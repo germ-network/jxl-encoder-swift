@@ -34,7 +34,7 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Test platform ${{ matrix.destination }}
-        run: set -o pipefail && xcodebuild -skipMacroValidation -scheme jxl-encoder-swift -destination "${{ matrix.destination }}" test | xcbeautify
+        run: set -o pipefail && xcodebuild -skipMacroValidation -scheme jxl-encoder-swift-Package -destination "${{ matrix.destination }}" test | xcbeautify
 
   # Portability guard: JXLEncoder must build and test with no Foundation and no
   # Apple frameworks, so an Android shim can consume it unchanged. A stray
