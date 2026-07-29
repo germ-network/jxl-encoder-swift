@@ -1,0 +1,49 @@
+diff --git a/encoder/enc_group.cc b/encoder/enc_group.cc
+index a2de5ba..16e8e2b 100644
+--- a/encoder/enc_group.cc
++++ b/encoder/enc_group.cc
+@@ -278,6 +278,15 @@ void QuantizeBlockAC(const float* JXL_RESTRICT block_in, size_t c,
+ }
+ 
+ // NOTE: caller takes care of extracting quant from rect of RawQuantField.
++// TEST HOOK (jxl-encoder-swift): exposes QuantizeBlockAC for differential
++// testing. Not used by the encoder itself.
++void QuantizeBlockACForTest(const float* block_in, size_t c, const float* qm,
++                            int32_t quant, float scale, float qm_multiplier,
++                            size_t xsize, size_t ysize, int32_t* block_out) {
++  QuantizeBlockAC(block_in, c, qm, quant, scale, qm_multiplier, xsize, ysize,
++                  block_out);
++}
++
+ void QuantizeRoundtripYBlockAC(const float* JXL_RESTRICT qm,
+                                const float* JXL_RESTRICT dqm, float scale,
+                                int32_t quant, size_t xsize, size_t ysize,
+@@ -514,5 +523,12 @@ void WriteACGroup(const Image3F& opsin, const Rect& group_brect,
+                                             scale_dc, x_qm_scale, dc_data,
+                                             ac_code, num_nzeros, mem, writer);
+ }
++HWY_EXPORT(QuantizeBlockACForTest);
++void QuantizeBlockACForTest(const float* block_in, size_t c, const float* qm,
++                            int32_t quant, float scale, float qm_multiplier,
++                            size_t xsize, size_t ysize, int32_t* block_out) {
++  HWY_DYNAMIC_DISPATCH(QuantizeBlockACForTest)
++  (block_in, c, qm, quant, scale, qm_multiplier, xsize, ysize, block_out);
++}
+ }  // namespace jxl
+ #endif  // HWY_ONCE
+diff --git a/encoder/enc_group.h b/encoder/enc_group.h
+index 1d14afe..f98548a 100644
+--- a/encoder/enc_group.h
++++ b/encoder/enc_group.h
+@@ -37,6 +37,11 @@ void WriteACGroup(const Image3F& opsin, const Rect& group_brect,
+                   Image3B* num_nzeros, GroupProcessorMemory* mem,
+                   BitWriter* writer);
+ 
++// TEST HOOK (jxl-encoder-swift): see enc_group.cc.
++void QuantizeBlockACForTest(const float* block_in, size_t c, const float* qm,
++                            int32_t quant, float scale, float qm_multiplier,
++                            size_t xsize, size_t ysize, int32_t* block_out);
++
+ }  // namespace jxl
+ 
+ #endif  // ENCODER_ENC_GROUP_H_

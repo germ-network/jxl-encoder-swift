@@ -43,8 +43,10 @@ HWY_AFTER_NAMESPACE();
 
 #if HWY_ONCE
 
+#include "encoder/enc_group.h"
 #include "encoder/enc_xyb.h"
 #include "encoder/image.h"
+#include "encoder/quant_weights.h"
 #include "encoder/read_pfm.h"
 
 namespace jxl {
@@ -92,7 +94,7 @@ std::vector<std::vector<float>> Flatten(const jxl::Image3F& img) {
 int main(int argc, char** argv) {
   if (argc < 4) {
     fprintf(stderr, "Usage: %s <stage> <in.pfm> <out.dump>\n", argv[0]);
-    fprintf(stderr, "  stages: linear, xyb, dct\n");
+    fprintf(stderr, "  stages: linear, xyb, dct, quant\n");
     return 1;
   }
   const std::string stage = argv[1];
@@ -110,6 +112,34 @@ int main(int argc, char** argv) {
   } else if (stage == "xyb") {
     jxl::ToXYB(&image);
     planes = Flatten(image);
+  } else if (stage == "quant") {
+    // Quantized AC coefficients at a fixed quant/scale, so the quantizer can be
+    // diffed independently of the adaptive quant field. Values chosen to
+    // straddle the zero-threshold logic.
+    if (xsize % 8 || ysize % 8) {
+      fprintf(stderr, "quant stage requires dimensions divisible by 8\n");
+      return 1;
+    }
+    const float scale = 0.1120758056640625f;  // global_scale 7344 / 2^16
+    const int32_t quant = 5;
+    jxl::DequantMatrices matrices;
+    jxl::ToXYB(&image);
+    auto xyb = Flatten(image);
+    planes.resize(3);
+    for (size_t c = 0; c < 3; ++c) {
+      std::vector<float> coeffs(xsize * ysize);
+      jxl::DCT8Blocks(xyb[c].data(), xsize, ysize, coeffs.data());
+      const float* qm = matrices.InvMatrix(0, c);
+      planes[c].resize(xsize * ysize);
+      std::vector<int32_t> out(64);
+      for (size_t b = 0; b < xsize * ysize / 64; ++b) {
+        jxl::QuantizeBlockACForTest(coeffs.data() + b * 64, c, qm, quant, scale,
+                                    1.0f, 1, 1, out.data());
+        for (size_t i = 0; i < 64; ++i) {
+          planes[c][b * 64 + i] = static_cast<float>(out[i]);
+        }
+      }
+    }
   } else if (stage == "dct") {
     if (xsize % 8 || ysize % 8) {
       fprintf(stderr, "dct stage requires dimensions divisible by 8\n");
