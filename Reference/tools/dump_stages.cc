@@ -43,6 +43,8 @@ HWY_AFTER_NAMESPACE();
 
 #if HWY_ONCE
 
+#include "encoder/common.h"
+#include "encoder/enc_frame.h"
 #include "encoder/enc_group.h"
 #include "encoder/enc_xyb.h"
 #include "encoder/image.h"
@@ -94,7 +96,7 @@ std::vector<std::vector<float>> Flatten(const jxl::Image3F& img) {
 int main(int argc, char** argv) {
   if (argc < 4) {
     fprintf(stderr, "Usage: %s <stage> <in.pfm> <out.dump>\n", argv[0]);
-    fprintf(stderr, "  stages: linear, xyb, dct, quant\n");
+    fprintf(stderr, "  stages: linear, xyb, dct, quant, stripe\n");
     return 1;
   }
   const std::string stage = argv[1];
@@ -112,6 +114,36 @@ int main(int argc, char** argv) {
   } else if (stage == "xyb") {
     jxl::ToXYB(&image);
     planes = Flatten(image);
+  } else if (stage == "stripe") {
+    // The real pipeline geometry: walk kGroupDim x kTileDim stripes, pad each
+    // to whole blocks by edge replication (the reference's own
+    // CopyAndPadImage), XYB the padded stripe, then DCT it. Emitted as one
+    // concatenated buffer per channel in stripe order, so a port with the
+    // wrong padding, stripe shape, or ordering cannot match.
+    const size_t xsize_groups = (xsize + jxl::kGroupDim - 1) / jxl::kGroupDim;
+    const size_t ysize_tiles = (ysize + jxl::kTileDim - 1) / jxl::kTileDim;
+    planes.assign(3, {});
+    jxl::Image3F stripe(jxl::kGroupDim, jxl::kTileDim + jxl::kBlockDim);
+    for (size_t gx = 0; gx < xsize_groups; ++gx) {
+      for (size_t ty = 0; ty < ysize_tiles; ++ty) {
+        jxl::Rect rect(gx * jxl::kGroupDim, ty * jxl::kTileDim, jxl::kGroupDim,
+                       jxl::kTileDim, xsize, ysize);
+        jxl::CopyAndPadImageForTest(image, rect, &stripe);
+        jxl::ToXYB(&stripe);
+        const size_t sw = stripe.xsize(), sh = stripe.ysize();
+        auto flat = Flatten(stripe);
+        for (size_t c = 0; c < 3; ++c) {
+          std::vector<float> coeffs(sw * sh);
+          jxl::DCT8Blocks(flat[c].data(), sw, sh, coeffs.data());
+          planes[c].insert(planes[c].end(), coeffs.begin(), coeffs.end());
+        }
+      }
+    }
+    // shape is the concatenation itself, so report a flat N x 1 buffer
+    if (!WritePlanes(argv[3], planes[0].size(), 1, planes)) return 1;
+    fprintf(stderr, "stripe: %zux%zu -> %s (%zu floats/channel)\n", xsize, ysize,
+            argv[3], planes[0].size());
+    return 0;
   } else if (stage == "quant") {
     // Quantized AC coefficients at a fixed quant/scale, so the quantizer can be
     // diffed independently of the adaptive quant field. Values chosen to

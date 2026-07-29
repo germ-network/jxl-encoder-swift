@@ -1,3 +1,40 @@
+diff --git a/encoder/enc_frame.cc b/encoder/enc_frame.cc
+index 9da510a..0895aaf 100644
+--- a/encoder/enc_frame.cc
++++ b/encoder/enc_frame.cc
+@@ -594,6 +594,7 @@ void WriteTOC(const std::vector<BitWriter>& sections, BitWriter* output) {
+   allotment.Reclaim(output);
+ }
+ 
++// TEST HOOK (jxl-encoder-swift): un-namespaced below.
+ void CopyAndPadImage(const Image3F& from, const Rect& r, Image3F* to) {
+   size_t xsize_padded = DivCeil(r.xsize(), kBlockDim) * kBlockDim;
+   size_t ysize_padded = DivCeil(r.ysize(), kBlockDim) * kBlockDim;
+@@ -859,4 +860,10 @@ Status EncodeFrame(const float distance, const Image3F& linear,
+   return true;
+ }
+ 
++// TEST HOOK (jxl-encoder-swift): exposes CopyAndPadImage for differential
++// testing of stripe padding. Not used by the encoder itself.
++void CopyAndPadImageForTest(const Image3F& from, const Rect& r, Image3F* to) {
++  CopyAndPadImage(from, r, to);
++}
++
+ }  // namespace jxl
+diff --git a/encoder/enc_frame.h b/encoder/enc_frame.h
+index ee96e62..d7bf39c 100644
+--- a/encoder/enc_frame.h
++++ b/encoder/enc_frame.h
+@@ -19,6 +19,9 @@ namespace jxl {
+ Status EncodeFrame(const float distance, const Image3F& linear,
+                    ThreadPool* pool, BitWriter* writer);
+ 
++// TEST HOOK (jxl-encoder-swift): see enc_frame.cc.
++void CopyAndPadImageForTest(const Image3F& from, const Rect& r, Image3F* to);
++
+ }  // namespace jxl
+ 
+ #endif  // ENCODER_ENC_FRAME_H_
 diff --git a/encoder/enc_group.cc b/encoder/enc_group.cc
 index a2de5ba..16e8e2b 100644
 --- a/encoder/enc_group.cc
