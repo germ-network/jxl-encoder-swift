@@ -36,11 +36,17 @@ done
 # This is not cosmetic: OPTIMIZE_CHROMA_FROM_LUMA also selects kTileDim, 64 when
 # on and 16 when off. That changes the stripe height and the whole tiling the
 # adaptive quant field is computed over.
-cat > "$TINY/encoder/config.h" <<'CONFIG'
+#
+# OPTIMIZE_CODE selects between static prefix-code tables (0) and per-image
+# optimized Huffman trees (1). The port implements static tables first — they
+# cost ~19-24% size but produce byte-identical decoded pixels — so this defaults
+# to 0 and moves to 1 when the optimized path lands.
+OPTIMIZE_CODE="${OPTIMIZE_CODE:-0}"
+cat > "$TINY/encoder/config.h" <<CONFIG
 #ifndef ENCODER_CONFIG_H_
 #define ENCODER_CONFIG_H_
 
-#define OPTIMIZE_CODE 1
+#define OPTIMIZE_CODE $OPTIMIZE_CODE
 #define OPTIMIZE_CHROMA_FROM_LUMA 0
 #define OPTIMIZE_BLOCK_SIZES 0
 

@@ -77,3 +77,24 @@ func ulpDistance(_ a: Float, _ b: Float) -> Int {
 	if a == b { return 0 }
 	return abs(Int(Int32(bitPattern: a.bitPattern)) - Int(Int32(bitPattern: b.bitPattern)))
 }
+
+/// Flat array of uint32 reference values, for exhaustively comparing integer
+/// functions against libjxl-tiny.
+struct UInt32Fixture {
+	let values: [UInt32]
+
+	init(name: String) throws {
+		guard
+			let url = Bundle.module.url(
+				forResource: name, withExtension: "bin", subdirectory: "Fixtures")
+		else {
+			throw StageDump.DumpError.fixtureNotFound(name)
+		}
+		let data = try Data(contentsOf: url)
+		values = (0..<(data.count / 4)).map { i in
+			data.withUnsafeBytes {
+				$0.loadUnaligned(fromByteOffset: i * 4, as: UInt32.self)
+			}
+		}
+	}
+}
