@@ -22,6 +22,8 @@ public struct DistanceParams: Equatable, Sendable {
 	public let inverseScale: Float
 	public let scaleDC: Float
 	public let xQuantMatrixScale: UInt32
+	/// Edge-preserving filter iterations the decoder will run.
+	public let epfIterations: UInt32
 
 	static let globalScaleDenominator = 1 << 16
 	static let globalScaleNumerator = 4096
@@ -63,6 +65,12 @@ public struct DistanceParams: Equatable, Sendable {
 			xScale += 1
 		}
 		xQuantMatrixScale = xScale
+
+		var iterations: UInt32 = 0
+		for threshold in [Float(0.7), 1.5, 4.0] where distance >= threshold {
+			iterations += 1
+		}
+		epfIterations = iterations
 	}
 
 	static func quantDC(distance: Float) -> Float {
