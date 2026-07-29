@@ -1,0 +1,26 @@
+TREES
+T0 4 2 2 2 2
+T1 5 1 0 2 0 2
+T2 8 1 3 4 4 4 4 4 4
+T3 1 1
+T4 3 0 0 1
+T5 15 14 14 13 12 11 10 9 8 7 6 5 4 3 2 1
+CODES
+DC 1116 140 49 90 20 41 82 04 09 12 24 d6 5f 7f fd f5 d7 5f 7f fd f5 11 00 bc 3d 2f d9 54 11 68 55 25 a6 e1 40 66 d7 f6 cd df 33 c6 29 24 b2 82 7f 16 29 ad 7e d1 0c c7 c3 59 83 05 c0 d8 06 46 bd 27 56 35 16 00 63 1b a0 fd 9e 95 75 c8 d4 ff 87 5e 14 63 5c e2 40 97 fa 48 1a 35 c0 39 f7 ed fe 56 8e d0 4a eb 3f 6c 7a 00 91 0e 48 a0 aa ba 7b 86 a4 44 69 b5 f7 8c ff 76 19 59 f9 ff 0f b9 2a 4b 20 81 08 d5 dd 33 1b bc f6 f1 7d ef c7 00
+AC 1374 172 49 90 20 41 82 04 09 12 24 d6 5f 7f fd f5 d7 5f 7f fd f5 17 71 21 ff fd 8b 0c 2c d9 72 92 69 7b ee ee fb 40 48 f5 3c ef 13 ad 32 8f 7b de cf ac 02 ba 61 76 56 09 0d af 44 1a 5f fd 1f 80 20 23 d2 48 4a 55 d5 ed e9 d9 dd f7 8d b5 c7 70 45 cf ff 23 16 62 a5 50 24 e9 d9 3d f7 99 7f 53 aa 08 ac 50 ca c2 2b bb 67 76 01 92 e0 fd bd 12 da 17 71 4f ff f2 bf 24 36 46 76 b2 67 ce 6d fb 98 3e 21 fd 3f cf cb fb 6a 0f bb dd b6 25 51 d4 c3 3d 7b 8e 5a a0 7e c8 61 19 5a d4 ff 3f e0 14 8a 20 40 12 02 e3 ea ee 99 3d f7 a5 fc 23
+DC0 47 6 08 00 de 9e 97 6c
+DC1 121 16 54 11 68 55 25 a6 e1 40 66 d7 f6 cd df 33 c6 01
+DC2 115 15 14 12 59 c1 3f 8b 94 56 bf 68 86 e3 e1 ac 01
+DC3 74 10 58 00 8c 6d 60 d4 7b 62 55 03
+DC4 70 9 58 00 8c 6d 80 f6 7b 56 16
+DC5 173 22 87 4c fd 7f e8 45 31 c6 25 0e 74 a9 8f a4 51 03 9c 73 df ee 6f 05
+DC6 188 24 47 68 a5 f5 1f 36 3d 80 48 07 24 50 55 dd 3d 43 52 a2 b4 da 7b c6 7f 0b
+DC7 175 22 cb c8 ca ff 7f c8 55 59 02 09 44 a8 ee 9e d9 e0 b5 8f ef 7b 3f 06
+AC0 139 18 8b b8 90 ff fe 45 06 96 6c 39 c9 b4 3d 77 f7 7d 20 04
+AC1 144 18 54 cf f3 3e d1 2a f3 b8 e7 fd cc 2a a0 1b 66 67 95 d0
+AC2 172 22 f0 4a a4 f1 d5 ff 01 08 32 22 8d a4 54 55 dd 9e 9e dd 7d df 58 0b
+AC3 143 18 c7 70 45 cf ff 23 16 62 a5 50 24 e9 d9 3d f7 99 7f 53
+AC4 134 17 54 11 58 a1 94 85 57 76 cf ec 02 24 c1 fb 7b 25 34
+AC5 145 19 be 88 7b fa 97 ff 25 b1 31 b2 93 3d 73 6e db c7 f4 09 01
+AC6 175 22 f4 ff 3c 2f ef ab 3d ec 76 db 96 44 51 0f f7 ec 39 6a 81 fa 21 07
+AC7 169 22 cb d0 a2 fe ff 01 a7 50 04 01 92 10 18 57 77 cf ec b9 2f e5 1f 01

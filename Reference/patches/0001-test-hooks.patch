@@ -1,3 +1,40 @@
+diff --git a/encoder/enc_entropy_code.cc b/encoder/enc_entropy_code.cc
+index 3b83c1a..8d6de42 100644
+--- a/encoder/enc_entropy_code.cc
++++ b/encoder/enc_entropy_code.cc
+@@ -486,6 +486,16 @@ void BuildHuffmanCodes(const std::vector<Histogram>& histograms,
+ 
+ }  // namespace
+ 
++// TEST HOOK (jxl-encoder-swift): exposes the prefix-code serializers for
++// differential testing. Not used by the encoder itself.
++void WritePrefixCodeForTest(const PrefixCode& code, BitWriter* writer) {
++  WritePrefixCode(code, writer);
++}
++void WritePrefixCodesForTest(const PrefixCode* codes, size_t num,
++                             BitWriter* writer) {
++  WritePrefixCodes(codes, num, writer);
++}
++
+ void OptimizePrefixCodes(const std::vector<Token>& tokens, EntropyCode* code) {
+   std::vector<Histogram> histograms(code->num_prefix_codes);
+   BuildHistograms(tokens, code->context_map, code->num_contexts, &histograms);
+diff --git a/encoder/enc_entropy_code.h b/encoder/enc_entropy_code.h
+index fa83f32..2d84322 100644
+--- a/encoder/enc_entropy_code.h
++++ b/encoder/enc_entropy_code.h
+@@ -27,6 +27,11 @@ void WriteContextMap(const EntropyCode& code, BitWriter* writer);
+ 
+ void WriteEntropyCode(const EntropyCode& code, BitWriter* writer);
+ 
++// TEST HOOK (jxl-encoder-swift): see enc_entropy_code.cc.
++void WritePrefixCodeForTest(const PrefixCode& code, BitWriter* writer);
++void WritePrefixCodesForTest(const PrefixCode* codes, size_t num,
++                             BitWriter* writer);
++
+ // This is an upper bound on the average bits per token on an array of
+ // at most 256x256 entropy coded tokens.
+ static constexpr size_t kMaxBitsPerToken = 24;
 diff --git a/encoder/enc_frame.cc b/encoder/enc_frame.cc
 index 9da510a..880945f 100644
 --- a/encoder/enc_frame.cc
