@@ -17,7 +17,11 @@ let package = Package(
 			name: "JXLEncoderApple",
 			dependencies: ["JXLEncoder"]
 		),
-		.testTarget(name: "JXLEncoderTests", dependencies: ["JXLEncoder"]),
+		.testTarget(
+			name: "JXLEncoderTests",
+			dependencies: ["JXLEncoder"],
+			resources: [.copy("Fixtures")]
+		),
 		.testTarget(name: "JXLEncoderAppleTests", dependencies: ["JXLEncoderApple"]),
 	]
 )
