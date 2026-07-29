@@ -9,10 +9,18 @@ let package = Package(
 		.library(name: "JXLEncoder", targets: ["JXLEncoder"]),
 		.library(name: "JXLEncoderApple", targets: ["JXLEncoderApple"]),
 	],
+	dependencies: [
+		//RealModule only, for pow(). Pure Swift over the platform libm, so it
+		//stays portable to Linux and Android.
+		.package(url: "https://github.com/apple/swift-numerics", from: "1.1.1")
+	],
 	targets: [
-		//Portable core: Swift stdlib only. No Foundation, no platform frameworks —
-		//Linux CI enforces this so an Android shim can consume it unchanged.
-		.target(name: "JXLEncoder"),
+		//Portable core: no Foundation, no platform frameworks — Linux CI enforces
+		//this so an Android shim can consume it unchanged.
+		.target(
+			name: "JXLEncoder",
+			dependencies: [.product(name: "RealModule", package: "swift-numerics")]
+		),
 		.target(
 			name: "JXLEncoderApple",
 			dependencies: ["JXLEncoder"]

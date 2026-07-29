@@ -120,7 +120,7 @@ int main(int argc, char** argv) {
       fprintf(stderr, "quant stage requires dimensions divisible by 8\n");
       return 1;
     }
-    const float scale = 0.1120758056640625f;  // global_scale 7344 / 2^16
+    const float scale = 0.1120758056640625f;  // global_scale 7345 / 2^16, arbitrary but fixed
     const int32_t quant = 5;
     jxl::DequantMatrices matrices;
     jxl::ToXYB(&image);
