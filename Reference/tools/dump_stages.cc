@@ -44,6 +44,8 @@ HWY_AFTER_NAMESPACE();
 #if HWY_ONCE
 
 #include "encoder/common.h"
+#include "encoder/dc_group_data.h"
+#include "encoder/static_entropy_codes.h"
 #include "encoder/enc_adaptive_quantization.h"
 #include "encoder/enc_frame.h"
 #include "encoder/enc_group.h"
@@ -222,6 +224,62 @@ int main(int argc, char** argv) {
     if (!WritePlanes(argv[3], xsize_blocks, ysize_blocks, planes)) return 1;
     fprintf(stderr, "aq: %zux%zu -> %s (%zux%zu blocks)\n", xsize, ysize,
             argv[3], xsize_blocks, ysize_blocks);
+    return 0;
+  } else if (stage == "acgroup") {
+    // The real WriteACGroup bitstream for a single-group image: DCT, quantize,
+    // Y roundtrip, colour decorrelation and tokenization, all through the
+    // shipped code path. Only tokens reach the writer (DC goes to dc_data), so
+    // these bytes are exactly the AC group payload.
+    if (xsize > jxl::kGroupDim || ysize > jxl::kGroupDim) {
+      fprintf(stderr, "acgroup stage expects a single group (<= %zu px)\n",
+              jxl::kGroupDim);
+      return 1;
+    }
+    const float distance = 1.0f;
+    const float scale = 0.1120758056640625f;
+    const float scale_dc = 1.0f;
+    const uint32_t x_qm_scale = 2;
+    const size_t xsize_blocks = (xsize + 7) / 8;
+    const size_t ysize_blocks = (ysize + 7) / 8;
+
+    jxl::Image3F stripe;
+    jxl::Rect whole(0, 0, jxl::kGroupDim, jxl::kGroupDim, xsize, ysize);
+    stripe = jxl::Image3F(jxl::kGroupDim, jxl::kGroupDim + jxl::kBlockDim);
+    jxl::CopyAndPadImageForTest(image, whole, &stripe);
+    jxl::ToXYB(&stripe);
+
+    jxl::DequantMatrices matrices;
+    jxl::DCGroupData dc_data(xsize_blocks, ysize_blocks);
+    // fixed quant field so the tokenizer is compared independently of it
+    for (size_t y = 0; y < ysize_blocks; ++y)
+      for (size_t x = 0; x < xsize_blocks; ++x)
+        dc_data.raw_quant_field.Row(y)[x] = 5;
+
+    jxl::EntropyCode ac_code(jxl::kACContextMap, sizeof(jxl::kACContextMap),
+                             jxl::kACPrefixCodes, jxl::kNumACPrefixCodes);
+    jxl::Image3B num_nzeros(jxl::kGroupDimInBlocks, jxl::kGroupDimInBlocks);
+    jxl::ZeroFillImage(&num_nzeros);
+    jxl::GroupProcessorMemory mem;
+    jxl::BitWriter writer;
+    jxl::Rect group_brect(0, 0, jxl::kGroupDimInBlocks, jxl::kGroupDimInBlocks,
+                          xsize_blocks, ysize_blocks);
+    jxl::WriteACGroup(stripe, group_brect, matrices, scale, scale_dc,
+                      x_qm_scale, &dc_data, ac_code, &num_nzeros, &mem,
+                      &writer);
+    size_t bits = writer.BitsWritten();
+    {
+      jxl::BitWriter::Allotment a(&writer, 8);
+      writer.ZeroPadToByte();
+      a.Reclaim(&writer);
+    }
+    auto span = writer.GetSpan();
+    std::vector<std::vector<float>> out(1);
+    out[0].push_back(static_cast<float>(bits));
+    for (size_t i = 0; i < span.size(); ++i)
+      out[0].push_back(static_cast<float>(span.data()[i]));
+    if (!WritePlanes(argv[3], out[0].size(), 1, out)) return 1;
+    fprintf(stderr, "acgroup: %zux%zu -> %s (%zu bits, %zu bytes)\n", xsize,
+            ysize, argv[3], bits, span.size());
     return 0;
   } else if (stage == "quant") {
     // Quantized AC coefficients at a fixed quant/scale, so the quantizer can be
