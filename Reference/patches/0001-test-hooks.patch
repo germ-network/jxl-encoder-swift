@@ -36,7 +36,7 @@ index fa83f32..2d84322 100644
  // at most 256x256 entropy coded tokens.
  static constexpr size_t kMaxBitsPerToken = 24;
 diff --git a/encoder/enc_frame.cc b/encoder/enc_frame.cc
-index 9da510a..880945f 100644
+index 9da510a..0acce4b 100644
 --- a/encoder/enc_frame.cc
 +++ b/encoder/enc_frame.cc
 @@ -594,6 +594,7 @@ void WriteTOC(const std::vector<BitWriter>& sections, BitWriter* output) {
@@ -47,7 +47,7 @@ index 9da510a..880945f 100644
  void CopyAndPadImage(const Image3F& from, const Rect& r, Image3F* to) {
    size_t xsize_padded = DivCeil(r.xsize(), kBlockDim) * kBlockDim;
    size_t ysize_padded = DivCeil(r.ysize(), kBlockDim) * kBlockDim;
-@@ -859,4 +860,15 @@ Status EncodeFrame(const float distance, const Image3F& linear,
+@@ -859,4 +860,19 @@ Status EncodeFrame(const float distance, const Image3F& linear,
    return true;
  }
  
@@ -62,9 +62,13 @@ index 9da510a..880945f 100644
 +  WriteDCGroup(data, dc_code, writer);
 +}
 +
++void WriteContextTreeForTest(size_t num_dc_groups, BitWriter* writer) {
++  WriteContextTree(num_dc_groups, writer);
++}
++
  }  // namespace jxl
 diff --git a/encoder/enc_frame.h b/encoder/enc_frame.h
-index ee96e62..8a6f373 100644
+index ee96e62..3227aeb 100644
 --- a/encoder/enc_frame.h
 +++ b/encoder/enc_frame.h
 @@ -9,7 +9,9 @@
@@ -77,7 +81,7 @@ index ee96e62..8a6f373 100644
  #include "encoder/image.h"
  
  namespace jxl {
-@@ -19,6 +21,13 @@ namespace jxl {
+@@ -19,6 +21,14 @@ namespace jxl {
  Status EncodeFrame(const float distance, const Image3F& linear,
                     ThreadPool* pool, BitWriter* writer);
  
@@ -87,6 +91,7 @@ index ee96e62..8a6f373 100644
 +// TEST HOOK (jxl-encoder-swift): see enc_frame.cc.
 +void WriteDCGroupForTest(const DCGroupData& data, const EntropyCode& dc_code,
 +                         BitWriter* writer);
++void WriteContextTreeForTest(size_t num_dc_groups, BitWriter* writer);
 +
  }  // namespace jxl
  
