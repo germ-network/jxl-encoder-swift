@@ -99,7 +99,7 @@ std::vector<std::vector<float>> Flatten(const jxl::Image3F& img) {
 int main(int argc, char** argv) {
   if (argc < 4) {
     fprintf(stderr, "Usage: %s <stage> <in.pfm> <out.dump>\n", argv[0]);
-    fprintf(stderr, "  stages: linear, xyb, dct, quant, stripe, aq, acgroup, dcgroup\n");
+    fprintf(stderr, "  stages: linear, xyb, dct, quant, stripe, aq, acgroup, dcgroup, dcextract\n");
     return 1;
   }
   const std::string stage = argv[1];
@@ -225,7 +225,7 @@ int main(int argc, char** argv) {
     fprintf(stderr, "aq: %zux%zu -> %s (%zux%zu blocks)\n", xsize, ysize,
             argv[3], xsize_blocks, ysize_blocks);
     return 0;
-  } else if (stage == "acgroup") {
+  } else if (stage == "acgroup" || stage == "dcextract") {
     // The real WriteACGroup bitstream for a single-group image: DCT, quantize,
     // Y roundtrip, colour decorrelation and tokenization, all through the
     // shipped code path. Only tokens reach the writer (DC goes to dc_data), so
@@ -266,6 +266,20 @@ int main(int argc, char** argv) {
     jxl::WriteACGroup(stripe, group_brect, matrices, scale, scale_dc,
                       x_qm_scale, &dc_data, ac_code, &num_nzeros, &mem,
                       &writer);
+    if (stage == "dcextract") {
+      // the DC image WriteACGroup fills as a side output
+      std::vector<std::vector<float>> dc(3);
+      for (size_t c = 0; c < 3; ++c) {
+        dc[c].resize(xsize_blocks * ysize_blocks);
+        for (size_t y = 0; y < ysize_blocks; ++y)
+          for (size_t x = 0; x < xsize_blocks; ++x)
+            dc[c][y * xsize_blocks + x] = dc_data.quant_dc.PlaneRow(c, y)[x];
+      }
+      if (!WritePlanes(argv[3], xsize_blocks, ysize_blocks, dc)) return 1;
+      fprintf(stderr, "dcextract: %zux%zu -> %s (%zux%zu blocks)\n", xsize,
+              ysize, argv[3], xsize_blocks, ysize_blocks);
+      return 0;
+    }
     size_t bits = writer.BitsWritten();
     {
       jxl::BitWriter::Allotment a(&writer, 8);

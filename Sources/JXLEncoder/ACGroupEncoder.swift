@@ -15,20 +15,33 @@ public enum ACGroupEncoder {
 	static let xFactor: Float = 0
 	static let bFactor: Float = 1
 
-	/// Encodes one group's AC coefficients.
+	/// DC quantization steps, from encoder/quant_weights.h.
+	static let inverseDCQuant: [Float] = [4096.0, 512.0, 256.0]
+	static let dcQuant: [Float] = [1.0 / 4096.0, 1.0 / 512.0, 1.0 / 256.0]
+
+	/// B's DC is decorrelated against Y's DC even with chroma-from-luma off:
+	/// `kInvDCQuant[2] * kDCQuant[1]` is 0.5.
+	static let dcCflFactor: [Float] = [0, 0, inverseDCQuant[2] * dcQuant[1]]
+
+	/// Encodes one group's AC coefficients and fills in its DC image.
 	///
 	/// `xyb` is the padded XYB image for the group; `quantField` holds one value
-	/// per block in group-raster order.
+	/// per block in group-raster order. `quantDC` receives one DC value per
+	/// block per channel — the AC pass produces both outputs, since DC is just
+	/// the lowest-frequency coefficient of the same transform.
 	public static func encode(
 		xyb: PaddedStripe,
 		widthInBlocks: Int,
 		heightInBlocks: Int,
 		quantField: [UInt8],
 		scale: Float,
+		scaleDC: Float,
 		xQuantMatrixScale: UInt32,
 		code: EntropyCode,
+		quantDC: inout [[Int16]],
 		writer: inout BitWriter
 	) {
+		let inverseFactor = inverseDCQuant.map { $0 * scaleDC }
 		// The X channel's quant matrix is scaled by distance-dependent steps.
 		let xMatrixMultiplier = Float.pow(1.25, Float(xQuantMatrixScale) - 2.0)
 
@@ -51,6 +64,14 @@ public enum ACGroupEncoder {
 				var quantized = [[Int32]](repeating: [], count: 3)
 				quantized[1] = yQuantized
 
+				// For DCT8 the DC is simply the lowest-frequency coefficient.
+				// `std::round` here rounds ties away from zero, unlike the
+				// half-to-even rounding the AC quantizer uses.
+				let blockIndex = by * widthInBlocks + bx
+				quantDC[1][blockIndex] = Int16(
+					(inverseFactor[1] * yCoefficients[0])
+						.rounded(.toNearestOrAwayFromZero))
+
 				for channel in [0, 2] {
 					var coefficients = DCT.forward8x8(
 						pixels: xyb.planes[channel], stride: xyb.width,
@@ -70,6 +91,15 @@ public enum ACGroupEncoder {
 						scale: scale,
 						matrixMultiplier: channel == 0
 							? xMatrixMultiplier : 1.0)
+
+					// Taken from the decorrelated coefficients, then B has Y's
+					// DC subtracted on top.
+					let dc =
+						coefficients[0] * inverseFactor[channel]
+						- Float(quantDC[1][blockIndex])
+						* dcCflFactor[channel]
+					quantDC[channel][blockIndex] = Int16(
+						dc.rounded(.toNearestOrAwayFromZero))
 				}
 
 				for channel in ACTokenizer.channelOrder {
