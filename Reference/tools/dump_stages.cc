@@ -99,7 +99,7 @@ std::vector<std::vector<float>> Flatten(const jxl::Image3F& img) {
 int main(int argc, char** argv) {
   if (argc < 4) {
     fprintf(stderr, "Usage: %s <stage> <in.pfm> <out.dump>\n", argv[0]);
-    fprintf(stderr, "  stages: linear, xyb, dct, quant, stripe, aq\n");
+    fprintf(stderr, "  stages: linear, xyb, dct, quant, stripe, aq, acgroup, dcgroup\n");
     return 1;
   }
   const std::string stage = argv[1];
@@ -279,6 +279,45 @@ int main(int argc, char** argv) {
       out[0].push_back(static_cast<float>(span.data()[i]));
     if (!WritePlanes(argv[3], out[0].size(), 1, out)) return 1;
     fprintf(stderr, "acgroup: %zux%zu -> %s (%zu bits, %zu bytes)\n", xsize,
+            ysize, argv[3], bits, span.size());
+    return 0;
+  } else if (stage == "dcgroup") {
+    // The real WriteDCGroup bitstream: gradient-predicted DC image plus the
+    // per-block control fields. Fed a synthetic DC image and quant field so the
+    // modular path is compared independently of the DCT stages.
+    const size_t xsize_blocks = (xsize + 7) / 8;
+    const size_t ysize_blocks = (ysize + 7) / 8;
+    jxl::DCGroupData dc_data(xsize_blocks, ysize_blocks);
+    for (size_t c = 0; c < 3; ++c) {
+      for (size_t y = 0; y < ysize_blocks; ++y) {
+        for (size_t x = 0; x < xsize_blocks; ++x) {
+          // deterministic but varied, and signed, to exercise the predictor
+          int v = (int)((x * 7 + y * 13 + c * 29) % 61) - 30;
+          dc_data.quant_dc.PlaneRow(c, y)[x] = (int16_t)(v * (c == 1 ? 5 : 1));
+        }
+      }
+    }
+    for (size_t y = 0; y < ysize_blocks; ++y)
+      for (size_t x = 0; x < xsize_blocks; ++x)
+        dc_data.raw_quant_field.Row(y)[x] = (uint8_t)(1 + (x * 3 + y * 5) % 17);
+
+    jxl::EntropyCode dc_code(jxl::kDCContextMap, sizeof(jxl::kDCContextMap),
+                             jxl::kDCPrefixCodes, jxl::kNumDCPrefixCodes);
+    jxl::BitWriter writer;
+    jxl::WriteDCGroupForTest(dc_data, dc_code, &writer);
+    size_t bits = writer.BitsWritten();
+    {
+      jxl::BitWriter::Allotment a(&writer, 8);
+      writer.ZeroPadToByte();
+      a.Reclaim(&writer);
+    }
+    auto span = writer.GetSpan();
+    std::vector<std::vector<float>> out(1);
+    out[0].push_back(static_cast<float>(bits));
+    for (size_t i = 0; i < span.size(); ++i)
+      out[0].push_back(static_cast<float>(span.data()[i]));
+    if (!WritePlanes(argv[3], out[0].size(), 1, out)) return 1;
+    fprintf(stderr, "dcgroup: %zux%zu -> %s (%zu bits, %zu bytes)\n", xsize,
             ysize, argv[3], bits, span.size());
     return 0;
   } else if (stage == "quant") {
