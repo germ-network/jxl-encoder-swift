@@ -29,6 +29,24 @@ for patch in "$HERE"/patches/*.patch; do
 	fi
 done
 
+# The reference must be built in the configuration the port targets, or the
+# dumps describe a different encoder. Chroma-from-luma is dropped (measured at
+# ~0.5% size) and variable block sizes are dropped (~5-7%) per the scope fence.
+#
+# This is not cosmetic: OPTIMIZE_CHROMA_FROM_LUMA also selects kTileDim, 64 when
+# on and 16 when off. That changes the stripe height and the whole tiling the
+# adaptive quant field is computed over.
+cat > "$TINY/encoder/config.h" <<'CONFIG'
+#ifndef ENCODER_CONFIG_H_
+#define ENCODER_CONFIG_H_
+
+#define OPTIMIZE_CODE 1
+#define OPTIMIZE_CHROMA_FROM_LUMA 0
+#define OPTIMIZE_BLOCK_SIZES 0
+
+#endif  // ENCODER_CONFIG_H_
+CONFIG
+
 cmake -S "$TINY" -B "$TINY/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF >/dev/null
 cmake --build "$TINY/build" --target cjxl_tiny -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)" >/dev/null
 
