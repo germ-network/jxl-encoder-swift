@@ -20,6 +20,7 @@ mkdir -p "$OUT"
 clang++ -std=c++17 -O2 \
 	-I"$TINY" \
 	-I"$TINY/third_party/highway" \
+	-I"$(dirname "${BASH_SOURCE[0]}")" \
 	"$(dirname "${BASH_SOURCE[0]}")/tools/dump_stages.cc" \
 	"$TINY/build/encoder/libjxl_tiny.a" \
 	"$TINY/build/third_party/highway/libhwy.a" \
