@@ -20,16 +20,85 @@ display and thumbnail sizes.
 | `JXLEncoder` | Portable core. **Swift stdlib only** — no Foundation, no platform frameworks. Linux CI enforces this so an Android shim can consume it unchanged. |
 | `JXLEncoderApple` | Platform shim. The only target that touches Foundation / CoreGraphics / ImageIO: decodes arbitrary input, handles thumbnails and alpha policy, returns `Data`. |
 
+## Usage
+
+```swift
+import JXLEncoderApple
+
+// Any ImageIO-decodable input; `maxPixelSize` caps the longest edge for
+// thumbnails and applies the EXIF orientation.
+let jxl = try JXLEncoderApple.encode(data: jpegData, distance: 1.0)
+let thumb = try JXLEncoderApple.encode(
+	data: jpegData, distance: 1.0, maxPixelSize: 200)
+```
+
+`distance` is a butteraugli target: lower is higher quality. Input carrying
+alpha is composited onto `alphaPolicy`'s background, white by default.
+
+Off Apple platforms, drive the core directly with 8-bit sRGB samples:
+
+```swift
+import JXLEncoder
+
+let image = try ImageBuffer(width: w, height: h, samples: rgb, channels: 3)
+let bytes = try Encoder.encode(image, distance: 1.0)
+```
+
 ## Status
 
-Under construction. Phase 0 (de-risking) is complete:
+Working. With static entropy tables the output is **byte-identical to
+`cjxl_tiny`** across the corpus, single- and multi-group; with per-image
+optimized prefix codes the encoding decisions are unchanged and only the
+entropy layer differs. 122 tests, CI on macOS, Mac Catalyst, iOS Simulator and
+Linux.
 
-- A bare `FF 0A` codestream decodes through ImageIO on macOS and iOS — no
-  ISOBMFF container needed.
-- `BitWriter` and the image header emit bytes **identical to `cjxl_tiny`**,
-  verified against reference output in `Tests/JXLEncoderTests`.
+Implemented: lossy VarDCT (8×8), XYB color, adaptive quantization, DC modular
+sub-encoder, static and per-image prefix codes, chroma subsampling, alpha
+flattening, and a baseline JPEG parser. A bare `FF 0A` codestream decodes
+through ImageIO on macOS and iOS — no ISOBMFF container needed.
 
-Next: the forward transform chain (sRGB → linear → XYB → DCT → quantization).
+Not yet done: JPEG recompression is parsed but not re-emitted (it still needs
+YCbCr signalling, custom quant matrix transmission and DC scaling). Alpha is
+flattened onto a background, never preserved.
+
+### Measured
+
+Against `libjxl-tiny` at the same configuration, encoding decisions are
+identical — byte-identical files with static tables, and the same ssimulacra2
+to the last digit at every distance. Chroma-from-luma and variable block sizes,
+both dropped here, save 5–8% at fixed distance but ~0–4% at matched quality on
+photographs.
+
+Against full `libjxl` on a 600×600 photograph, at matched quality
+(ssimulacra2 ≈ 82.5):
+
+| encoder | bytes |
+|---|---|
+| this package | 42 197 |
+| `cjxl -e1` | 37 443 |
+| `cjxl -e7` | 30 811 |
+
+Roughly 11% of that is structural — ANS, variable block sizes and rate
+allocation are present even at libjxl's cheapest effort — and the rest is
+search effort. Gaborish and EPF are not the cause; disabling them in libjxl
+costs under one ssimulacra2 point.
+
+On Apple silicon the encoder runs at ~10 MP/s scalar and single-threaded, and
+adds ~336 KB to a stripped iOS binary.
+
+### Known limits
+
+- **Use `distance` ≤ 1.0.** Above roughly 1.0 the inherited
+  distance-to-quality mapping falls apart: a 600×600 photograph scores 82.3 at
+  d = 1.0 and 64.0 at d = 1.5, where libjxl moves 89.3 → 87.3 over the same
+  step. This is inherited from libjxl-tiny, not introduced by the port.
+- **Smooth synthetic content is the weak case.** On gradients libjxl stays near
+  ssimulacra2 91–95 across the whole distance range while shrinking far below
+  what this encoder reaches.
+- Output is deterministic on every architecture, which the reference is not:
+  `cjxl_tiny` emits different bytes at different SIMD widths because four
+  horizontal float reductions in adaptive quantization change summation order
+  with lane count.
 
 ## Development
 
@@ -41,9 +110,21 @@ dump before the next one starts. Building the reference tooling:
 git clone --recursive https://github.com/libjxl/libjxl-tiny.git
 ```
 
+Then `Reference/build.sh`, which pins the reference to the configuration this
+port targets. That pinning matters: `OPTIMIZE_CHROMA_FROM_LUMA` also selects
+the tile dimension, so building the reference with its defaults produces dumps
+describing a differently tiled encoder.
+
 `djxl` and `ssimulacra2` (from `brew install jpeg-xl`) serve as the independent
-decoder and quality metric. Note that quality comparisons are only meaningful
-when both images carry the same transfer function.
+decoder and quality metric. Two traps when comparing against the reference:
+
+- Quality comparisons are only meaningful when both images carry the same
+  transfer function. `libjxl-tiny` hardcodes linear; this encoder signals sRGB
+  in production and can emit linear for byte-comparison.
+- `libjxl-tiny` takes linear float input, so a comparison is only valid if that
+  input is this encoder's own linearization. Converting through CoreGraphics
+  instead gives the reference different data and makes every byte comparison
+  meaningless.
 
 ## License
 
