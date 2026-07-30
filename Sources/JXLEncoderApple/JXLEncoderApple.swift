@@ -68,18 +68,25 @@
 			return Data(try Encoder.encode(buffer, distance: distance))
 		}
 
-		/// Peak bytes a full-size encode holds, per source pixel: four for the
-		/// drawing context, three for the extracted samples, twelve for the
-		/// linear plane.
-		static let bytesPerSourcePixel = 19
+		/// Peak bytes a full-size encode holds per source pixel.
+		///
+		/// Nineteen are accounted for — four for the drawing context, three for
+		/// the extracted samples, twelve for the linear plane — but measured peak
+		/// RSS is half again as much, the rest being ImageIO's own decode of the
+		/// source. Measured, rounded up: 503 MB at 12 MP, 772 MB at 24 MP,
+		/// 1388 MB at 48 MP. Small images sit well above this ratio on fixed
+		/// overhead, which a per-pixel budget should not be charged for.
+		static let bytesPerSourcePixel = 32
 
-		/// Memory budget applied to input whose size the caller has not bounded,
-		/// matching `JPEGParser.defaultMaxCoefficientBytes`. At 19 bytes a pixel
-		/// this admits about 14 MP, past the 12 MP the encoder is designed
-		/// around but short of a 48 MP sensor — raise it deliberately if that
-		/// input has to be accepted, and lower it in an extension running under
-		/// its own memory limit.
-		public static let defaultMaxSourceBytes = JPEGParser.defaultMaxCoefficientBytes
+		/// Memory budget applied to input whose size the caller has not bounded.
+		///
+		/// 512 MB, which admits about 16 MP — the 12 MP the encoder is designed
+		/// around, with headroom. **A 48 MP phone photo needs roughly 1.5 GB**
+		/// through this path and is refused; raise the budget deliberately if
+		/// that input has to be accepted at full size, pass `maxPixelSize` to
+		/// scale it down instead, or lower the budget in an extension running
+		/// under its own memory limit.
+		public static let defaultMaxSourceBytes = 512 << 20
 
 		/// Decodes any ImageIO-supported input and re-encodes it as JPEG XL.
 		///

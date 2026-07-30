@@ -108,9 +108,15 @@ public enum JPEGParser {
 
 	/// Coefficient budget applied when the caller does not name one.
 	///
-	/// 256 MB, which admits a 20 MP 4:4:4 photograph or a 42 MP 4:2:0 one —
-	/// past any phone sensor at the subsampling phones actually use.
-	public static let defaultMaxCoefficientBytes = 256 << 20
+	/// Coefficients cost exactly 12 bytes a pixel at 4:4:4 and 6 at 4:2:0, both
+	/// measured. 512 MB therefore admits a 42 MP 4:4:4 frame or an 85 MP 4:2:0
+	/// one, so a 48 MP phone photo fits at the subsampling phones actually use —
+	/// it needs 279 MB.
+	///
+	/// Worth noting against the pixel path, which costs roughly 32 bytes a pixel
+	/// and needs about 1.5 GB for that same photograph: recompressing a JPEG is
+	/// five times cheaper than decoding and re-encoding it.
+	public static let defaultMaxCoefficientBytes = 512 << 20
 
 	/// Parses a baseline JPEG to quantized coefficients.
 	///
