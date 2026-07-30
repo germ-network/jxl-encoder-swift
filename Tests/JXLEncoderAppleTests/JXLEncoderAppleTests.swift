@@ -156,6 +156,92 @@
 				try JXLEncoderApple.encode(data: Data([0, 1, 2, 3, 4, 5, 6, 7]))
 			}
 		}
+
+		/// Rewrites a real JPEG's frame header to claim `width` × `height`.
+		///
+		/// ImageIO refuses to report a size for a wildly impossible claim — it
+		/// declines 16000×16000 backed by 12 kB — so the exposure is the window
+		/// it *does* accept: sizes plausible enough to report and then decode.
+		/// A patched fixture lands inside that window, where a synthetic
+		/// header-only file does not.
+		static func claimingSize(_ fixture: [UInt8], width: Int, height: Int) -> Data {
+			var bytes = fixture
+			var i = 2
+			while i + 8 < bytes.count {
+				guard bytes[i] == 0xFF else {
+					i += 1
+					continue
+				}
+				let marker = bytes[i + 1]
+				if marker == 0xC0 || marker == 0xC1 {
+					bytes[i + 5] = UInt8(height >> 8)
+					bytes[i + 6] = UInt8(height & 0xFF)
+					bytes[i + 7] = UInt8(width >> 8)
+					bytes[i + 8] = UInt8(width & 0xFF)
+					break
+				}
+				if marker == 0xD8 {
+					i += 2
+					continue
+				}
+				i += 2 + (Int(bytes[i + 2]) << 8 | Int(bytes[i + 3]))
+			}
+			return Data(bytes)
+		}
+
+		static func fixture(_ name: String) throws -> [UInt8] {
+			let url = try #require(
+				Bundle.module.url(
+					forResource: name, withExtension: "jpg",
+					subdirectory: "Fixtures"))
+			return [UInt8](try Data(contentsOf: url))
+		}
+
+		/// 64 MP from a 12 kB file: ImageIO reports it and would go on to decode,
+		/// which at ~19 bytes a pixel across the context, samples and linear
+		/// plane is over a gigabyte.
+		@Test("refuses a source that would exceed the budget")
+		func refusesOversizedSource() throws {
+			let claim = Self.claimingSize(
+				try Self.fixture("hopper_444"), width: 8000, height: 8000)
+			#expect(
+				throws: JXLEncoderAppleError.sourceBudgetExceeded(
+					width: 8000, height: 8000,
+					required: 8000 * 8000 * JXLEncoderApple.bytesPerSourcePixel,
+					budget: JXLEncoderApple.defaultMaxSourceBytes)
+			) {
+				try JXLEncoderApple.encode(data: claim)
+			}
+		}
+
+		/// `maxPixelSize` bounds the output, not what the decoder is asked to
+		/// produce, so it must not be mistaken for this check.
+		@Test("the budget applies even when a thumbnail was requested")
+		func budgetAppliesToThumbnails() throws {
+			let claim = Self.claimingSize(
+				try Self.fixture("hopper_444"), width: 8000, height: 8000)
+			#expect(throws: JXLEncoderAppleError.self) {
+				try JXLEncoderApple.encode(
+					data: claim, maxPixelSize: 64, maxSourceBytes: 1 << 20)
+			}
+		}
+
+		/// Ordinary input has to survive the check, right up to the boundary.
+		@Test("images within the budget still encode")
+		func withinBudget() throws {
+			let jpeg = Data(try Self.fixture("hopper_444"))
+			let required = 200 * 200 * JXLEncoderApple.bytesPerSourcePixel
+			#expect(throws: Never.self) {
+				try JXLEncoderApple.encode(data: jpeg, maxSourceBytes: required)
+			}
+			#expect(
+				throws: JXLEncoderAppleError.sourceBudgetExceeded(
+					width: 200, height: 200, required: required,
+					budget: required - 1)
+			) {
+				try JXLEncoderApple.encode(data: jpeg, maxSourceBytes: required - 1)
+			}
+		}
 	}
 
 #endif  // canImport(ImageIO)

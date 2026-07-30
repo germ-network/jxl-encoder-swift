@@ -25,6 +25,9 @@
 		case contextCreationFailed
 		/// Alpha preservation is deliberately not implemented; flatten instead.
 		case alphaNotSupported
+		/// Encoding the source at its declared size would exceed the caller's
+		/// memory budget.
+		case sourceBudgetExceeded(width: Int, height: Int, required: Int, budget: Int)
 	}
 
 	/// What to do with an input that carries transparency.
@@ -65,20 +68,45 @@
 			return Data(try Encoder.encode(buffer, distance: distance))
 		}
 
+		/// Peak bytes a full-size encode holds, per source pixel: four for the
+		/// drawing context, three for the extracted samples, twelve for the
+		/// linear plane.
+		static let bytesPerSourcePixel = 19
+
+		/// Memory budget applied to input whose size the caller has not bounded,
+		/// matching `JPEGParser.defaultMaxCoefficientBytes`. At 19 bytes a pixel
+		/// this admits about 14 MP, past the 12 MP the encoder is designed
+		/// around but short of a 48 MP sensor — raise it deliberately if that
+		/// input has to be accepted, and lower it in an extension running under
+		/// its own memory limit.
+		public static let defaultMaxSourceBytes = JPEGParser.defaultMaxCoefficientBytes
+
 		/// Decodes any ImageIO-supported input and re-encodes it as JPEG XL.
 		///
 		/// `maxPixelSize` caps the longest edge, for thumbnails. Decoding goes
 		/// through the thumbnail API in both cases because it applies the EXIF
 		/// orientation, which the plain image API does not.
+		///
+		/// `maxSourceBytes` bounds what encoding the source would hold, judged
+		/// from the size the container declares and read before anything is
+		/// decoded. Headers are cheap to write and expensive to believe: a 12 kB
+		/// JPEG rewritten to claim 8000×8000 costs over a gigabyte to honour.
+		/// ImageIO applies a plausibility test of its own and refuses the wilder
+		/// claims — it declines to report a size at 16000×16000 — but it accepts
+		/// that 64 MP one, so this is the backstop under it. `maxPixelSize` is
+		/// not a substitute: that bounds the output, this bounds what the
+		/// decoder is asked to produce.
 		public static func encode(
 			data: Data,
 			distance: Float = 1.0,
 			maxPixelSize: Int? = nil,
-			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground)
+			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground),
+			maxSourceBytes: Int = defaultMaxSourceBytes
 		) throws -> Data {
 			guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
 				throw JXLEncoderAppleError.decodeFailed
 			}
+			try checkSourceSize(source, budget: maxSourceBytes)
 			var options: [CFString: Any] = [
 				kCGImageSourceCreateThumbnailFromImageAlways: true,
 				kCGImageSourceCreateThumbnailWithTransform: true,
@@ -94,6 +122,34 @@
 			}
 			return try encode(
 				image: image, distance: distance, alphaPolicy: alphaPolicy)
+		}
+
+		/// Reads the declared dimensions from the container's metadata, which
+		/// does not decode the image.
+		///
+		/// A source that will not report its size is passed through rather than
+		/// rejected: the formats that do this are ones ImageIO is about to refuse
+		/// anyway, and failing here would turn a decode error into a size error.
+		static func checkSourceSize(_ source: CGImageSource, budget: Int) throws {
+			guard
+				let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+					as? [CFString: Any],
+				let width = properties[kCGImagePropertyPixelWidth] as? Int,
+				let height = properties[kCGImagePropertyPixelHeight] as? Int,
+				width > 0, height > 0
+			else { return }
+
+			let (pixels, pixelOverflow) = width.multipliedReportingOverflow(by: height)
+			let (required, byteOverflow) =
+				pixelOverflow
+				? (0, true)
+				: pixels.multipliedReportingOverflow(by: bytesPerSourcePixel)
+			guard !pixelOverflow, !byteOverflow, required <= budget else {
+				throw JXLEncoderAppleError.sourceBudgetExceeded(
+					width: width, height: height,
+					required: pixelOverflow || byteOverflow ? .max : required,
+					budget: budget)
+			}
 		}
 
 		/// Draws into a known 8-bit sRGB layout and returns interleaved RGB.

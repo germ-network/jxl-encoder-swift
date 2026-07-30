@@ -39,6 +39,10 @@ public enum JPEGParseError: Error, Equatable, Sendable {
 	case missingScan
 	/// Zero width, or the zero height that signals a DNL segment.
 	case invalidDimensions(width: Int, height: Int)
+	/// The frame's coefficients would exceed the caller's budget. Held in full,
+	/// so the frame header decides the allocation before any entropy data is
+	/// read.
+	case coefficientBudgetExceeded(required: Int, budget: Int)
 	/// Baseline requires a full spectral selection with no successive
 	/// approximation.
 	case invalidScanParameters
@@ -102,8 +106,31 @@ public enum JPEGParser {
 		47, 55, 62, 63,
 	]
 
-	public static func parse(_ data: [UInt8]) throws -> JPEGImage {
-		var parser = JPEGSegmentParser(data: data)
+	/// Coefficient budget applied when the caller does not name one.
+	///
+	/// 256 MB, which admits a 20 MP 4:4:4 photograph or a 42 MP 4:2:0 one —
+	/// past any phone sensor at the subsampling phones actually use.
+	public static let defaultMaxCoefficientBytes = 256 << 20
+
+	/// Parses a baseline JPEG to quantized coefficients.
+	///
+	/// `maxCoefficientBytes` bounds the coefficient planes, which are what a
+	/// hostile header buys: a block costs 256 bytes to hold but as little as two
+	/// bits to code, so the frame header alone decides the allocation. Since a
+	/// genuinely flat image codes that densely too, no ratio against the entropy
+	/// data can separate the two without decoding first — libjpeg reaches the
+	/// same conclusion and answers it with `max_memory_to_use`, spilling its
+	/// coefficient arrays to a backing store rather than refusing them. Nothing
+	/// here spills, so the budget is a limit instead.
+	///
+	/// Bytes rather than pixels because that is what varies: the same dimensions
+	/// cost twice as much at 4:4:4 as at 4:2:0.
+	public static func parse(
+		_ data: [UInt8],
+		maxCoefficientBytes: Int = defaultMaxCoefficientBytes
+	) throws -> JPEGImage {
+		var parser = JPEGSegmentParser(
+			data: data, maxCoefficientBytes: maxCoefficientBytes)
 		return try parser.run()
 	}
 }
@@ -129,6 +156,7 @@ private struct JPEGFrame {
 
 private struct JPEGSegmentParser {
 	let data: [UInt8]
+	let maxCoefficientBytes: Int
 	var index = 0
 	var quantTables = [[UInt16]?](repeating: nil, count: 4)
 	var dcTables = [JPEGHuffmanTable?](repeating: nil, count: 4)
@@ -453,6 +481,14 @@ private struct JPEGSegmentParser {
 		// allocate gigabytes before discovering it is truncated.
 		guard (data.count - index) * 4 >= totalBlocks else {
 			throw JPEGParseError.truncatedEntropyData
+		}
+		// That rule is the information-theoretic floor, which leaves 256 bytes
+		// of coefficients authorised by two bits of input. The budget is what
+		// actually bounds it.
+		let required = totalBlocks * 64 * MemoryLayout<Int32>.size
+		guard required <= maxCoefficientBytes else {
+			throw JPEGParseError.coefficientBudgetExceeded(
+				required: required, budget: maxCoefficientBytes)
 		}
 
 		var planes: [[Int32]] = []

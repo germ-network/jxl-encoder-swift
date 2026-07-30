@@ -260,13 +260,15 @@ struct JPEGParserTests {
 	}
 
 	/// Dimensions this large cannot be backed by the bytes on hand; without the
-	/// check the parser would allocate for them before finding out.
+	/// check the parser would allocate for them before finding out. Kept under
+	/// the pixel ceiling so this exercises the entropy-length guard rather than
+	/// the ceiling — see `JPEGSizeLimitTests` for that one.
 	@Test("rejects dimensions the file cannot possibly hold")
 	func rejectsImplausibleDimensions() throws {
 		var data = try Self.fixture("small_444")
 		let offset = try #require(Self.segmentOffset(data, marker: 0xC0))
-		data[offset + 3] = 0xF0  // height
-		data[offset + 5] = 0xF0  // width
+		data[offset + 3] = 0x0F  // height
+		data[offset + 5] = 0x0F  // width
 		#expect(throws: JPEGParseError.truncatedEntropyData) {
 			try JPEGParser.parse(data)
 		}
