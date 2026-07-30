@@ -16,13 +16,25 @@ public struct ImageBuffer: Sendable {
 	public let height: Int
 	/// Row-major, `channels` samples per pixel.
 	public let samples: [UInt8]
+	/// 3 or 4. A fourth channel is stride only — the encoder ignores it, so
+	/// alpha must be flattened before reaching the core (the shim's job).
 	public let channels: Int
 
 	public init(width: Int, height: Int, samples: [UInt8], channels: Int = 3) throws {
 		guard width > 0, height > 0 else { throw EncoderError.emptyImage }
-		guard samples.count == width * height * channels else {
+		guard channels == 3 || channels == 4 else {
+			throw EncoderError.unsupportedChannelCount(channels)
+		}
+		// Overflow here means the dimensions are absurd, not that the count is
+		// merely wrong — and a throwing initializer must not trap.
+		let (pixels, overflowA) = width.multipliedReportingOverflow(by: height)
+		let (expected, overflowB) = pixels.multipliedReportingOverflow(by: channels)
+		guard !overflowA, !overflowB else {
+			throw EncoderError.imageTooLarge(width: width, height: height)
+		}
+		guard samples.count == expected else {
 			throw EncoderError.pixelCountMismatch(
-				expected: width * height * channels, actual: samples.count)
+				expected: expected, actual: samples.count)
 		}
 		self.width = width
 		self.height = height

@@ -105,4 +105,51 @@ struct EncoderTests {
 			try ImageBuffer(width: 2, height: 2, samples: [1, 2, 3])
 		}
 	}
+
+	/// Channel counts other than 3 and 4 would misalign every pixel read; 1 and
+	/// 2 used to pass validation and trap inside `linearize` instead.
+	@Test("rejects unsupported channel counts", arguments: [0, 1, 2, 5])
+	func rejectsChannels(channels: Int) {
+		let samples = [UInt8](repeating: 128, count: 16 * 16 * max(channels, 1))
+		#expect(throws: EncoderError.unsupportedChannelCount(channels)) {
+			try ImageBuffer(
+				width: 16, height: 16, samples: samples, channels: channels)
+		}
+	}
+
+	/// A throwing initializer must throw on absurd dimensions, not trap on the
+	/// sample-count multiplication.
+	@Test("overflowing dimensions throw rather than trap")
+	func overflowThrows() {
+		#expect(throws: EncoderError.imageTooLarge(width: Int.max / 2, height: 4)) {
+			try ImageBuffer(width: Int.max / 2, height: 4, samples: [])
+		}
+	}
+
+	/// The fourth channel is stride only, so RGBA input encodes exactly as the
+	/// same pixels without it — alpha never leaks into the output.
+	@Test("alpha channel is ignored, not encoded")
+	func alphaIgnored() throws {
+		let size = 32
+		var rgb = [UInt8](repeating: 0, count: size * size * 3)
+		var rgba = [UInt8](repeating: 0, count: size * size * 4)
+		for i in 0..<(size * size) {
+			let r = UInt8((i * 7) % 256)
+			let g = UInt8((i * 13) % 256)
+			let b = UInt8((i * 29) % 256)
+			rgb[i * 3] = r
+			rgb[i * 3 + 1] = g
+			rgb[i * 3 + 2] = b
+			rgba[i * 4] = r
+			rgba[i * 4 + 1] = g
+			rgba[i * 4 + 2] = b
+			rgba[i * 4 + 3] = UInt8(i % 256)
+		}
+		let a = try Encoder.encode(
+			ImageBuffer(width: size, height: size, samples: rgb), distance: 1.0)
+		let b = try Encoder.encode(
+			ImageBuffer(width: size, height: size, samples: rgba, channels: 4),
+			distance: 1.0)
+		#expect(a == b)
+	}
 }

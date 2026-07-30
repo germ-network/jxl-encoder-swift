@@ -11,4 +11,7 @@ public enum EncoderError: Error, Equatable, Sendable {
 	case losslessNotSupported
 	case invalidDistance(Float)
 	case pixelCountMismatch(expected: Int, actual: Int)
+	/// Only 3 (RGB) and 4 (RGBA stride, alpha ignored) are meaningful; anything
+	/// else would misalign every pixel read.
+	case unsupportedChannelCount(Int)
 }
