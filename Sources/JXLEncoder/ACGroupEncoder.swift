@@ -60,22 +60,73 @@ public enum ACGroupEncoder {
 		quantDC: inout [[Int16]],
 		writer: inout BitWriter
 	) {
+		encode(
+			planes: xyb.channelPlanes,
+			widthInBlocks: widthInBlocks,
+			heightInBlocks: heightInBlocks,
+			subsampling: .none,
+			quantField: quantField,
+			scale: scale,
+			scaleDC: scaleDC,
+			xQuantMatrixScale: xQuantMatrixScale,
+			code: code,
+			quantDC: &quantDC,
+			writer: &writer)
+	}
+
+	/// As above, with per-channel resolutions.
+	///
+	/// The loop runs over the full-resolution block grid; a subsampled channel
+	/// codes only where its own grid aligns, which is how the format interleaves
+	/// channels of different resolutions in one scan. With 4:4:4 every channel
+	/// codes every block and this reduces to the simple case.
+	public static func encode(
+		planes: ChannelPlanes,
+		widthInBlocks: Int,
+		heightInBlocks: Int,
+		subsampling: ChromaSubsampling,
+		quantField: [UInt8],
+		scale: Float,
+		scaleDC: Float,
+		xQuantMatrixScale: UInt32,
+		code: EntropyCode,
+		quantDC: inout [[Int16]],
+		writer: inout BitWriter
+	) {
 		let inverseFactor = inverseDCQuant.map { $0 * scaleDC }
 		// The X channel's quant matrix is scaled by distance-dependent steps.
 		let xMatrixMultiplier = Float.pow(1.25, Float(xQuantMatrixScale) - 2.0)
 
-		var nonZeros: [[UInt8]] = Array(
-			repeating: [UInt8](repeating: 0, count: widthInBlocks), count: 3)
-		var nonZerosAbove: [[UInt8]]? = nil
+		let channelWidths = (0..<3).map {
+			subsampling.blocksAcross(channel: $0, fullWidthInBlocks: widthInBlocks)
+		}
+		var nonZeros: [[UInt8]] = (0..<3).map {
+			[UInt8](repeating: 0, count: channelWidths[$0])
+		}
+		var nonZerosAbove: [[UInt8]?] = [nil, nil, nil]
 
 		for by in 0..<heightInBlocks {
+			var codedThisRow = [false, false, false]
 			for bx in 0..<widthInBlocks {
 				let quant = Int32(quantField[by * widthInBlocks + bx])
 
+				// Index each channel on its own grid; identical to (bx, by) at
+				// 4:4:4.
+				let sx = (0..<3).map {
+					subsampling.subsampledX(channel: $0, blockX: bx)
+				}
+				let sy = (0..<3).map {
+					subsampling.subsampledY(channel: $0, blockY: by)
+				}
+				func index(_ channel: Int) -> Int {
+					sy[channel] * channelWidths[channel] + sx[channel]
+				}
+
 				// Y first: its reconstruction is what X and B decorrelate against.
 				let yCoefficients = DCT.forward8x8(
-					pixels: xyb.planes[1], stride: xyb.width,
-					originX: bx * DCT.blockDim, originY: by * DCT.blockDim)
+					pixels: planes.planes[1], stride: planes.widths[1],
+					originX: sx[1] * DCT.blockDim, originY: sy[1] * DCT.blockDim
+				)
 				let (yQuantized, yReconstructed) = Quantizer.roundtripYBlockAC(
 					coefficients: yCoefficients[...], quant: quant, scale: scale
 				)
@@ -86,16 +137,25 @@ public enum ACGroupEncoder {
 				// For DCT8 the DC is simply the lowest-frequency coefficient.
 				// `std::round` here rounds ties away from zero, unlike the
 				// half-to-even rounding the AC quantizer uses.
-				let blockIndex = by * widthInBlocks + bx
-				quantDC[1][blockIndex] = Int16(
+				quantDC[1][index(1)] = Int16(
 					(inverseFactor[1] * yCoefficients[0])
 						.rounded(.toNearestOrAwayFromZero))
 
 				for channel in [0, 2] {
+					// Without this guard a subsampled chroma block would be
+					// recomputed once per full-resolution position it spans, each
+					// time against a different luma DC, and the last write would
+					// silently win.
+					guard
+						subsampling.codesBlock(
+							channel: channel, blockX: bx, blockY: by)
+					else { continue }
+
 					var coefficients = DCT.forward8x8(
-						pixels: xyb.planes[channel], stride: xyb.width,
-						originX: bx * DCT.blockDim,
-						originY: by * DCT.blockDim)
+						pixels: planes.planes[channel],
+						stride: planes.widths[channel],
+						originX: sx[channel] * DCT.blockDim,
+						originY: sy[channel] * DCT.blockDim)
 					let factor = channel == 0 ? xFactor : bFactor
 					for k in 0..<DCT.blockSize {
 						coefficients[k] = coefficients[k].addingProduct(
@@ -119,25 +179,38 @@ public enum ACGroupEncoder {
 					// default, while Swift never contracts. Computing both
 					// products separately differs in the last bit, which is
 					// enough to flip a value sitting on a rounding boundary.
-					quantDC[channel][blockIndex] = quantizedDC(
+					quantDC[channel][index(channel)] = quantizedDC(
 						coefficient: coefficients[0],
 						inverseFactor: inverseFactor[channel],
-						yDC: quantDC[1][blockIndex],
+						yDC: quantDC[1][index(1)],
 						cflFactor: dcCflFactor[channel])
 				}
 
 				for channel in ACTokenizer.channelOrder {
+					// A subsampled channel has no block here; the full-resolution
+					// position it would occupy belongs to an earlier block it
+					// already covered.
+					guard
+						subsampling.codesBlock(
+							channel: channel, blockX: bx, blockY: by)
+					else { continue }
+					codedThisRow[channel] = true
 					ACTokenizer.writeBlock(
 						quantized: quantized[channel][...],
 						channel: channel,
-						blockX: bx,
+						blockX: sx[channel],
 						nonZeroRow: &nonZeros[channel],
-						nonZeroRowAbove: nonZerosAbove?[channel],
+						nonZeroRowAbove: nonZerosAbove[channel],
 						code: code,
 						writer: &writer)
 				}
 			}
-			nonZerosAbove = nonZeros
+			// Only advance a channel's "row above" when it actually coded one,
+			// so a vertically subsampled channel predicts from its own previous
+			// row rather than the row it skipped.
+			for channel in 0..<3 where codedThisRow[channel] {
+				nonZerosAbove[channel] = nonZeros[channel]
+			}
 		}
 	}
 }

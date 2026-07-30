@@ -24,6 +24,31 @@ public struct PaddedStripe: Sendable {
 	}
 
 	public func plane(_ channel: Int) -> [Float] { planes[channel] }
+
+	/// Every channel at the same resolution, which is what the pixel path
+	/// always produces.
+	public var channelPlanes: ChannelPlanes {
+		ChannelPlanes(
+			planes: planes,
+			widths: [width, width, width],
+			heights: [height, height, height])
+	}
+}
+
+/// Three planes that may differ in resolution.
+///
+/// Chroma subsampling is the only thing that makes them differ, and it only
+/// arises from JPEG recompression — the pixel path is always 4:4:4.
+public struct ChannelPlanes: Sendable {
+	public let planes: [[Float]]
+	public let widths: [Int]
+	public let heights: [Int]
+
+	public init(planes: [[Float]], widths: [Int], heights: [Int]) {
+		self.planes = planes
+		self.widths = widths
+		self.heights = heights
+	}
 }
 
 public enum PlaneBuffer {
