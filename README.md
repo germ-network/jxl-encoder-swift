@@ -58,8 +58,8 @@ let jxl = try JXLEncoderApple.encode(
 ```
 
 `maxPixelSize(fitting:)` returns `nil` when nothing fits — no encode was
-measured below ~17 MB, so a caller with only tens of megabytes (a notification
-extension) cannot use this path at any size. `estimatedEncodeBytes(width:
+measured below ~17 MB, so a caller with only tens of megabytes to spare cannot
+use this path at any size, whatever cap it picks. `estimatedEncodeBytes(width:
 height:maxPixelSize:)` gives the same estimate directly; it bounds every
 measurement taken, over-estimating a large encode by up to about half.
 

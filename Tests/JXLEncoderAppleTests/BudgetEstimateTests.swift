@@ -85,9 +85,8 @@
 		///
 		/// This is a real floor, not a modelling artefact: the smallest encode
 		/// measured, a 200 px thumbnail, still peaked at 17 MB. A caller with
-		/// tens of megabytes to spare — a notification extension — cannot use
-		/// this path at any size, and should learn that from `nil` rather than
-		/// from being killed.
+		/// only tens of megabytes to spare cannot use this path at any size, and
+		/// should learn that from `nil` rather than from being killed.
 		@Test("a budget under the fixed overhead has no cap")
 		func impossibleBudget() {
 			#expect(JXLEncoderApple.maxPixelSize(fitting: 1 << 20) == nil)
