@@ -198,31 +198,78 @@
 		}
 
 		/// 64 MP from a 12 kB file: ImageIO reports it and would go on to decode,
-		/// which at ~19 bytes a pixel across the context, samples and linear
-		/// plane is over a gigabyte.
-		@Test("refuses a source that would exceed the budget")
+		/// which at ~36 bytes a decoded pixel is over two gigabytes.
+		@Test("refuses a full-size encode that would exceed the budget")
 		func refusesOversizedSource() throws {
 			let claim = Self.claimingSize(
 				try Self.fixture("hopper_444"), width: 8000, height: 8000)
 			#expect(
 				throws: JXLEncoderAppleError.sourceBudgetExceeded(
 					width: 8000, height: 8000,
-					required: 8000 * 8000 * JXLEncoderApple.bytesPerSourcePixel,
+					required: JXLEncoderApple.estimatedEncodeBytes(
+						width: 8000, height: 8000),
 					budget: JXLEncoderApple.defaultMaxSourceBytes)
 			) {
 				try JXLEncoderApple.encode(data: claim)
 			}
 		}
 
-		/// `maxPixelSize` bounds the output, not what the decoder is asked to
-		/// produce, so it must not be mistaken for this check.
-		@Test("the budget applies even when a thumbnail was requested")
-		func budgetAppliesToThumbnails() throws {
+		/// The case an earlier revision of this check got backwards.
+		///
+		/// `maxPixelSize` scales *during* decoding — ImageIO reaches it through DCT
+		/// scaling, so a 48 MP source asked for at 200 px peaks at 24 MB rather than
+		/// the 1.4 GB full size costs. Budgeting the source instead of what it
+		/// decodes to would refuse every thumbnail of a large photograph, which is
+		/// the app's ordinary path.
+		@Test(
+			"a large source is allowed when scaled down during decode",
+			arguments: [64, 200, 600])
+		func largeSourceScaledDown(cap: Int) throws {
+			let claim = Self.claimingSize(
+				try Self.fixture("hopper_444"), width: 8000, height: 8000)
+			// Far below what the source needs, comfortably above the thumbnail.
+			// Above the fixed overhead too — below that nothing encodes at all.
+			let budget = 128 << 20
+			#expect(
+				JXLEncoderApple.estimatedEncodeBytes(width: 8000, height: 8000)
+					> budget)
+			#expect(
+				JXLEncoderApple.estimatedEncodeBytes(
+					width: 8000, height: 8000, maxPixelSize: cap) < budget)
+			#expect(throws: Never.self) {
+				try JXLEncoderApple.encode(
+					data: claim, maxPixelSize: cap, maxSourceBytes: budget)
+			}
+		}
+
+		/// Scaling down is not a bypass: a cap that still lands over budget is
+		/// still refused.
+		@Test("a thumbnail over budget is still refused")
+		func thumbnailStillBudgeted() throws {
 			let claim = Self.claimingSize(
 				try Self.fixture("hopper_444"), width: 8000, height: 8000)
 			#expect(throws: JXLEncoderAppleError.self) {
 				try JXLEncoderApple.encode(
-					data: claim, maxPixelSize: 64, maxSourceBytes: 1 << 20)
+					data: claim, maxPixelSize: 4000, maxSourceBytes: 128 << 20)
+			}
+		}
+
+		/// The cap preserves aspect ratio and never enlarges.
+		@Test("decoded size follows the cap")
+		func decodedSizeScaling() {
+			let cases: [(Int, Int, Int?, Int, Int)] = [
+				(400, 200, 100, 100, 50),
+				(400, 200, 800, 400, 200),
+				(400, 200, nil, 400, 200),
+				(8000, 10, 100, 100, 1),
+			]
+			for (w, h, cap, expectedWidth, expectedHeight) in cases {
+				let size = JXLEncoderApple.decodedSize(
+					width: w, height: h, maxPixelSize: cap)
+				#expect(size.width == expectedWidth)
+				#expect(
+					size.height == expectedHeight,
+					"an edge must not round to zero")
 			}
 		}
 
@@ -230,7 +277,7 @@
 		@Test("images within the budget still encode")
 		func withinBudget() throws {
 			let jpeg = Data(try Self.fixture("hopper_444"))
-			let required = 200 * 200 * JXLEncoderApple.bytesPerSourcePixel
+			let required = JXLEncoderApple.estimatedEncodeBytes(width: 200, height: 200)
 			#expect(throws: Never.self) {
 				try JXLEncoderApple.encode(data: jpeg, maxSourceBytes: required)
 			}

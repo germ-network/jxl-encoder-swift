@@ -35,6 +35,38 @@ let thumb = try JXLEncoderApple.encode(
 `distance` is a butteraugli target: lower is higher quality. Input carrying
 alpha is composited onto `alphaPolicy`'s background, white by default.
 
+### Memory
+
+Encoding is memory-hungry and untrusted headers are cheap to write, so
+`encode(data:)` estimates what a source will cost and refuses to start past
+`maxSourceBytes` (640 MB by default). Measured peaks: 110 MB at 2 MP, **503 MB
+at 12 MP**, 1388 MB at 48 MP — so a full-size 48 MP photograph needs an
+explicitly raised budget.
+
+`maxPixelSize` is the cheaper answer, because ImageIO reaches it by DCT-scaling
+*during* the decode rather than after: the same 48 MP source costs 24 MB at
+200 px and 176 MB at 2000 px. The budget is applied to that scaled size, so
+capping a large photograph is never refused for the source's sake.
+
+To pick a cap from what the device can spare:
+
+```swift
+// e.g. from ProcessInfo.physicalMemory, or a per-device-model table
+let cap = JXLEncoderApple.maxPixelSize(fitting: budgetForThisDevice)
+let jxl = try JXLEncoderApple.encode(
+	data: input, maxPixelSize: cap, maxSourceBytes: budgetForThisDevice)
+```
+
+`maxPixelSize(fitting:)` returns `nil` when nothing fits — no encode was
+measured below ~17 MB, so a caller with only tens of megabytes (a notification
+extension) cannot use this path at any size. `estimatedEncodeBytes(width:
+height:maxPixelSize:)` gives the same estimate directly; it bounds every
+measurement taken, over-estimating a large encode by up to about half.
+
+Recompressing a JPEG is far cheaper than re-encoding its pixels — coefficients
+cost exactly 6 bytes a pixel at 4:2:0, so that 48 MP photograph needs 279 MB
+rather than 1.4 GB. That path is not finished yet.
+
 Off Apple platforms, drive the core directly with 8-bit sRGB samples:
 
 ```swift

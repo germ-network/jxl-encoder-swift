@@ -25,8 +25,9 @@
 		case contextCreationFailed
 		/// Alpha preservation is deliberately not implemented; flatten instead.
 		case alphaNotSupported
-		/// Encoding the source at its declared size would exceed the caller's
-		/// memory budget.
+		/// Encoding would exceed the caller's memory budget. `width` and `height`
+		/// are the source's; `required` is for the size it would decode to, so a
+		/// `maxPixelSize` that scales the source down is already reflected in it.
 		case sourceBudgetExceeded(width: Int, height: Int, required: Int, budget: Int)
 	}
 
@@ -68,25 +69,98 @@
 			return Data(try Encoder.encode(buffer, distance: distance))
 		}
 
-		/// Peak bytes a full-size encode holds per source pixel.
+		/// Peak bytes an encode holds per *decoded* pixel.
 		///
 		/// Nineteen are accounted for — four for the drawing context, three for
-		/// the extracted samples, twelve for the linear plane — but measured peak
-		/// RSS is half again as much, the rest being ImageIO's own decode of the
-		/// source. Measured, rounded up: 503 MB at 12 MP, 772 MB at 24 MP,
-		/// 1388 MB at 48 MP. Small images sit well above this ratio on fixed
-		/// overhead, which a per-pixel budget should not be charged for.
-		static let bytesPerSourcePixel = 32
+		/// the extracted samples, twelve for the linear plane — and measured peak
+		/// RSS runs well above that, the rest being ImageIO's own decode.
+		/// Measured at full size: 110 MB at 2 MP, 503 MB at 12 MP, 772 MB at
+		/// 24 MP, 1388 MB at 48 MP.
+		static let bytesPerDecodedPixel = 40
 
-		/// Memory budget applied to input whose size the caller has not bounded.
+		/// Working set an encode holds regardless of size, which a per-pixel
+		/// figure alone cannot express: a 200 px thumbnail costs 17 to 24 MB
+		/// depending on how large the source it came from was.
 		///
-		/// 512 MB, which admits about 16 MP — the 12 MP the encoder is designed
-		/// around, with headroom. **A 48 MP phone photo needs roughly 1.5 GB**
-		/// through this path and is refused; raise the budget deliberately if
-		/// that input has to be accepted at full size, pass `maxPixelSize` to
-		/// scale it down instead, or lower the budget in an extension running
-		/// under its own memory limit.
-		public static let defaultMaxSourceBytes = 512 << 20
+		/// Carries margin for run-to-run variance as well — the same encode was
+		/// seen at 158 MB and 178 MB on consecutive runs, so a bound fitted
+		/// tightly to one set of measurements would not hold on the next.
+		///
+		/// Together with `bytesPerDecodedPixel` this sits above every measurement
+		/// taken, at the cost of over-estimating a large encode by up to about
+		/// half. Erring high is the safe direction — the estimate decides what
+		/// gets refused.
+		static let fixedOverheadBytes = 80 << 20
+
+		/// Memory budget applied when the caller does not name one.
+		///
+		/// 640 MB, which admits about 14 MP — past the 12 MP the encoder is
+		/// designed around, which measures 503 MB.
+		///
+		/// This bounds the *decode*, so it is not a limit on how large a source
+		/// may be: `maxPixelSize` scales during decoding rather than after it, so
+		/// a 48 MP photograph asked for at 200 px costs 24 MB and is nowhere near
+		/// this. Only a full-size encode of such a photograph is refused, and
+		/// that one needs roughly 1.4 GB.
+		public static let defaultMaxSourceBytes = 640 << 20
+
+		/// The size ImageIO will decode to, after `maxPixelSize` caps the longest
+		/// edge. Aspect ratio is preserved and the cap never enlarges.
+		public static func decodedSize(
+			width: Int, height: Int, maxPixelSize: Int?
+		) -> (width: Int, height: Int) {
+			guard let maxPixelSize, maxPixelSize > 0,
+				max(width, height) > maxPixelSize
+			else { return (width, height) }
+			let scale = Double(maxPixelSize) / Double(max(width, height))
+			return (
+				max(1, Int((Double(width) * scale).rounded())),
+				max(1, Int((Double(height) * scale).rounded()))
+			)
+		}
+
+		/// Peak bytes encoding a source of these dimensions is expected to hold,
+		/// as an upper bound over everything measured.
+		///
+		/// Exposed so a caller can decide what to allow from what the device can
+		/// spare — picking `maxPixelSize` by device model, say — rather than
+		/// discovering the cost by running out of memory. Returns `Int.max` if
+		/// the dimensions overflow.
+		public static func estimatedEncodeBytes(
+			width: Int, height: Int, maxPixelSize: Int? = nil
+		) -> Int {
+			let size = decodedSize(
+				width: width, height: height, maxPixelSize: maxPixelSize)
+			let (pixels, pixelOverflow) = size.width.multipliedReportingOverflow(
+				by: size.height)
+			guard !pixelOverflow else { return .max }
+			let (scaled, scaleOverflow) = pixels.multipliedReportingOverflow(
+				by: bytesPerDecodedPixel)
+			guard !scaleOverflow else { return .max }
+			let (total, sumOverflow) = scaled.addingReportingOverflow(
+				fixedOverheadBytes)
+			return sumOverflow ? .max : total
+		}
+
+		/// The largest `maxPixelSize` whose encode is expected to fit in `budget`,
+		/// or `nil` if even the smallest encode would not.
+		///
+		/// The counterpart to `estimatedEncodeBytes` for callers who know what
+		/// the device can spare and want the cap that fits it. `aspectRatio` is
+		/// long edge over short, since the cap applies to the long edge: 4:3 by
+		/// default, which is what phone cameras produce.
+		public static func maxPixelSize(
+			fitting budget: Int, aspectRatio: Double = 4.0 / 3.0
+		) -> Int? {
+			let usable = budget - fixedOverheadBytes
+			guard usable > 0, aspectRatio >= 1 else { return nil }
+			// longEdge * (longEdge / aspectRatio) * bytesPerPixel <= usable
+			let longEdge =
+				(Double(usable) / Double(bytesPerDecodedPixel) * aspectRatio)
+				.squareRoot()
+			let cap = Int(longEdge)
+			return cap >= 1 ? cap : nil
+		}
 
 		/// Decodes any ImageIO-supported input and re-encodes it as JPEG XL.
 		///
@@ -113,7 +187,8 @@
 			guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
 				throw JXLEncoderAppleError.decodeFailed
 			}
-			try checkSourceSize(source, budget: maxSourceBytes)
+			try checkSourceSize(
+				source, maxPixelSize: maxPixelSize, budget: maxSourceBytes)
 			var options: [CFString: Any] = [
 				kCGImageSourceCreateThumbnailFromImageAlways: true,
 				kCGImageSourceCreateThumbnailWithTransform: true,
@@ -137,7 +212,9 @@
 		/// A source that will not report its size is passed through rather than
 		/// rejected: the formats that do this are ones ImageIO is about to refuse
 		/// anyway, and failing here would turn a decode error into a size error.
-		static func checkSourceSize(_ source: CGImageSource, budget: Int) throws {
+		static func checkSourceSize(
+			_ source: CGImageSource, maxPixelSize: Int?, budget: Int
+		) throws {
 			guard
 				let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
 					as? [CFString: Any],
@@ -146,15 +223,11 @@
 				width > 0, height > 0
 			else { return }
 
-			let (pixels, pixelOverflow) = width.multipliedReportingOverflow(by: height)
-			let (required, byteOverflow) =
-				pixelOverflow
-				? (0, true)
-				: pixels.multipliedReportingOverflow(by: bytesPerSourcePixel)
-			guard !pixelOverflow, !byteOverflow, required <= budget else {
+			let required = estimatedEncodeBytes(
+				width: width, height: height, maxPixelSize: maxPixelSize)
+			guard required <= budget else {
 				throw JXLEncoderAppleError.sourceBudgetExceeded(
-					width: width, height: height,
-					required: pixelOverflow || byteOverflow ? .max : required,
+					width: width, height: height, required: required,
 					budget: budget)
 			}
 		}
