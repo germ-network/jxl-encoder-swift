@@ -52,9 +52,7 @@ public enum Encoder {
 		dcGroupX: Int,
 		dcGroupY: Int,
 		params: DistanceParams,
-		dcCode: EntropyCode,
-		acCode: EntropyCode,
-		sections: inout [BitWriter]
+		sections: inout [SectionWriter]
 	) {
 		let dcGroupRect = dim.pixelRect(
 			ix: dcGroupX, iy: dcGroupY, dim: Geometry.dcGroupDim)
@@ -191,7 +189,6 @@ public enum Encoder {
 					scale: params.scale,
 					scaleDC: params.scaleDC,
 					xQuantMatrixScale: params.xQuantMatrixScale,
-					code: acCode,
 					quantDC: &groupDC,
 					writer: &sections[acIndex])
 
@@ -215,41 +212,68 @@ public enum Encoder {
 		}
 
 		let dcIndex = 1 + dcGroupY * dim.widthInDCGroups + dcGroupX
-		DCGroupEncoder.write(data: data, code: dcCode, writer: &sections[dcIndex])
+		DCGroupEncoder.write(data: data, writer: &sections[dcIndex])
 	}
 
 	static func encodeFrame(
 		linear: [Float], width: Int, height: Int, params: DistanceParams,
+		optimizeCodes: Bool = true,
 		writer: inout BitWriter
 	) {
 		let dim = ImageDim(width: width, height: height)
-		let dcCode = EntropyCode.staticDC
-		let acCode = EntropyCode.staticAC
+		var dcCode = EntropyCode.staticDC
+		var acCode = EntropyCode.staticAC
 
-		var sections = [BitWriter](
-			repeating: BitWriter(), count: 2 + dim.dcGroupCount + dim.groupCount)
+		// Staging defers entropy coding until the image's own statistics are
+		// known. The static tables ship in full on every file otherwise, which
+		// dominates small images.
+		let mode: SectionWriter.Mode =
+			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
+		var sections = [SectionWriter](
+			repeating: SectionWriter(mode: mode),
+			count: 2 + dim.dcGroupCount + dim.groupCount)
+		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
+		if optimizeCodes {
+			for i in acRange { sections[i] = SectionWriter(mode: .staging(acCode)) }
+		} else {
+			for i in acRange { sections[i] = SectionWriter(mode: .direct(acCode)) }
+		}
 
 		for i in 0..<dim.dcGroupCount {
 			encodeDCGroup(
 				linear: linear, dim: dim,
 				dcGroupX: i % dim.widthInDCGroups,
 				dcGroupY: i / dim.widthInDCGroups,
-				params: params, dcCode: dcCode, acCode: acCode,
-				sections: &sections)
+				params: params, sections: &sections)
 		}
 
+		if optimizeCodes {
+			let dcRange = 1..<(1 + dim.dcGroupCount)
+			dcCode = SectionOptimizer.optimize(
+				sections: &sections, range: dcRange, baseCode: dcCode)
+			acCode = SectionOptimizer.optimize(
+				sections: &sections, range: acRange, baseCode: acCode)
+		}
+
+		// The globals carry the codes, so they can only be written once the
+		// codes are final.
+		var dcGlobal = BitWriter()
 		FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			writer: &sections[0])
+			writer: &dcGlobal)
+		sections[0] = SectionWriter(prewritten: dcGlobal)
+
+		var acGlobal = BitWriter()
 		FrameAssembly.writeACGlobal(
-			groupCount: dim.groupCount, code: acCode,
-			writer: &sections[1 + dim.dcGroupCount])
+			groupCount: dim.groupCount, code: acCode, writer: &acGlobal)
+		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
 			xQuantMatrixScale: params.xQuantMatrixScale,
 			epfIterations: params.epfIterations,
 			writer: &writer)
-		FrameAssembly.combineSections(sections, writer: &writer)
+		FrameAssembly.combineSections(
+			sections.map { $0.finished() }, writer: &writer)
 	}
 
 	/// Encodes an image as a bare JPEG XL codestream.
@@ -259,7 +283,8 @@ public enum Encoder {
 	public static func encode(
 		_ image: ImageBuffer,
 		distance: Float,
-		transferFunction: TransferFunction = .sRGB
+		transferFunction: TransferFunction = .sRGB,
+		optimizeCodes: Bool = true
 	) throws -> [UInt8] {
 		let params = try DistanceParams(distance: distance)
 		let linear = linearize(image)
@@ -270,7 +295,7 @@ public enum Encoder {
 			transferFunction: transferFunction, to: &writer)
 		encodeFrame(
 			linear: linear, width: image.width, height: image.height,
-			params: params, writer: &writer)
+			params: params, optimizeCodes: optimizeCodes, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
 	}

@@ -164,13 +164,13 @@ struct SubsampledEncodingTests {
 					* subsampling.blocksDown(
 						channel: channel, fullHeightInBlocks: blocks))
 		}
-		var writer = BitWriter()
+		var writer = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.encode(
 			planes: planes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: subsampling,
 			quantField: [UInt8](repeating: 5, count: blocks * blocks),
 			scale: 0.112_075_805_664_062_5, scaleDC: 1.0, xQuantMatrixScale: 2,
-			code: .staticAC, quantDC: &quantDC, writer: &writer)
+			quantDC: &quantDC, writer: &writer)
 		return (writer.bitsWritten, quantDC)
 	}
 
@@ -202,13 +202,13 @@ struct SubsampledEncodingTests {
 					* cs.blocksDown(
 						channel: channel, fullHeightInBlocks: blocks))
 		}
-		var writer = BitWriter()
+		var writer = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.encode(
 			planes: planes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: cs,
 			quantField: [UInt8](repeating: 5, count: blocks * blocks),
 			scale: 0.112_075_805_664_062_5, scaleDC: 1.0, xQuantMatrixScale: 2,
-			code: .staticAC, quantDC: &quantDC, writer: &writer)
+			quantDC: &quantDC, writer: &writer)
 
 		for channel in 0..<3 {
 			let unwritten = quantDC[channel].filter { $0 == sentinel }.count
@@ -246,24 +246,26 @@ struct SubsampledEncodingTests {
 		let quantField = [UInt8](repeating: 5, count: blocks * blocks)
 
 		var dcA = [[Int16]](repeating: [Int16](repeating: 0, count: 64), count: 3)
-		var writerA = BitWriter()
+		var writerA = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.encode(
 			xyb: stripe, widthInBlocks: blocks, heightInBlocks: blocks,
 			quantField: quantField, scale: 0.112_075_805_664_062_5, scaleDC: 1.0,
-			xQuantMatrixScale: 2, code: .staticAC, quantDC: &dcA, writer: &writerA)
+			xQuantMatrixScale: 2, quantDC: &dcA, writer: &writerA)
 
 		var dcB = [[Int16]](repeating: [Int16](repeating: 0, count: 64), count: 3)
-		var writerB = BitWriter()
+		var writerB = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.encode(
 			planes: stripe.channelPlanes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: .none, quantField: quantField, scale: 0.112_075_805_664_062_5,
-			scaleDC: 1.0, xQuantMatrixScale: 2, code: .staticAC, quantDC: &dcB,
+			scaleDC: 1.0, xQuantMatrixScale: 2, quantDC: &dcB,
 			writer: &writerB)
 
 		#expect(writerA.bitsWritten == writerB.bitsWritten)
-		writerA.zeroPadToByte()
-		writerB.zeroPadToByte()
-		#expect(writerA.take() == writerB.take())
+		var writerABits = writerA.finished()
+		writerABits.zeroPadToByte()
+		var writerBBits = writerB.finished()
+		writerBBits.zeroPadToByte()
+		#expect(writerABits.take() == writerBBits.take())
 		#expect(dcA == dcB)
 	}
 }

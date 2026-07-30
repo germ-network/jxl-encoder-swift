@@ -49,8 +49,7 @@ public enum DCGroupEncoder {
 		width: Int,
 		height: Int,
 		context: (Int) -> UInt32,
-		code: EntropyCode,
-		writer: inout BitWriter
+		writer: inout SectionWriter
 	) {
 		for y in 0..<height {
 			for x in 0..<width {
@@ -68,14 +67,13 @@ public enum DCGroupEncoder {
 				writer.write(
 					token: Token(
 						context: context(gradientProperty),
-						value: packSigned(residual)),
-					code: code)
+						value: packSigned(residual)), )
 			}
 		}
 	}
 
 	static func writeDCTokens(
-		data: DCGroupData, code: EntropyCode, writer: inout BitWriter
+		data: DCGroupData, writer: inout SectionWriter
 	) {
 		for channel in ACTokenizer.channelOrder {
 			let plane = data.quantDC[channel]
@@ -84,13 +82,12 @@ public enum DCGroupEncoder {
 				width: data.widthInBlocks,
 				height: data.heightInBlocks,
 				context: { UInt32(DCPredictor.gradientContextLut[$0]) },
-				code: code,
 				writer: &writer)
 		}
 	}
 
 	static func writeACMetadataTokens(
-		data: DCGroupData, code: EntropyCode, writer: inout BitWriter
+		data: DCGroupData, writer: inout SectionWriter
 	) {
 		// Chroma-from-luma maps use fixed contexts rather than the gradient LUT.
 		for c in 0..<2 {
@@ -100,7 +97,6 @@ public enum DCGroupEncoder {
 				width: data.cmapWidth,
 				height: data.cmapHeight,
 				context: { _ in UInt32(2 - c) },
-				code: code,
 				writer: &writer)
 		}
 
@@ -114,7 +110,7 @@ public enum DCGroupEncoder {
 					left > 11 ? 7 : (left > 5 ? 8 : (left > 3 ? 9 : 10))
 				writer.write(
 					token: Token(context: context, value: packSigned(current)),
-					code: code)
+				)
 				left = current
 			}
 		}
@@ -132,24 +128,24 @@ public enum DCGroupEncoder {
 					left > 11 ? 3 : (left > 5 ? 4 : (left > 3 ? 5 : 6))
 				writer.write(
 					token: Token(context: context, value: packSigned(residual)),
-					code: code)
+				)
 				left = current
 			}
 		}
 
 		// Edge-preserving filter sharpness, constant across the image.
 		for _ in 0..<(data.widthInBlocks * data.heightInBlocks) {
-			writer.write(token: Token(context: 0, value: packSigned(4)), code: code)
+			writer.write(token: Token(context: 0, value: packSigned(4)))
 		}
 	}
 
 	public static func write(
-		data: DCGroupData, code: EntropyCode, writer: inout BitWriter
+		data: DCGroupData, writer: inout SectionWriter
 	) {
-		writer.write(2, 0)  // extra_dc_precision
-		writer.write(4, 3)  // global tree, default weighted predictor, no transforms
+		writer.writeRaw(2, 0)  // extra_dc_precision
+		writer.writeRaw(4, 3)  // global tree, default weighted predictor, no transforms
 
-		writeDCTokens(data: data, code: code, writer: &writer)
+		writeDCTokens(data: data, writer: &writer)
 
 		let blockCount = data.widthInBlocks * data.heightInBlocks
 		// Every block is a first block with 8x8 only, so the AC block count
@@ -157,10 +153,10 @@ public enum DCGroupEncoder {
 		let bitCount =
 			blockCount <= 1 ? 0 : (Int.bitWidth - (blockCount - 1).leadingZeroBitCount)
 		if bitCount != 0 {
-			writer.write(bitCount, UInt64(blockCount - 1))
+			writer.writeRaw(bitCount, UInt64(blockCount - 1))
 		}
-		writer.write(4, 3)  // global tree again, for the control fields
+		writer.writeRaw(4, 3)  // global tree again, for the control fields
 
-		writeACMetadataTokens(data: data, code: code, writer: &writer)
+		writeACMetadataTokens(data: data, writer: &writer)
 	}
 }

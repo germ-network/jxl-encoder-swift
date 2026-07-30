@@ -60,8 +60,7 @@ public enum ACTokenizer {
 		blockX: Int,
 		nonZeroRow: inout [UInt8],
 		nonZeroRowAbove: [UInt8]?,
-		code: EntropyCode,
-		writer: inout BitWriter
+		writer: inout SectionWriter
 	) {
 		var nonZeros = nonZeroCountExcludingDC(quantized)
 		nonZeroRow[blockX] = UInt8(nonZeros)
@@ -77,8 +76,7 @@ public enum ACTokenizer {
 			blockContext: blockContext)
 
 		writer.write(
-			token: Token(context: UInt32(nonZeroContext), value: UInt32(nonZeros)),
-			code: code)
+			token: Token(context: UInt32(nonZeroContext), value: UInt32(nonZeros)))
 
 		let base = quantized.startIndex
 		// Coefficient 0 is DC, carried by the separate DC image.
@@ -93,8 +91,7 @@ public enum ACTokenizer {
 					coveredBlocks: 1, log2CoveredBlocks: 0, previous: previous)
 			writer.write(
 				token: Token(
-					context: UInt32(context), value: packSigned(coefficient)),
-				code: code)
+					context: UInt32(context), value: packSigned(coefficient)))
 			previous = coefficient != 0 ? 1 : 0
 			nonZeros -= previous
 			k += 1

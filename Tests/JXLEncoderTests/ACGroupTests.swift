@@ -35,7 +35,7 @@ struct ACGroupTests {
 		let quantField = [UInt8](
 			repeating: Self.quant, count: dim.widthInBlocks * dim.heightInBlocks)
 
-		var writer = BitWriter()
+		var writer = SectionWriter(mode: .direct(.staticAC))
 		var quantDC = [[Int16]](
 			repeating: [Int16](
 				repeating: 0, count: dim.widthInBlocks * dim.heightInBlocks),
@@ -48,13 +48,13 @@ struct ACGroupTests {
 			scale: Self.scale,
 			scaleDC: Self.scaleDC,
 			xQuantMatrixScale: Self.xQuantMatrixScale,
-			code: .staticAC,
 			quantDC: &quantDC,
 			writer: &writer)
 
 		#expect(writer.bitsWritten == expectedBits)
-		writer.zeroPadToByte()
-		let actual = writer.take()
+		var writerBits = writer.finished()
+		writerBits.zeroPadToByte()
+		let actual = writerBits.take()
 		#expect(actual.count == expectedBytes.count)
 		let firstDifference = zip(actual, expectedBytes).enumerated()
 			.first { $0.element.0 != $0.element.1 }?.offset
@@ -78,7 +78,7 @@ struct ACGroupTests {
 		let quantField = [UInt8](
 			repeating: Self.quant, count: dim.widthInBlocks * dim.heightInBlocks)
 
-		var writer = BitWriter()
+		var writer = SectionWriter(mode: .direct(.staticAC))
 		var quantDC = [[Int16]](
 			repeating: [Int16](
 				repeating: 0, count: dim.widthInBlocks * dim.heightInBlocks),
@@ -87,7 +87,7 @@ struct ACGroupTests {
 			xyb: xyb, widthInBlocks: dim.widthInBlocks,
 			heightInBlocks: dim.heightInBlocks, quantField: quantField,
 			scale: Self.scale, scaleDC: Self.scaleDC,
-			xQuantMatrixScale: Self.xQuantMatrixScale, code: .staticAC,
+			xQuantMatrixScale: Self.xQuantMatrixScale,
 			quantDC: &quantDC, writer: &writer)
 
 		for channel in 0..<3 {

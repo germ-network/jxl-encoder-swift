@@ -18,9 +18,11 @@ struct EncoderTests {
 		try ImageHeader.write(
 			width: linear.width, height: linear.height,
 			transferFunction: .linear, to: &writer)
+		//these fixtures were produced with static entropy tables, so they gate
+		//the unoptimised path
 		Encoder.encodeFrame(
 			linear: linear.interleaved, width: linear.width, height: linear.height,
-			params: params, writer: &writer)
+			params: params, optimizeCodes: false, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
 	}

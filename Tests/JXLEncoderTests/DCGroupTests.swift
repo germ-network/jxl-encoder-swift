@@ -38,12 +38,13 @@ struct DCGroupTests {
 		// the fixture image is 32x32
 		let data = Self.makeData(widthInBlocks: 4, heightInBlocks: 4)
 
-		var writer = BitWriter()
-		DCGroupEncoder.write(data: data, code: .staticDC, writer: &writer)
+		var writer = SectionWriter(mode: .direct(.staticDC))
+		DCGroupEncoder.write(data: data, writer: &writer)
 
 		#expect(writer.bitsWritten == expectedBits)
-		writer.zeroPadToByte()
-		let actual = writer.take()
+		var writerBits = writer.finished()
+		writerBits.zeroPadToByte()
+		let actual = writerBits.take()
 		#expect(actual.count == expectedBytes.count)
 		let firstDifference = zip(actual, expectedBytes).enumerated()
 			.first { $0.element.0 != $0.element.1 }?.offset

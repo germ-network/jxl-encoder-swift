@@ -56,9 +56,8 @@ public enum ACGroupEncoder {
 		scale: Float,
 		scaleDC: Float,
 		xQuantMatrixScale: UInt32,
-		code: EntropyCode,
 		quantDC: inout [[Int16]],
-		writer: inout BitWriter
+		writer: inout SectionWriter
 	) {
 		encode(
 			planes: xyb.channelPlanes,
@@ -69,7 +68,6 @@ public enum ACGroupEncoder {
 			scale: scale,
 			scaleDC: scaleDC,
 			xQuantMatrixScale: xQuantMatrixScale,
-			code: code,
 			quantDC: &quantDC,
 			writer: &writer)
 	}
@@ -89,9 +87,8 @@ public enum ACGroupEncoder {
 		scale: Float,
 		scaleDC: Float,
 		xQuantMatrixScale: UInt32,
-		code: EntropyCode,
 		quantDC: inout [[Int16]],
-		writer: inout BitWriter
+		writer: inout SectionWriter
 	) {
 		let inverseFactor = inverseDCQuant.map { $0 * scaleDC }
 		// The X channel's quant matrix is scaled by distance-dependent steps.
@@ -201,7 +198,6 @@ public enum ACGroupEncoder {
 						blockX: sx[channel],
 						nonZeroRow: &nonZeros[channel],
 						nonZeroRowAbove: nonZerosAbove[channel],
-						code: code,
 						writer: &writer)
 				}
 			}
