@@ -23,7 +23,7 @@
 	public enum JXLEncoderAppleError: Error, Equatable {
 		case decodeFailed
 		case contextCreationFailed
-		/// Alpha is not yet carried through the encoder; flatten it instead.
+		/// Alpha preservation is deliberately not implemented; flatten instead.
 		case alphaNotSupported
 	}
 
@@ -31,7 +31,15 @@
 	public enum AlphaPolicy: Sendable {
 		/// Composite over a solid colour and encode opaque RGB.
 		case flatten(background: CGColor)
-		/// Keep alpha as a JXL extra channel. Not yet implemented in the core.
+		/// Keep alpha as a JXL extra channel.
+		///
+		/// Deliberately unimplemented. Carrying alpha means modular extra
+		/// channels — header signalling, a global declaration, and a
+		/// `ModularAC` stream appended to every AC group — and libjxl-tiny has
+		/// no alpha at all, so unlike every other stage there would be no
+		/// reference to diff against. Callers composite over a background
+		/// instead, which is what the app intends to do anyway. Throws
+		/// `alphaNotSupported` rather than silently degrading.
 		case preserve
 	}
 
