@@ -160,5 +160,12 @@ decoder and quality metric. Two traps when comparing against the reference:
 
 ## License
 
-The port follows libjxl-tiny, which is BSD-3-Clause with an additional IP
-rights grant; see that project's `LICENSE` and `PATENTS`.
+BSD-3-Clause — see [LICENSE](LICENSE), which carries both this project's
+copyright and the JPEG XL Project Authors', since the port is a derivative work
+of libjxl-tiny.
+
+[NOTICE.md](NOTICE.md) records which files are transliterated from upstream,
+which hold generated upstream tables, and which were written against published
+specifications instead. It also covers the dependency licensing and the open
+question about upstream's separate patent grant, which is **not** reproduced
+here and should not be assumed to reach this code.
