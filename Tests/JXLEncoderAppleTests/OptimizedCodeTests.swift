@@ -89,6 +89,48 @@
 			let optimized = try Self.encode(Self.image(64), optimize: true)
 			#expect(optimized.count < 1000)
 		}
+
+		static let fixtures = [
+			"hopper_411", "hopper_420_odd", "hopper_420_restart", "hopper_420_sof1",
+			"hopper_422", "hopper_444", "hopper_gray_odd",
+		]
+		static let distances: [Float] = [0.3, 0.5, 0.7, 1.0, 1.5, 2.0, 3.0]
+
+		/// Every optimised file has to decode to the same pixels as the static
+		/// path, on photographic content and across the whole distance range.
+		///
+		/// The tests above only ever encoded a synthetic gradient at d = 1.0, and
+		/// that combination happens to dodge degenerate prefix codes entirely.
+		/// Photographs hit them constantly: before the fix, 42 of these 49 cases
+		/// produced a stream ImageIO refused.
+		@Test(
+			"optimised photographs match the static path at every distance",
+			arguments: fixtures, distances)
+		func photographsDecode(fixture: String, distance: Float) throws {
+			let url = try #require(
+				Bundle.module.url(
+					forResource: fixture, withExtension: "jpg",
+					subdirectory: "Fixtures"))
+			let data = try Data(contentsOf: url)
+			let source = try #require(CGImageSourceCreateWithData(data as CFData, nil))
+			let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+
+			let samples = try JXLEncoderApple.sRGBSamples(
+				from: image,
+				alphaPolicy: .flatten(background: JXLEncoderApple.defaultBackground)
+			)
+			let buffer = try ImageBuffer(
+				width: image.width, height: image.height, samples: samples)
+			let optimized = try Encoder.encode(buffer, distance: distance)
+			let staticCoded = try Encoder.encode(
+				buffer, distance: distance, optimizeCodes: false)
+
+			let decoded = try #require(
+				Self.decode(optimized),
+				"\(fixture) at d=\(distance) produced an undecodable stream")
+			#expect(decoded == Self.decode(staticCoded))
+			#expect(optimized.count < staticCoded.count)
+		}
 	}
 
 #endif  // canImport(ImageIO)

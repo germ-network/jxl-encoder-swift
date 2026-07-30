@@ -19,10 +19,17 @@
 public struct PrefixCode: Sendable {
 	public let depths: [UInt8]
 	public let bits: [UInt16]
+	/// True when only one symbol is reachable. The tree builder gives that
+	/// symbol depth 1 as a placeholder, but a code over a single symbol carries
+	/// no information and the decoder reads it in zero bits, so the token writer
+	/// must emit nothing. The depths are kept as built because serialization
+	/// derives both the symbol and the alphabet size from them.
+	public let isDegenerate: Bool
 
 	public init(depths: [UInt8], bits: [UInt16]) {
 		self.depths = depths
 		self.bits = bits
+		self.isDegenerate = depths.reduce(0) { $0 + ($1 == 0 ? 0 : 1) } == 1
 	}
 }
 

@@ -50,9 +50,9 @@ extension BitWriter {
 	public mutating func write(token: Token, code: EntropyCode) {
 		let (symbol, bitCount, bits) = UintCoder.encode(token.value)
 		let prefix = code.prefixCodes[Int(code.contextMap[Int(token.context)])]
-		let depth = prefix.depths[Int(symbol)]
-		var data = UInt64(prefix.bits[Int(symbol)])
+		let depth = prefix.isDegenerate ? 0 : Int(prefix.depths[Int(symbol)])
+		var data = prefix.isDegenerate ? 0 : UInt64(prefix.bits[Int(symbol)])
 		data |= UInt64(bits) << UInt64(depth)
-		write(Int(depth) + Int(bitCount), data)
+		write(depth + Int(bitCount), data)
 	}
 }
