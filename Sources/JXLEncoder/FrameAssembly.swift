@@ -11,17 +11,39 @@
 //
 
 enum FrameAssembly {
+	/// How the frame's colour is coded, which decides three things in the frame
+	/// header: whether a colour-transform bit appears at all, whether chroma
+	/// subsampling follows it, and whether the quant-matrix scales are written.
+	public enum ColorMode: Equatable, Sendable {
+		/// XYB, the pixel path. The image header's `xyb_encoded` bit already says
+		/// so, so the frame header carries no colour-transform field.
+		case xyb(xQuantMatrixScale: UInt32)
+		/// YCbCr, carrying a JPEG's own coefficients. The scales are XYB-only and
+		/// must be left out, not written as their defaults.
+		case ycbcr(subsampling: ChromaSubsampling)
+	}
+
 	static func writeFrameHeader(
-		xQuantMatrixScale: UInt32, epfIterations: UInt32, writer: inout BitWriter
+		colorMode: ColorMode, epfIterations: UInt32, writer: inout BitWriter
 	) {
 		writer.write(1, 0)  // not all default
 		writer.write(2, 0)  // regular frame
 		writer.write(1, 0)  // vardct
 		writer.write(2, 2)  // flags selector bits (17 .. 272)
 		writer.write(8, 111)  // skip adaptive dc flag (128)
+
+		// Only present when the image header said `xyb_encoded` is false: the
+		// bit chooses YCbCr over none.
+		if case .ycbcr(let subsampling) = colorMode {
+			writer.write(1, 1)  // alternate: YCbCr
+			subsampling.write(to: &writer)
+		}
+
 		writer.write(2, 0)  // no upsampling
-		writer.write(3, UInt64(xQuantMatrixScale))
-		writer.write(3, 2)  // b_qm_scale
+		if case .xyb(let xQuantMatrixScale) = colorMode {
+			writer.write(3, UInt64(xQuantMatrixScale))
+			writer.write(3, 2)  // b_qm_scale
+		}
 		writer.write(2, 0)  // one pass
 		writer.write(1, 0)  // no custom frame size or origin
 		writer.write(2, 0)  // replace blend mode

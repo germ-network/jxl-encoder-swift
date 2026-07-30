@@ -35,6 +35,10 @@ public enum ImageHeader {
 		width: Int,
 		height: Int,
 		transferFunction: TransferFunction,
+		/// False when the frame carries a JPEG's own YCbCr coefficients rather
+		/// than XYB. It also decides whether the frame header carries a
+		/// colour-transform field at all, so the two must agree.
+		xybEncoded: Bool = true,
 		to writer: inout BitWriter
 	) throws {
 		guard width > 0, height > 0 else { throw EncoderError.emptyImage }
@@ -57,7 +61,7 @@ public enum ImageHeader {
 		writer.write(4, 7)  // 8 exponent bits
 		writer.write(1, 0)  // modular 16 bit sufficient
 		writer.write(2, 0)  // no extra channels
-		writer.write(1, 1)  // xyb encoded
+		writer.write(1, xybEncoded ? 1 : 0)  // xyb encoded
 		writer.write(1, 0)  // not all default color encoding
 		writer.write(1, 0)  // no icc
 		writer.write(2, 0)  // RGB color space

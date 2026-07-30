@@ -281,7 +281,7 @@ public enum Encoder {
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
-			xQuantMatrixScale: params.xQuantMatrixScale,
+			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
 			epfIterations: params.epfIterations,
 			writer: &writer)
 		FrameAssembly.combineSections(
