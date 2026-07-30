@@ -36,7 +36,7 @@ index fa83f32..2d84322 100644
  // at most 256x256 entropy coded tokens.
  static constexpr size_t kMaxBitsPerToken = 24;
 diff --git a/encoder/enc_frame.cc b/encoder/enc_frame.cc
-index 9da510a..0acce4b 100644
+index 9da510a..6a6f327 100644
 --- a/encoder/enc_frame.cc
 +++ b/encoder/enc_frame.cc
 @@ -594,6 +594,7 @@ void WriteTOC(const std::vector<BitWriter>& sections, BitWriter* output) {
@@ -47,7 +47,7 @@ index 9da510a..0acce4b 100644
  void CopyAndPadImage(const Image3F& from, const Rect& r, Image3F* to) {
    size_t xsize_padded = DivCeil(r.xsize(), kBlockDim) * kBlockDim;
    size_t ysize_padded = DivCeil(r.ysize(), kBlockDim) * kBlockDim;
-@@ -859,4 +860,19 @@ Status EncodeFrame(const float distance, const Image3F& linear,
+@@ -859,4 +860,89 @@ Status EncodeFrame(const float distance, const Image3F& linear,
    return true;
  }
  
@@ -66,22 +66,94 @@ index 9da510a..0acce4b 100644
 +  WriteContextTree(num_dc_groups, writer);
 +}
 +
++// Runs one DC group and hands back its per-block state, so the port can be
++// compared on data rather than only on serialized bytes.
++bool ProcessDCGroupForTest(const Image3F& linear, float distance, size_t dc_gx,
++                           size_t dc_gy, std::vector<int16_t>* dc_out,
++                           std::vector<uint8_t>* qf_out, size_t* xsize_blocks,
++                           size_t* ysize_blocks) {
++  ImageDim dim(linear.xsize(), linear.ysize());
++  DistanceParams distp = ComputeDistanceParams(distance);
++  DequantMatrices matrices;
++  EntropyCode dc_code(kDCContextMap, kNumDCContexts, kDCPrefixCodes,
++                      kNumDCPrefixCodes);
++  EntropyCode ac_code(kACContextMap, kNumACContexts, kACPrefixCodes,
++                      kNumACPrefixCodes);
++  std::vector<BitWriter> sections(2 + dim.num_dc_groups + dim.num_groups);
++  ThreadPool pool;
++
++  Rect dc_group_rect = dim.PixelRect(dc_gx, dc_gy, kDCGroupDim);
++  ImageDim dc_group_dim(dc_group_rect.xsize(), dc_group_rect.ysize());
++  *xsize_blocks = dc_group_dim.xsize_blocks;
++  *ysize_blocks = dc_group_dim.ysize_blocks;
++
++  // Mirror ProcessDCGroup but keep dc_data so it can be inspected.
++  DCGroupData dc_data(dc_group_dim.xsize_blocks, dc_group_dim.ysize_blocks);
++  Image3F stripe(kGroupDim, kTileDim);
++  GroupProcessorMemory gmem;
++  Image3B num_nzeros(kGroupDimInBlocks, kGroupDimInBlocks);
++  TileProcessorMemory tmem;
++  for (size_t gix = 0; gix < dc_group_dim.num_groups; ++gix) {
++    size_t gx = gix % dc_group_dim.xsize_groups;
++    size_t gy = gix / dc_group_dim.xsize_groups;
++    size_t image_gx = dc_gx * kBlockDim + gx;
++    size_t image_gy = dc_gy * kBlockDim + gy;
++    const size_t ac_group_idx =
++        2 + dim.num_dc_groups + image_gy * dim.xsize_groups + image_gx;
++    Rect group_rect = dim.PixelRect(image_gx, image_gy, kGroupDim);
++    ImageDim group_dim(group_rect.xsize(), group_rect.ysize());
++    Rect group_brect = dc_group_dim.BlockRect(gx, gy, kGroupDimInBlocks);
++    for (size_t ty = 0; ty < group_dim.ysize_tiles; ++ty) {
++      size_t dc_ty = gy * kGroupDimInTiles + ty;
++      size_t image_ty = image_gy * kGroupDimInTiles + ty;
++      Rect stripe_rect = dim.PixelRect(image_gx, image_ty, kGroupDim, kTileDim);
++      ImageDim stripe_dim(stripe_rect.xsize(), stripe_rect.ysize());
++      Rect stripe_brect = dc_group_dim.BlockRect(gx, dc_ty, kGroupDimInBlocks,
++                                                kTileDimInBlocks);
++      Rect stripe_trect =
++          dc_group_dim.TileRect(gx, dc_ty, kGroupDimInTiles, 1);
++      CopyAndPadImage(linear, stripe_rect, &stripe);
++      ToXYB(&stripe);
++      for (size_t tx = 0; tx < group_dim.xsize_tiles; ++tx) {
++        Rect tile_brect = stripe_dim.BlockRect(tx, 0, kTileDimInBlocks);
++        ProcessTile(stripe, tile_brect, stripe_brect, stripe_trect, distp,
++                    matrices, &dc_data, &tmem);
++      }
++      WriteACGroup(stripe, stripe_brect, matrices, distp.scale, distp.scale_dc,
++                   distp.x_qm_scale, &dc_data, ac_code, &num_nzeros, &gmem,
++                   &sections[ac_group_idx]);
++    }
++  }
++  dc_out->clear();
++  for (size_t c = 0; c < 3; ++c)
++    for (size_t y = 0; y < dc_group_dim.ysize_blocks; ++y)
++      for (size_t x = 0; x < dc_group_dim.xsize_blocks; ++x)
++        dc_out->push_back(dc_data.quant_dc.PlaneRow(c, y)[x]);
++  qf_out->clear();
++  for (size_t y = 0; y < dc_group_dim.ysize_blocks; ++y)
++    for (size_t x = 0; x < dc_group_dim.xsize_blocks; ++x)
++      qf_out->push_back(dc_data.raw_quant_field.Row(y)[x]);
++  return true;
++}
++
  }  // namespace jxl
 diff --git a/encoder/enc_frame.h b/encoder/enc_frame.h
-index ee96e62..3227aeb 100644
+index ee96e62..25b4093 100644
 --- a/encoder/enc_frame.h
 +++ b/encoder/enc_frame.h
-@@ -9,7 +9,9 @@
+@@ -9,7 +9,11 @@
  
  #include "encoder/base/data_parallel.h"
  #include "encoder/base/status.h"
++#include <vector>
++
 +#include "encoder/dc_group_data.h"
  #include "encoder/enc_bit_writer.h"
 +#include "encoder/entropy_code.h"
  #include "encoder/image.h"
  
  namespace jxl {
-@@ -19,6 +21,14 @@ namespace jxl {
+@@ -19,6 +23,18 @@ namespace jxl {
  Status EncodeFrame(const float distance, const Image3F& linear,
                     ThreadPool* pool, BitWriter* writer);
  
@@ -92,6 +164,10 @@ index ee96e62..3227aeb 100644
 +void WriteDCGroupForTest(const DCGroupData& data, const EntropyCode& dc_code,
 +                         BitWriter* writer);
 +void WriteContextTreeForTest(size_t num_dc_groups, BitWriter* writer);
++bool ProcessDCGroupForTest(const Image3F& linear, float distance, size_t dc_gx,
++                           size_t dc_gy, std::vector<int16_t>* dc_out,
++                           std::vector<uint8_t>* qf_out, size_t* xsize_blocks,
++                           size_t* ysize_blocks);
 +
  }  // namespace jxl
  

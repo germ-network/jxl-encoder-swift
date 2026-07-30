@@ -22,5 +22,8 @@ let start = Date()
 let bytes = try! JXLEncoder.Encoder.encode(image, distance: 1.0)
 let elapsed = Date().timeIntervalSince(start)
 let mp = Double(w * h) / 1_000_000
-print(String(format: "%5.2f MP  %7.3f s  %6.2f MP/s  %8d bytes", mp, elapsed, mp / elapsed, bytes.count))
+print(
+	String(
+		format: "%5.2f MP  %7.3f s  %6.2f MP/s  %8d bytes", mp, elapsed, mp / elapsed,
+		bytes.count))
 FileHandle.standardError.write("done\n".data(using: .utf8)!)

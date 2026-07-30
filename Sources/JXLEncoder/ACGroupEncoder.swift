@@ -23,6 +23,25 @@ public enum ACGroupEncoder {
 	/// `kInvDCQuant[2] * kDCQuant[1]` is 0.5.
 	static let dcCflFactor: [Float] = [0, 0, inverseDCQuant[2] * dcQuant[1]]
 
+	/// Quantizes one DC coefficient.
+	///
+	/// The multiply-subtract is written as an explicit fused multiply-add
+	/// because clang contracts `a * b - c * d` into `fma(a, b, -(c * d))` by
+	/// default while Swift never contracts. Rounding both products separately
+	/// differs in the last bit, which is enough to flip a value sitting on a
+	/// rounding boundary — it cost exactly one block in one 44 800-block DC
+	/// group before this was matched.
+	///
+	/// Rounding is ties-away-from-zero (`std::round`), unlike the ties-to-even
+	/// used when quantizing AC coefficients.
+	static func quantizedDC(
+		coefficient: Float, inverseFactor: Float, yDC: Int16, cflFactor: Float
+	) -> Int16 {
+		let correction = Float(yDC) * cflFactor
+		let value = (-correction).addingProduct(coefficient, inverseFactor)
+		return Int16(value.rounded(.toNearestOrAwayFromZero))
+	}
+
 	/// Encodes one group's AC coefficients and fills in its DC image.
 	///
 	/// `xyb` is the padded XYB image for the group; `quantField` holds one value
@@ -94,12 +113,17 @@ public enum ACGroupEncoder {
 
 					// Taken from the decorrelated coefficients, then B has Y's
 					// DC subtracted on top.
-					let dc =
-						coefficients[0] * inverseFactor[channel]
-						- Float(quantDC[1][blockIndex])
-						* dcCflFactor[channel]
-					quantDC[channel][blockIndex] = Int16(
-						dc.rounded(.toNearestOrAwayFromZero))
+					//
+					// Written as an explicit fused multiply-add because clang
+					// contracts `a * b - c * d` into `fma(a, b, -(c * d))` by
+					// default, while Swift never contracts. Computing both
+					// products separately differs in the last bit, which is
+					// enough to flip a value sitting on a rounding boundary.
+					quantDC[channel][blockIndex] = quantizedDC(
+						coefficient: coefficients[0],
+						inverseFactor: inverseFactor[channel],
+						yDC: quantDC[1][blockIndex],
+						cflFactor: dcCflFactor[channel])
 				}
 
 				for channel in ACTokenizer.channelOrder {

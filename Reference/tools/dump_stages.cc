@@ -334,6 +334,28 @@ int main(int argc, char** argv) {
     fprintf(stderr, "dcgroup: %zux%zu -> %s (%zu bits, %zu bytes)\n", xsize,
             ysize, argv[3], bits, span.size());
     return 0;
+  } else if (stage == "dcdata") {
+    // Per-block state of one DC group, so the port can be diffed on data
+    // instead of only on serialized bytes. Fourth argument selects the group.
+    size_t dgx = argc > 4 ? atoi(argv[4]) : 0;
+    size_t dgy = argc > 5 ? atoi(argv[5]) : 0;
+    std::vector<int16_t> dc;
+    std::vector<uint8_t> qf;
+    size_t xb = 0, yb = 0;
+    if (!jxl::ProcessDCGroupForTest(image, 1.0f, dgx, dgy, &dc, &qf, &xb, &yb))
+      return 1;
+    planes.assign(4, {});
+    for (size_t c = 0; c < 3; ++c) {
+      planes[c].resize(xb * yb);
+      for (size_t i = 0; i < xb * yb; ++i)
+        planes[c][i] = static_cast<float>(dc[c * xb * yb + i]);
+    }
+    planes[3].resize(xb * yb);
+    for (size_t i = 0; i < xb * yb; ++i) planes[3][i] = static_cast<float>(qf[i]);
+    if (!WritePlanes(argv[3], xb, yb, planes)) return 1;
+    fprintf(stderr, "dcdata: group(%zu,%zu) %zux%zu blocks -> %s\n", dgx, dgy,
+            xb, yb, argv[3]);
+    return 0;
   } else if (stage == "quant") {
     // Quantized AC coefficients at a fixed quant/scale, so the quantizer can be
     // diffed independently of the adaptive quant field. Values chosen to
