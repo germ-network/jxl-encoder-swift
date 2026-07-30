@@ -31,6 +31,10 @@ let package = Package(
 			resources: [.copy("Fixtures")]
 		),
 		.executableTarget(name: "jxlbench", dependencies: ["JXLEncoder"]),
-		.testTarget(name: "JXLEncoderAppleTests", dependencies: ["JXLEncoderApple"]),
+		.testTarget(
+			name: "JXLEncoderAppleTests",
+			dependencies: ["JXLEncoder", "JXLEncoderApple"],
+			resources: [.copy("Fixtures")]
+		),
 	]
 )
