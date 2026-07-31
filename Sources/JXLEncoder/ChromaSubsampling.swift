@@ -82,6 +82,16 @@ public struct ChromaSubsampling: Equatable, Sendable {
 		blockY >> verticalShift(channel)
 	}
 
+	/// Size of this channel's plane in the DC modular stream.
+	///
+	/// The decoder shrinks each channel with `ch.w >>= HShift(c)` — a shift, so
+	/// it rounds *down* where `blocksAcross` rounds up. The two are not
+	/// interchangeable: an odd block count makes them differ by one, and the DC
+	/// stream has to match what the decoder allocates.
+	public func dcPlaneSize(channel: Int, blocks: Int, vertical: Bool) -> Int {
+		blocks >> (vertical ? verticalShift(channel) : horizontalShift(channel))
+	}
+
 	/// Blocks this channel spans given the full-resolution block count.
 	public func blocksAcross(channel: Int, fullWidthInBlocks: Int) -> Int {
 		Geometry.divCeil(fullWidthInBlocks, 1 << horizontalShift(channel))

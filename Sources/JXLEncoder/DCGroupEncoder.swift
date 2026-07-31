@@ -13,10 +13,16 @@
 
 /// Per-block state a DC group encodes alongside the DC image.
 public struct DCGroupData: Sendable {
+	/// One plane per channel, each at its own subsampled size.
 	public var quantDC: [[Int16]]
 	public var rawQuantField: [UInt8]
 	public let widthInBlocks: Int
 	public let heightInBlocks: Int
+	public let subsampling: ChromaSubsampling
+	/// Per-channel plane dimensions, which differ from the block grid whenever
+	/// chroma is subsampled.
+	public let planeWidths: [Int]
+	public let planeHeights: [Int]
 	/// Chroma-from-luma maps, one entry per 64-pixel colour tile. Dropped from
 	/// this port's scope, so they stay zero, but they are still transmitted.
 	public var ytoxMap: [Int8]
@@ -24,12 +30,24 @@ public struct DCGroupData: Sendable {
 	public let cmapWidth: Int
 	public let cmapHeight: Int
 
-	public init(widthInBlocks: Int, heightInBlocks: Int) {
+	public init(
+		widthInBlocks: Int, heightInBlocks: Int,
+		subsampling: ChromaSubsampling = .none
+	) {
 		self.widthInBlocks = widthInBlocks
 		self.heightInBlocks = heightInBlocks
-		quantDC = Array(
-			repeating: [Int16](repeating: 0, count: widthInBlocks * heightInBlocks),
-			count: 3)
+		self.subsampling = subsampling
+		let widths = (0..<3).map {
+			subsampling.dcPlaneSize(channel: $0, blocks: widthInBlocks, vertical: false)
+		}
+		let heights = (0..<3).map {
+			subsampling.dcPlaneSize(channel: $0, blocks: heightInBlocks, vertical: true)
+		}
+		planeWidths = widths
+		planeHeights = heights
+		quantDC = (0..<3).map {
+			[Int16](repeating: 0, count: widths[$0] * heights[$0])
+		}
 		rawQuantField = [UInt8](repeating: 1, count: widthInBlocks * heightInBlocks)
 		cmapWidth = Geometry.divCeil(widthInBlocks * Geometry.blockDim, 64)
 		cmapHeight = Geometry.divCeil(heightInBlocks * Geometry.blockDim, 64)
@@ -75,12 +93,15 @@ public enum DCGroupEncoder {
 	static func writeDCTokens(
 		data: DCGroupData, writer: inout SectionWriter
 	) {
+		// Channel order is 1, 0, 2, which is also modular channel order 0, 1, 2 —
+		// the DC stream swaps the first two, matching `c < 2 ? c ^ 1 : c`.
 		for channel in ACTokenizer.channelOrder {
 			let plane = data.quantDC[channel]
+			let width = data.planeWidths[channel]
 			writePlane(
-				values: { x, y in Int32(plane[y * data.widthInBlocks + x]) },
-				width: data.widthInBlocks,
-				height: data.heightInBlocks,
+				values: { x, y in Int32(plane[y * width + x]) },
+				width: width,
+				height: data.planeHeights[channel],
 				context: { UInt32(DCPredictor.gradientContextLut[$0]) },
 				writer: &writer)
 		}

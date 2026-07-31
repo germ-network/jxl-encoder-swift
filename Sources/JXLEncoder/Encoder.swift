@@ -363,7 +363,8 @@ extension Encoder {
 			let groupDim = ImageDim(width: rect.width, height: rect.height)
 			return DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
-				heightInBlocks: groupDim.heightInBlocks)
+				heightInBlocks: groupDim.heightInBlocks,
+				subsampling: transcode.subsampling)
 		}
 
 		for gy in 0..<dim.heightInGroups {

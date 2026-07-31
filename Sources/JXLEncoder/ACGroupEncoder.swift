@@ -232,8 +232,19 @@ extension ACGroupEncoder {
 		writer: inout SectionWriter
 	) {
 		let subsampling = transcode.subsampling
+		// Nonzero-neighbour bookkeeping runs over the coded block grid, which
+		// rounds up; the DC planes use the decoder's floor. They are separate
+		// numbers and mixing them misplaces DC on an odd block count.
 		let channelWidths = (0..<3).map {
 			subsampling.blocksAcross(channel: $0, fullWidthInBlocks: widthInBlocks)
+		}
+		let dcWidths = (0..<3).map {
+			subsampling.dcPlaneSize(
+				channel: $0, blocks: widthInBlocks, vertical: false)
+		}
+		let dcHeights = (0..<3).map {
+			subsampling.dcPlaneSize(
+				channel: $0, blocks: heightInBlocks, vertical: true)
 		}
 		var nonZeros: [[UInt8]] = (0..<3).map {
 			[UInt8](repeating: 0, count: channelWidths[$0])
