@@ -151,6 +151,24 @@
 			#expect(viaEncode == direct)
 		}
 
+		/// The concurrent entry point must agree with the serial one byte for
+		/// byte, on both the pixel path and the recompression path it shares.
+		@Test(
+			"concurrent and serial entry points agree",
+			arguments: ["hopper_444", "hopper_411"])
+		func concurrentMatchesSerial(name: String) async throws {
+			let source = try Self.fixture(name)
+			#expect(
+				try await JXLEncoderApple.encodeConcurrently(data: source)
+					== (try JXLEncoderApple.encode(data: source)))
+			// And through the pixel path, which a size cap forces.
+			#expect(
+				try await JXLEncoderApple.encodeConcurrently(
+					data: source, maxPixelSize: 96)
+					== (try JXLEncoderApple.encode(
+						data: source, maxPixelSize: 96)))
+		}
+
 		/// Recompression never materialises pixels, so it is not bound by the
 		/// decode budget — a photograph too large for the pixel path can still
 		/// take this one.

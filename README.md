@@ -128,8 +128,21 @@ allocation are present even at libjxl's cheapest effort — and the rest is
 search effort. Gaborish and EPF are not the cause; disabling them in libjxl
 costs under one ssimulacra2 point.
 
-On Apple silicon the encoder runs at ~10 MP/s scalar and single-threaded, and
-adds ~336 KB to a stripped iOS binary.
+On Apple silicon the encoder runs at ~10 MP/s single-threaded and adds ~336 KB
+to a stripped iOS binary. `encodeConcurrently` splits the AC groups across a
+task group for byte-identical output at roughly twice the speed:
+
+| size | serial | concurrent |
+|---|---|---|
+| 600×600 | 0.041 s | 0.017 s |
+| 12 MP | 1.34 s | 0.67 s |
+| 48 MP | 5.37 s | 2.76 s |
+
+Twice, not fourteen times, on a fourteen-core machine. The AC groups are 92% of
+the work, so Amdahl puts the ceiling near 7× — the shortfall is in the group
+work itself rather than the serial remainder, most likely allocator contention,
+since every group and every stripe within it allocates. Worth revisiting if
+encode latency ever matters more than it does now.
 
 ### Known limits
 

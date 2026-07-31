@@ -13,15 +13,15 @@
 
 /// One entry in a staged section: either a token to be entropy coded once the
 /// code is known, or bits that bypass entropy coding.
-enum StagedRecord {
+enum StagedRecord: Sendable {
 	/// `context` is already mapped through the base code's context map, so it
 	/// indexes a prefix code rather than the full context space.
 	case token(mappedContext: UInt8, value: UInt32)
 	case rawBits(count: Int, value: UInt64)
 }
 
-public struct SectionWriter {
-	public enum Mode {
+public struct SectionWriter: Sendable {
+	public enum Mode: Sendable {
 		/// Emit immediately with a code fixed in advance.
 		case direct(EntropyCode)
 		/// Record, so a code can be built from the actual statistics. The

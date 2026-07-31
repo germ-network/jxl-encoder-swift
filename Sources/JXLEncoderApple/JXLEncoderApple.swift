@@ -195,6 +195,20 @@
 				return recompressed
 			}
 
+			let image = try decodedImage(
+				data: data, maxPixelSize: maxPixelSize,
+				maxSourceBytes: maxSourceBytes)
+			return try encode(
+				image: image, distance: distance, alphaPolicy: alphaPolicy)
+		}
+
+		/// Decodes for either entry point, budget check included.
+		///
+		/// Both go through the thumbnail API even at full size, because it applies
+		/// the EXIF orientation and the plain image API does not.
+		static func decodedImage(
+			data: Data, maxPixelSize: Int?, maxSourceBytes: Int
+		) throws -> CGImage {
 			guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
 				throw JXLEncoderAppleError.decodeFailed
 			}
@@ -213,8 +227,37 @@
 			else {
 				throw JXLEncoderAppleError.decodeFailed
 			}
-			return try encode(
-				image: image, distance: distance, alphaPolicy: alphaPolicy)
+			return image
+		}
+
+		/// As `encode(data:…)`, with the AC groups computed concurrently.
+		///
+		/// Byte-identical to the serial path — the groups are independent by
+		/// construction — and worth about twice the speed on a full-size
+		/// photograph. Below 256 px the image is a single group and this is a
+		/// wash, so a thumbnail may as well use the serial entry point.
+		///
+		/// A JPEG still takes the recompression path, which is serial: it does no
+		/// per-pixel work worth splitting.
+		public static func encodeConcurrently(
+			data: Data,
+			distance: Float = 1.0,
+			maxPixelSize: Int? = nil,
+			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground),
+			maxSourceBytes: Int = defaultMaxSourceBytes
+		) async throws -> Data {
+			if maxPixelSize == nil, let recompressed = recompressedJPEG(data) {
+				return recompressed
+			}
+			let image = try decodedImage(
+				data: data, maxPixelSize: maxPixelSize,
+				maxSourceBytes: maxSourceBytes)
+			let samples = try sRGBSamples(from: image, alphaPolicy: alphaPolicy)
+			let buffer = try ImageBuffer(
+				width: image.width, height: image.height, samples: samples,
+				channels: 3)
+			return Data(
+				try await Encoder.encodeConcurrently(buffer, distance: distance))
 		}
 
 		/// Re-codes a JPEG from its own quantized coefficients, or returns nil if

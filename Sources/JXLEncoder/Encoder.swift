@@ -57,174 +57,202 @@ public enum Encoder {
 		return linear
 	}
 
-	/// Encodes one DC group: every AC group inside it, then the DC group itself.
-	static func encodeDCGroup(
+	/// One AC group's output: its own section, plus the per-block state the DC
+	/// group it belongs to has to collect.
+	struct ACGroupOutput: Sendable {
+		let groupX: Int
+		let groupY: Int
+		let widthInBlocks: Int
+		let heightInBlocks: Int
+		let section: SectionWriter
+		let quantDC: [[Int16]]
+		let quantField: [UInt8]
+	}
+
+	/// Computes one AC group: colour transform, adaptive quant, forward DCT,
+	/// quantization and tokenization.
+	///
+	/// This is where nearly all the per-pixel cost sits, and it reads nothing but
+	/// `linear` and the geometry — groups never see each other. Separating it
+	/// from assembly is what lets them run concurrently.
+	static func encodeACGroup(
 		linear: [Float],
 		dim: ImageDim,
-		dcGroupX: Int,
-		dcGroupY: Int,
+		groupX imageGX: Int,
+		groupY imageGY: Int,
 		params: DistanceParams,
-		sections: inout [SectionWriter]
-	) {
-		let dcGroupRect = dim.pixelRect(
-			ix: dcGroupX, iy: dcGroupY, dim: Geometry.dcGroupDim)
-		let dcGroupDim = ImageDim(width: dcGroupRect.width, height: dcGroupRect.height)
+		mode: SectionWriter.Mode
+	) -> ACGroupOutput {
+		var writer = SectionWriter(mode: mode)
 
-		var data = DCGroupData(
-			widthInBlocks: dcGroupDim.widthInBlocks,
-			heightInBlocks: dcGroupDim.heightInBlocks)
+		let groupRect = dim.pixelRect(
+			ix: imageGX, iy: imageGY, dim: Geometry.groupDim)
+		let groupDim = ImageDim(
+			width: groupRect.width, height: groupRect.height)
 
-		for gy in 0..<dcGroupDim.heightInGroups {
-			for gx in 0..<dcGroupDim.widthInGroups {
-				// A DC group spans kBlockDim AC groups on each axis.
-				let imageGX = dcGroupX * Geometry.blockDim + gx
-				let imageGY = dcGroupY * Geometry.blockDim + gy
-				let acIndex =
-					2 + dim.dcGroupCount + imageGY * dim.widthInGroups + imageGX
+		// The quant field is computed stripe by stripe over the group.
+		var quantField = [UInt8](
+			repeating: 1,
+			count: groupDim.widthInBlocks * groupDim.heightInBlocks)
+		var xybPlanes = [[Float]](
+			repeating: [Float](
+				repeating: 0,
+				count: groupDim.widthInBlocks * Geometry.blockDim
+					* groupDim.heightInBlocks
+					* Geometry.blockDim),
+			count: 3)
+		let paddedWidth = groupDim.widthInBlocks * Geometry.blockDim
 
-				let groupRect = dim.pixelRect(
-					ix: imageGX, iy: imageGY, dim: Geometry.groupDim)
-				let groupDim = ImageDim(
-					width: groupRect.width, height: groupRect.height)
+		for ty in 0..<groupDim.heightInTiles {
+			let stripeRect = Rect(
+				x0: groupRect.x0,
+				y0: groupRect.y0 + ty * Geometry.tileDim,
+				maxWidth: Geometry.groupDim,
+				maxHeight: Geometry.tileDim,
+				xEnd: dim.width, yEnd: dim.height)
+			let padded = PlaneBuffer.copyAndPad(
+				source: linear, sourceWidth: dim.width,
+				rect: stripeRect)
+			let xyb = AdaptiveQuantPipeline.toXYB(padded)
 
-				// The quant field is computed stripe by stripe over the group.
-				var quantField = [UInt8](
-					repeating: 1,
-					count: groupDim.widthInBlocks * groupDim.heightInBlocks)
-				var xybPlanes = [[Float]](
-					repeating: [Float](
-						repeating: 0,
-						count: groupDim.widthInBlocks * Geometry.blockDim
-							* groupDim.heightInBlocks
-							* Geometry.blockDim),
-					count: 3)
-				let paddedWidth = groupDim.widthInBlocks * Geometry.blockDim
-
-				for ty in 0..<groupDim.heightInTiles {
-					let stripeRect = Rect(
-						x0: groupRect.x0,
-						y0: groupRect.y0 + ty * Geometry.tileDim,
-						maxWidth: Geometry.groupDim,
-						maxHeight: Geometry.tileDim,
-						xEnd: dim.width, yEnd: dim.height)
-					let padded = PlaneBuffer.copyAndPad(
-						source: linear, sourceWidth: dim.width,
-						rect: stripeRect)
-					let xyb = AdaptiveQuantPipeline.toXYB(padded)
-
-					// Keep the group's XYB so the AC pass sees the same values.
-					let rowOffset =
-						ty * Geometry.tileDimInBlocks * Geometry.blockDim
-					for c in 0..<3 {
-						for y in 0..<padded.height {
-							let destRow = (rowOffset + y) * paddedWidth
-							guard
-								destRow + padded.width
-									<= xybPlanes[c].count
-							else {
-								continue
-							}
-							for x in 0..<padded.width {
-								xybPlanes[c][destRow + x] =
-									xyb.planes[c][
-										y * padded.width + x
-									]
-							}
-						}
+			// Keep the group's XYB so the AC pass sees the same values.
+			let rowOffset =
+				ty * Geometry.tileDimInBlocks * Geometry.blockDim
+			for c in 0..<3 {
+				for y in 0..<padded.height {
+					let destRow = (rowOffset + y) * paddedWidth
+					guard
+						destRow + padded.width
+							<= xybPlanes[c].count
+					else {
+						continue
 					}
-
-					let tilesAcross = Geometry.divCeil(
-						padded.width, Geometry.tileDim)
-					for tx in 0..<tilesAcross {
-						let tileRect = Rect(
-							x0: tx * Geometry.tileDimInBlocks, y0: 0,
-							maxWidth: Geometry.tileDimInBlocks,
-							maxHeight: Geometry.tileDimInBlocks,
-							xEnd: padded.width / Geometry.blockDim,
-							yEnd: padded.height / Geometry.blockDim)
-						let aqMap = AdaptiveQuant.computeTile(
-							stripe: xyb, rect: tileRect,
-							distance: params.distance)
-						let raw = AdaptiveQuant.rawQuantField(
-							aqMap: aqMap,
-							inverseScale: params.inverseScale)
-						for y in 0..<tileRect.height {
-							let by = ty * Geometry.tileDimInBlocks + y
-							guard by < groupDim.heightInBlocks else {
-								continue
-							}
-							for x in 0..<tileRect.width {
-								let bx = tileRect.x0 + x
-								guard bx < groupDim.widthInBlocks
-								else { continue }
-								quantField[
-									by * groupDim.widthInBlocks
-										+ bx] =
-									raw[y * tileRect.width + x]
-							}
-						}
+					for x in 0..<padded.width {
+						xybPlanes[c][destRow + x] =
+							xyb.planes[c][
+								y * padded.width + x
+							]
 					}
 				}
+			}
 
-				// Record the quant field into the DC group's own grid.
-				let blockX0 = gx * Geometry.groupDimInBlocks
-				let blockY0 = gy * Geometry.groupDimInBlocks
-				for by in 0..<groupDim.heightInBlocks {
-					for bx in 0..<groupDim.widthInBlocks {
-						let target =
-							(blockY0 + by) * data.widthInBlocks
-							+ blockX0 + bx
-						guard target < data.rawQuantField.count else {
-							continue
-						}
-						data.rawQuantField[target] =
-							quantField[by * groupDim.widthInBlocks + bx]
+			let tilesAcross = Geometry.divCeil(
+				padded.width, Geometry.tileDim)
+			for tx in 0..<tilesAcross {
+				let tileRect = Rect(
+					x0: tx * Geometry.tileDimInBlocks, y0: 0,
+					maxWidth: Geometry.tileDimInBlocks,
+					maxHeight: Geometry.tileDimInBlocks,
+					xEnd: padded.width / Geometry.blockDim,
+					yEnd: padded.height / Geometry.blockDim)
+				let aqMap = AdaptiveQuant.computeTile(
+					stripe: xyb, rect: tileRect,
+					distance: params.distance)
+				let raw = AdaptiveQuant.rawQuantField(
+					aqMap: aqMap,
+					inverseScale: params.inverseScale)
+				for y in 0..<tileRect.height {
+					let by = ty * Geometry.tileDimInBlocks + y
+					guard by < groupDim.heightInBlocks else {
+						continue
 					}
-				}
-
-				let groupXYB = PaddedStripe(
-					width: paddedWidth,
-					height: groupDim.heightInBlocks * Geometry.blockDim,
-					planes: xybPlanes)
-				var groupDC = [[Int16]](
-					repeating: [Int16](
-						repeating: 0,
-						count: groupDim.widthInBlocks
-							* groupDim.heightInBlocks),
-					count: 3)
-
-				ACGroupEncoder.encode(
-					xyb: groupXYB,
-					widthInBlocks: groupDim.widthInBlocks,
-					heightInBlocks: groupDim.heightInBlocks,
-					quantField: quantField,
-					scale: params.scale,
-					scaleDC: params.scaleDC,
-					xQuantMatrixScale: params.xQuantMatrixScale,
-					quantDC: &groupDC,
-					writer: &sections[acIndex])
-
-				for c in 0..<3 {
-					for by in 0..<groupDim.heightInBlocks {
-						for bx in 0..<groupDim.widthInBlocks {
-							let target =
-								(blockY0 + by) * data.widthInBlocks
-								+ blockX0 + bx
-							guard target < data.quantDC[c].count else {
-								continue
-							}
-							data.quantDC[c][target] =
-								groupDC[c][
-									by * groupDim.widthInBlocks
-										+ bx]
-						}
+					for x in 0..<tileRect.width {
+						let bx = tileRect.x0 + x
+						guard bx < groupDim.widthInBlocks
+						else { continue }
+						quantField[
+							by * groupDim.widthInBlocks
+								+ bx] =
+							raw[y * tileRect.width + x]
 					}
 				}
 			}
 		}
 
-		let dcIndex = 1 + dcGroupY * dim.widthInDCGroups + dcGroupX
-		DCGroupEncoder.write(data: data, writer: &sections[dcIndex])
+		let groupXYB = PaddedStripe(
+			width: paddedWidth,
+			height: groupDim.heightInBlocks * Geometry.blockDim,
+			planes: xybPlanes)
+		var groupDC = [[Int16]](
+			repeating: [Int16](
+				repeating: 0,
+				count: groupDim.widthInBlocks
+					* groupDim.heightInBlocks),
+			count: 3)
+
+		ACGroupEncoder.encode(
+			xyb: groupXYB,
+			widthInBlocks: groupDim.widthInBlocks,
+			heightInBlocks: groupDim.heightInBlocks,
+			quantField: quantField,
+			scale: params.scale,
+			scaleDC: params.scaleDC,
+			xQuantMatrixScale: params.xQuantMatrixScale,
+			quantDC: &groupDC,
+			writer: &writer)
+
+		return ACGroupOutput(
+			groupX: imageGX, groupY: imageGY,
+			widthInBlocks: groupDim.widthInBlocks,
+			heightInBlocks: groupDim.heightInBlocks,
+			section: writer, quantDC: groupDC, quantField: quantField)
+	}
+
+	/// Folds finished AC groups into their DC groups and writes the DC sections.
+	///
+	/// Kept apart from the computation so the sequential and concurrent drivers
+	/// share it exactly and cannot drift.
+	static func assemble(
+		outputs: [ACGroupOutput], dim: ImageDim, sections: inout [SectionWriter]
+	) {
+		var dcData: [DCGroupData] = (0..<dim.dcGroupCount).map { i in
+			let rect = dim.pixelRect(
+				ix: i % dim.widthInDCGroups, iy: i / dim.widthInDCGroups,
+				dim: Geometry.dcGroupDim)
+			let groupDim = ImageDim(width: rect.width, height: rect.height)
+			return DCGroupData(
+				widthInBlocks: groupDim.widthInBlocks,
+				heightInBlocks: groupDim.heightInBlocks)
+		}
+
+		for output in outputs {
+			sections[
+				2 + dim.dcGroupCount + output.groupY * dim.widthInGroups
+					+ output.groupX] = output.section
+
+			// A DC group spans kBlockDim AC groups on each axis.
+			let dcGroupX = output.groupX / Geometry.blockDim
+			let dcGroupY = output.groupY / Geometry.blockDim
+			let index = dcGroupY * dim.widthInDCGroups + dcGroupX
+			let blockX0 =
+				(output.groupX - dcGroupX * Geometry.blockDim)
+				* Geometry.groupDimInBlocks
+			let blockY0 =
+				(output.groupY - dcGroupY * Geometry.blockDim)
+				* Geometry.groupDimInBlocks
+
+			for by in 0..<output.heightInBlocks {
+				for bx in 0..<output.widthInBlocks {
+					let target =
+						(blockY0 + by) * dcData[index].widthInBlocks
+						+ blockX0 + bx
+					guard target < dcData[index].rawQuantField.count else {
+						continue
+					}
+					dcData[index].rawQuantField[target] =
+						output.quantField[by * output.widthInBlocks + bx]
+					for c in 0..<3 {
+						dcData[index].quantDC[c][target] =
+							output.quantDC[c][
+								by * output.widthInBlocks + bx]
+					}
+				}
+			}
+		}
+
+		for i in 0..<dim.dcGroupCount {
+			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+		}
 	}
 
 	static func encodeFrame(
@@ -251,13 +279,19 @@ public enum Encoder {
 			for i in acRange { sections[i] = SectionWriter(mode: .direct(acCode)) }
 		}
 
-		for i in 0..<dim.dcGroupCount {
-			encodeDCGroup(
-				linear: linear, dim: dim,
-				dcGroupX: i % dim.widthInDCGroups,
-				dcGroupY: i / dim.widthInDCGroups,
-				params: params, sections: &sections)
+		let acMode: SectionWriter.Mode =
+			optimizeCodes ? .staging(acCode) : .direct(acCode)
+		var outputs: [ACGroupOutput] = []
+		outputs.reserveCapacity(dim.groupCount)
+		for index in 0..<dim.groupCount {
+			outputs.append(
+				encodeACGroup(
+					linear: linear, dim: dim,
+					groupX: index % dim.widthInGroups,
+					groupY: index / dim.widthInGroups,
+					params: params, mode: acMode))
 		}
+		assemble(outputs: outputs, dim: dim, sections: &sections)
 
 		if optimizeCodes {
 			let dcRange = 1..<(1 + dim.dcGroupCount)
@@ -314,6 +348,88 @@ public enum Encoder {
 }
 
 extension Encoder {
+	/// Encodes with the AC groups computed concurrently.
+	///
+	/// Produces byte-identical output to `encode`: groups read only the shared
+	/// linear image and their own geometry, and the assembly step keys off each
+	/// group's coordinates rather than the order results arrive in. What changes
+	/// is only how long it takes.
+	///
+	/// Worth using at full size and pointless below 256 px, where the image is a
+	/// single group and there is nothing to overlap.
+	public static func encodeConcurrently(
+		_ image: ImageBuffer,
+		distance: Float,
+		transferFunction: TransferFunction = .sRGB,
+		optimizeCodes: Bool = true
+	) async throws -> [UInt8] {
+		let params = try DistanceParams(distance: distance)
+		let linear = linearize(image)
+		let dim = ImageDim(width: image.width, height: image.height)
+
+		var writer = BitWriter()
+		try ImageHeader.write(
+			width: image.width, height: image.height,
+			transferFunction: transferFunction, to: &writer)
+
+		var dcCode = EntropyCode.staticDC
+		var acCode = EntropyCode.staticAC
+		let dcMode: SectionWriter.Mode =
+			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
+		let acMode: SectionWriter.Mode =
+			optimizeCodes ? .staging(acCode) : .direct(acCode)
+
+		var sections = [SectionWriter](
+			repeating: SectionWriter(mode: dcMode),
+			count: 2 + dim.dcGroupCount + dim.groupCount)
+
+		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
+			for index in 0..<dim.groupCount {
+				group.addTask {
+					encodeACGroup(
+						linear: linear, dim: dim,
+						groupX: index % dim.widthInGroups,
+						groupY: index / dim.widthInGroups,
+						params: params, mode: acMode)
+				}
+			}
+			var collected: [ACGroupOutput] = []
+			collected.reserveCapacity(dim.groupCount)
+			for await output in group { collected.append(output) }
+			return collected
+		}
+		assemble(outputs: outputs, dim: dim, sections: &sections)
+
+		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
+		if optimizeCodes {
+			dcCode = SectionOptimizer.optimize(
+				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
+				baseCode: dcCode)
+			acCode = SectionOptimizer.optimize(
+				sections: &sections, range: acRange, baseCode: acCode)
+		}
+
+		var dcGlobal = BitWriter()
+		try FrameAssembly.writeDCGlobal(
+			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+			writer: &dcGlobal)
+		sections[0] = SectionWriter(prewritten: dcGlobal)
+
+		var acGlobal = BitWriter()
+		try FrameAssembly.writeACGlobal(
+			groupCount: dim.groupCount, code: acCode, writer: &acGlobal)
+		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
+
+		FrameAssembly.writeFrameHeader(
+			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
+			epfIterations: params.epfIterations,
+			writer: &writer)
+		FrameAssembly.combineSections(
+			sections.map { $0.finished() }, writer: &writer)
+		writer.zeroPadToByte()
+		return writer.take()
+	}
+
 	/// Re-codes a parsed JPEG as JPEG XL without an inverse DCT.
 	///
 	/// The coefficients cross over exactly as the JPEG stored them, so this is
