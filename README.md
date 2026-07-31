@@ -86,12 +86,24 @@ Linux.
 
 Implemented: lossy VarDCT (8×8), XYB color, adaptive quantization, DC modular
 sub-encoder, static and per-image prefix codes, chroma subsampling, alpha
-flattening, and a baseline JPEG parser. A bare `FF 0A` codestream decodes
+flattening, and baseline JPEG recompression. A bare `FF 0A` codestream decodes
 through ImageIO on macOS and iOS — no ISOBMFF container needed.
 
-Not yet done: JPEG recompression is parsed but not re-emitted (it still needs
-YCbCr signalling, custom quant matrix transmission and DC scaling). Alpha is
-flattened onto a background, never preserved.
+**JPEG input is recompressed rather than re-encoded.** A JPEG's own quantized
+coefficients are re-coded directly — no inverse transform, so no generation of
+loss. Fidelity matches `cjxl --lossless_jpeg=1`: identical mean error to three
+decimals where comparable, slightly better at 4:4:4, better on greyscale. What
+the parser or the format declines — progressive, arithmetic-coded, CMYK, 4:1:1 —
+falls back to decoding and re-encoding the pixels, and a `maxPixelSize` does too,
+since a transcode reproduces the source's own resolution.
+
+The saving is 1–3%, not the 20% often quoted for JPEG recompression; small
+greyscale files come out larger. The reasons to use it are the absence of
+generational loss and the memory profile — coefficients cost 6 bytes a pixel at
+4:2:0 against roughly 40 for the pixel path, so a 48 MP photograph needs 279 MB
+rather than 1.4 GB.
+
+Alpha is flattened onto a background, never preserved.
 
 ### Measured
 

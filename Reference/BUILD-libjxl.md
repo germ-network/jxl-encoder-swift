@@ -31,16 +31,8 @@ Then read the failure off a rejected file:
 build-dbg/tools/djxl ours.jxl /tmp/out.png 2>&1 | grep FAILURE
 ```
 
-`tools/dumpquant.cc` dumps the bits libjxl writes for a RAW quantization
-matrix. It links but segfaults inside `EncodeQuantTable` when called with no
-`ModularFrameEncoder`; the debug decoder answered the question first, so this
-was left unfinished rather than pursued. Linking it needs the object files
-directly, since the internal symbols are hidden in the shared library:
-
-```bash
-c++ -std=c++17 -O1 -I. -Ilib/include -Ibuild/lib/include -Ithird_party/highway \
-	dumpquant.cc \
-	$(find build/lib/CMakeFiles/jxl_enc-obj.dir build/lib/CMakeFiles/jxl_dec-obj.dir -name '*.o') \
-	build/third_party/highway/libhwy.a \
-	-L/opt/homebrew/lib -lbrotlienc -lbrotlidec -lbrotlicommon -ljxl_cms -o dumpquant
-```
+A dump tool for libjxl's own `EncodeQuantTable` was tried first and abandoned:
+it segfaults when called without a `ModularFrameEncoder`, and the debug decoder
+answered the question before it was worth fixing. Instrumenting that decoder to
+print what it reconstructs — quant tables, DC, AC coefficients — is the
+technique that actually worked.

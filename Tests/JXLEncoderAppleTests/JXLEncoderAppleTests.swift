@@ -274,19 +274,31 @@
 		}
 
 		/// Ordinary input has to survive the check, right up to the boundary.
+		///
+		/// Uses a PNG rather than a JPEG: a JPEG now takes the recompression
+		/// path, which never materialises pixels and so is not bound by the
+		/// decode budget at all.
 		@Test("images within the budget still encode")
 		func withinBudget() throws {
-			let jpeg = Data(try Self.fixture("hopper_444"))
-			let required = JXLEncoderApple.estimatedEncodeBytes(width: 200, height: 200)
+			let png = NSMutableData()
+			let destination = CGImageDestinationCreateWithData(
+				png, UTType.png.identifier as CFString, 1, nil)!
+			CGImageDestinationAddImage(
+				destination, Self.gradient(width: 64, height: 64), nil)
+			#expect(CGImageDestinationFinalize(destination))
+
+			let required = JXLEncoderApple.estimatedEncodeBytes(width: 64, height: 64)
 			#expect(throws: Never.self) {
-				try JXLEncoderApple.encode(data: jpeg, maxSourceBytes: required)
+				try JXLEncoderApple.encode(
+					data: png as Data, maxSourceBytes: required)
 			}
 			#expect(
 				throws: JXLEncoderAppleError.sourceBudgetExceeded(
-					width: 200, height: 200, required: required,
+					width: 64, height: 64, required: required,
 					budget: required - 1)
 			) {
-				try JXLEncoderApple.encode(data: jpeg, maxSourceBytes: required - 1)
+				try JXLEncoderApple.encode(
+					data: png as Data, maxSourceBytes: required - 1)
 			}
 		}
 	}

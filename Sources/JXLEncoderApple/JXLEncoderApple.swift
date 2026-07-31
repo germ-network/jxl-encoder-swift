@@ -184,6 +184,17 @@
 			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground),
 			maxSourceBytes: Int = defaultMaxSourceBytes
 		) throws -> Data {
+			// A JPEG can be re-coded from its own coefficients, which avoids a
+			// generation of loss and costs a fraction of the memory — no pixels
+			// are ever materialised, so `maxSourceBytes` does not apply and a
+			// photograph too large for the pixel path can still go through here.
+			//
+			// Only at full size: the transcode reproduces the source's own
+			// resolution, so a thumbnail has to be decoded and re-encoded.
+			if maxPixelSize == nil, let recompressed = recompressedJPEG(data) {
+				return recompressed
+			}
+
 			guard let source = CGImageSourceCreateWithData(data as CFData, nil) else {
 				throw JXLEncoderAppleError.decodeFailed
 			}
@@ -204,6 +215,27 @@
 			}
 			return try encode(
 				image: image, distance: distance, alphaPolicy: alphaPolicy)
+		}
+
+		/// Re-codes a JPEG from its own quantized coefficients, or returns nil if
+		/// this one cannot take that path.
+		///
+		/// Recompression is an optimisation, never a requirement: anything the
+		/// parser or the layout declines — progressive, arithmetic-coded, CMYK,
+		/// 4:1:1, a frame JPEG XL cannot express — falls back to decoding and
+		/// re-encoding the pixels, which handles everything ImageIO does. So the
+		/// failure is swallowed deliberately rather than surfaced.
+		static func recompressedJPEG(_ data: Data) -> Data? {
+			guard data.count >= 2, data[data.startIndex] == 0xFF,
+				data[data.startIndex + 1] == 0xD8
+			else { return nil }  // not a JPEG; skip the parse entirely
+			do {
+				let image = try JPEGParser.parse([UInt8](data))
+				let transcode = try JPEGTranscode(image)
+				return Data(try Encoder.encodeJPEG(transcode))
+			} catch {
+				return nil
+			}
 		}
 
 		/// Reads the declared dimensions from the container's metadata, which
