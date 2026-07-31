@@ -26,13 +26,29 @@ enum QuantMatrixWriter {
 	/// the 255 x 8 scale JXL works in.
 	static let denominator: Float = 1.0 / (8 * 255)
 
-	/// A modular tree of one leaf: no split, predictor Zero, no offset or
-	/// multiplier. Contexts 1 through 5 are property+1, predictor, offset,
-	/// multiplier log and multiplier bits — property 0 meaning "leaf".
+	/// A modular tree of one split and two identical leaves, in pre-order.
 	///
-	/// Zero prediction sends each value as itself. For 64 entries that costs
-	/// less than a predictor would save, and it keeps the tree trivially valid.
+	/// A single leaf would be the obvious choice and is rejected: its property
+	/// context would carry one symbol, and `DecodeTree` refuses a degenerate
+	/// property code as an "infinite tree", since a code that can only produce
+	/// an inner node never terminates. Splitting once puts two distinct symbols
+	/// in that context — the split's property and the leaves' zero — at a cost
+	/// of a handful of bits.
+	///
+	/// The split is on property 0 against a value no channel index reaches, so
+	/// every pixel lands in the same leaf and the two behave as one. Both leaves
+	/// predict Zero, sending each value as itself: the table is 64 entries, too
+	/// few for a predictor to pay for itself.
 	static let leafTree: [Token] = [
+		// Inner node: property 0, split value 0.
+		Token(context: 1, value: 1),
+		Token(context: 0, value: packSigned(0)),
+		// Two leaves: property -1, predictor Zero, no offset, multiplier 1.
+		Token(context: 1, value: 0),
+		Token(context: 2, value: 0),
+		Token(context: 3, value: 0),
+		Token(context: 4, value: 0),
+		Token(context: 5, value: 0),
 		Token(context: 1, value: 0),
 		Token(context: 2, value: 0),
 		Token(context: 3, value: 0),
@@ -70,13 +86,16 @@ enum QuantMatrixWriter {
 
 		let treeCode = HistogramCluster.optimizeEntropyCode(
 			tokens: leafTree, contextCount: ContextTree.treeContextCount)
-		writer.write(1, 1)  // not an empty tree
+		// No "has tree" bit here: inside a group stream `DecodeTree` is entered
+		// directly, and that flag belongs to the global-tree path the DC groups
+		// use. Writing it desynchronises everything after.
 		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(treeCode, writer: &writer)
 		for token in leafTree { writer.write(token: token, code: treeCode) }
 
-		// One leaf means one context: the decoder sizes the histograms as
-		// (tree.size() + 1) / 2.
+		// The decoder sizes the data histograms as (tree.size() + 1) / 2, and a
+		// three-node tree gives two. Both leaves behave alike, so only the first
+		// context is ever used; the second still has to be transmitted.
 		var tokens: [Token] = []
 		tokens.reserveCapacity(3 * 64)
 		for channel in 0..<3 {
@@ -88,7 +107,7 @@ enum QuantMatrixWriter {
 			}
 		}
 		let dataCode = HistogramCluster.optimizeEntropyCode(
-			tokens: tokens, contextCount: 1)
+			tokens: tokens, contextCount: 2)
 		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(dataCode, writer: &writer)
 		for token in tokens { writer.write(token: token, code: dataCode) }

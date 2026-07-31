@@ -66,6 +66,11 @@ enum FrameAssembly {
 		writer.write(2, 0)  // no frame header extensions
 	}
 
+	/// `kGlobalScaleDenom`. A transcode uses this with `quantDC = 1` so that
+	/// `InvGlobalScale()` is exactly 1 and the quant field stays uniform — the
+	/// JPEG's own tables carry all the quantization.
+	static let jpegGlobalScale = 1 << 16
+
 	/// Both scales use a selector plus a variable-width offset.
 	static func writeQuantScales(
 		globalScale: Int, quantDC: Int, writer: inout BitWriter
@@ -105,20 +110,29 @@ enum FrameAssembly {
 		/// Per-channel DC quantization for a JPEG transcode, `255 * 8 / quant[0]`.
 		/// Nil on the pixel path, which uses the built-in values.
 		dcQuantization: [Float]? = nil,
+		/// Overrides the distance-derived scales, which a transcode does not use.
+		globalScale: Int? = nil,
+		quantDC: Int? = nil,
 		writer: inout BitWriter
 	) throws {
 		if let dcQuantization {
 			// `DequantMatricesEncodeDC`: the flag, then three half floats scaled
 			// by 128.
+			//
+			// What goes on the wire is the *reciprocal* of the step. `SetDCQuant`
+			// stores `1 / dc[c]` and the encoder writes that, so passing the step
+			// itself overflows the half-float range as soon as the JPEG's DC
+			// divisor is small — a high-quality source, exactly where it matters.
 			writer.write(1, 0)  // not default dequant dc
 			for channel in 0..<3 {
-				try Float16Coder.write(dcQuantization[channel] * 128, to: &writer)
+				try Float16Coder.write(128 / dcQuantization[channel], to: &writer)
 			}
 		} else {
 			writer.write(1, 1)  // default dequant dc
 		}
 		writeQuantScales(
-			globalScale: params.globalScale, quantDC: params.quantDC, writer: &writer)
+			globalScale: globalScale ?? params.globalScale,
+			quantDC: quantDC ?? params.quantDC, writer: &writer)
 		writer.write(1, 0)  // non-default block context map
 		writer.write(16, 0)  // no dc context, no quant field table
 
@@ -135,9 +149,17 @@ enum FrameAssembly {
 	}
 
 	static func writeACGlobal(
-		groupCount: Int, code: EntropyCode, writer: inout BitWriter
-	) {
-		writer.write(1, 1)  // all default quant matrices
+		groupCount: Int, code: EntropyCode,
+		/// A JPEG's own tables, already transposed. Nil on the pixel path, which
+		/// signals the built-in ones.
+		quantTables: [[UInt16]]? = nil,
+		writer: inout BitWriter
+	) throws {
+		if let quantTables {
+			try QuantMatrixWriter.writeCustom(tables: quantTables, writer: &writer)
+		} else {
+			writer.write(1, 1)  // all default quant matrices
+		}
 		let histogramBits = ceilLog2(groupCount)
 		if histogramBits != 0 { writer.write(histogramBits, 0) }
 		writer.write(2, 3)

@@ -210,3 +210,100 @@ public enum ACGroupEncoder {
 		}
 	}
 }
+
+extension ACGroupEncoder {
+	/// Encodes one group from a JPEG's own quantized coefficients.
+	///
+	/// The pixel path's middle is all absent here: no forward DCT, no
+	/// quantization, and no decorrelation of X and B against Y. The JPEG already
+	/// quantized these values and a transcode must not touch them — libjxl
+	/// applies chroma-from-luma only behind `force_cfl_jpeg_recompression`, which
+	/// is off by default and out of scope here.
+	///
+	/// The block walk is the same as the pixel path's, including how a subsampled
+	/// channel codes only where its own grid aligns.
+	public static func encodeJPEG(
+		transcode: JPEGTranscode,
+		blockX0: Int,
+		blockY0: Int,
+		widthInBlocks: Int,
+		heightInBlocks: Int,
+		quantDC: inout [[Int16]],
+		writer: inout SectionWriter
+	) {
+		let subsampling = transcode.subsampling
+		let channelWidths = (0..<3).map {
+			subsampling.blocksAcross(channel: $0, fullWidthInBlocks: widthInBlocks)
+		}
+		var nonZeros: [[UInt8]] = (0..<3).map {
+			[UInt8](repeating: 0, count: channelWidths[$0])
+		}
+		var nonZerosAbove: [[UInt8]?] = [nil, nil, nil]
+
+		for by in 0..<heightInBlocks {
+			var codedThisRow = [false, false, false]
+			for bx in 0..<widthInBlocks {
+				var quantized = [[Int32]](repeating: [], count: 3)
+
+				for channel in 0..<3 {
+					guard
+						subsampling.codesBlock(
+							channel: channel, blockX: blockX0 + bx,
+							blockY: blockY0 + by)
+					else { continue }
+
+					// The group's position in the image, mapped onto this
+					// channel's own subsampled grid.
+					let sourceX = subsampling.subsampledX(
+						channel: channel, blockX: blockX0 + bx)
+					let sourceY = subsampling.subsampledY(
+						channel: channel, blockY: blockY0 + by)
+					let component = transcode.component(channel)
+
+					// The MCU grid can run past the image, but never short of it;
+					// a missing block would mean the parser and the geometry
+					// disagree, so code zeros rather than read out of bounds.
+					guard
+						sourceX < component.blocksPerLine,
+						sourceY < component.blocksPerColumn
+					else {
+						quantized[channel] = [Int32](
+							repeating: 0, count: 64)
+						continue
+					}
+
+					let block = transcode.block(
+						channel: channel, x: sourceX, y: sourceY)
+					quantized[channel] = block
+
+					let localX = subsampling.subsampledX(
+						channel: channel, blockX: bx)
+					let localY = subsampling.subsampledY(
+						channel: channel, blockY: by)
+					quantDC[channel][localY * channelWidths[channel] + localX] =
+						Int16(clamping: block[0])
+				}
+
+				for channel in ACTokenizer.channelOrder {
+					guard
+						subsampling.codesBlock(
+							channel: channel, blockX: blockX0 + bx,
+							blockY: blockY0 + by)
+					else { continue }
+					codedThisRow[channel] = true
+					ACTokenizer.writeBlock(
+						quantized: quantized[channel][...],
+						channel: channel,
+						blockX: subsampling.subsampledX(
+							channel: channel, blockX: bx),
+						nonZeroRow: &nonZeros[channel],
+						nonZeroRowAbove: nonZerosAbove[channel],
+						writer: &writer)
+				}
+			}
+			for channel in 0..<3 where codedThisRow[channel] {
+				nonZerosAbove[channel] = nonZeros[channel]
+			}
+		}
+	}
+}

@@ -276,7 +276,7 @@ public enum Encoder {
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
-		FrameAssembly.writeACGlobal(
+		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
@@ -310,5 +310,153 @@ public enum Encoder {
 			params: params, optimizeCodes: optimizeCodes, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
+	}
+}
+
+extension Encoder {
+	/// Re-codes a parsed JPEG as JPEG XL without an inverse DCT.
+	///
+	/// The coefficients cross over exactly as the JPEG stored them, so this is
+	/// lossless with respect to the source: decoding the result gives the same
+	/// pixels the JPEG would. What changes is the signalling — YCbCr instead of
+	/// XYB, the JPEG's own quantization tables instead of the built-in ones — and
+	/// the entropy layer, which is where the saving comes from.
+	public static func encodeJPEG(
+		_ transcode: JPEGTranscode,
+		optimizeCodes: Bool = true
+	) throws -> [UInt8] {
+		var writer = BitWriter()
+		try ImageHeader.write(
+			width: transcode.width, height: transcode.height,
+			transferFunction: .sRGB, xybEncoded: false, to: &writer)
+		try encodeJPEGFrame(transcode, optimizeCodes: optimizeCodes, writer: &writer)
+		writer.zeroPadToByte()
+		return writer.take()
+	}
+
+	static func encodeJPEGFrame(
+		_ transcode: JPEGTranscode,
+		optimizeCodes: Bool,
+		writer: inout BitWriter
+	) throws {
+		let dim = ImageDim(width: transcode.width, height: transcode.height)
+		var dcCode = EntropyCode.staticDC
+		var acCode = EntropyCode.staticAC
+
+		let mode: SectionWriter.Mode =
+			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
+		var sections = [SectionWriter](
+			repeating: SectionWriter(mode: mode),
+			count: 2 + dim.dcGroupCount + dim.groupCount)
+		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
+		for i in acRange {
+			sections[i] = SectionWriter(
+				mode: optimizeCodes ? .staging(acCode) : .direct(acCode))
+		}
+
+		// DC groups collect the DC image; the AC pass fills it in as it goes,
+		// exactly as on the pixel path.
+		var dcData: [DCGroupData] = (0..<dim.dcGroupCount).map { i in
+			let rect = dim.pixelRect(
+				ix: i % dim.widthInDCGroups, iy: i / dim.widthInDCGroups,
+				dim: Geometry.dcGroupDim)
+			let groupDim = ImageDim(width: rect.width, height: rect.height)
+			return DCGroupData(
+				widthInBlocks: groupDim.widthInBlocks,
+				heightInBlocks: groupDim.heightInBlocks)
+		}
+
+		for gy in 0..<dim.heightInGroups {
+			for gx in 0..<dim.widthInGroups {
+				let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
+				let groupDim = ImageDim(width: rect.width, height: rect.height)
+				let acIndex = 2 + dim.dcGroupCount + gy * dim.widthInGroups + gx
+				let blockX0 = gx * Geometry.groupDimInBlocks
+				let blockY0 = gy * Geometry.groupDimInBlocks
+
+				var groupDC = [[Int16]](
+					repeating: [Int16](
+						repeating: 0,
+						count: groupDim.widthInBlocks
+							* groupDim.heightInBlocks),
+					count: 3)
+
+				ACGroupEncoder.encodeJPEG(
+					transcode: transcode,
+					blockX0: blockX0, blockY0: blockY0,
+					widthInBlocks: groupDim.widthInBlocks,
+					heightInBlocks: groupDim.heightInBlocks,
+					quantDC: &groupDC,
+					writer: &sections[acIndex])
+
+				// Fold the group's DC into whichever DC group covers it.
+				let dcGroupX = blockX0 / (Geometry.dcGroupDim / Geometry.blockDim)
+				let dcGroupY = blockY0 / (Geometry.dcGroupDim / Geometry.blockDim)
+				let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
+				let offsetX =
+					blockX0 - dcGroupX
+					* (Geometry.dcGroupDim / Geometry.blockDim)
+				let offsetY =
+					blockY0 - dcGroupY
+					* (Geometry.dcGroupDim / Geometry.blockDim)
+				for c in 0..<3 {
+					for by in 0..<groupDim.heightInBlocks {
+						for bx in 0..<groupDim.widthInBlocks {
+							let target =
+								(offsetY + by)
+								* dcData[dcIndex].widthInBlocks
+								+ offsetX + bx
+							guard
+								target
+									< dcData[dcIndex].quantDC[c]
+									.count
+							else {
+								continue
+							}
+							dcData[dcIndex].quantDC[c][target] =
+								groupDC[c][
+									by * groupDim.widthInBlocks
+										+ bx]
+						}
+					}
+				}
+			}
+		}
+
+		for i in 0..<dim.dcGroupCount {
+			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+		}
+
+		if optimizeCodes {
+			dcCode = SectionOptimizer.optimize(
+				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
+				baseCode: dcCode)
+			acCode = SectionOptimizer.optimize(
+				sections: &sections, range: acRange, baseCode: acCode)
+		}
+
+		var dcGlobal = BitWriter()
+		try FrameAssembly.writeDCGlobal(
+			params: try DistanceParams(distance: 1.0),
+			dcGroupCount: dim.dcGroupCount, code: dcCode,
+			dcQuantization: (0..<3).map { transcode.dcQuantization(channel: $0) },
+			globalScale: FrameAssembly.jpegGlobalScale,
+			quantDC: 1,
+			writer: &dcGlobal)
+		sections[0] = SectionWriter(prewritten: dcGlobal)
+
+		var acGlobal = BitWriter()
+		try FrameAssembly.writeACGlobal(
+			groupCount: dim.groupCount, code: acCode,
+			quantTables: (0..<3).map { transcode.quantTable(channel: $0) },
+			writer: &acGlobal)
+		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
+
+		FrameAssembly.writeFrameHeader(
+			colorMode: .ycbcr(subsampling: transcode.subsampling),
+			epfIterations: 0,
+			writer: &writer)
+		FrameAssembly.combineSections(
+			sections.map { $0.finished() }, writer: &writer)
 	}
 }
