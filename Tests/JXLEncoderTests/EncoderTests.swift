@@ -20,7 +20,7 @@ struct EncoderTests {
 			transferFunction: .linear, to: &writer)
 		//these fixtures were produced with static entropy tables, so they gate
 		//the unoptimised path
-		Encoder.encodeFrame(
+		try Encoder.encodeFrame(
 			linear: linear.interleaved, width: linear.width, height: linear.height,
 			params: params, optimizeCodes: false, writer: &writer)
 		writer.zeroPadToByte()

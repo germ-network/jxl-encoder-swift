@@ -102,9 +102,21 @@ enum FrameAssembly {
 		params: DistanceParams,
 		dcGroupCount: Int,
 		code: EntropyCode,
+		/// Per-channel DC quantization for a JPEG transcode, `255 * 8 / quant[0]`.
+		/// Nil on the pixel path, which uses the built-in values.
+		dcQuantization: [Float]? = nil,
 		writer: inout BitWriter
-	) {
-		writer.write(1, 1)  // default dequant dc
+	) throws {
+		if let dcQuantization {
+			// `DequantMatricesEncodeDC`: the flag, then three half floats scaled
+			// by 128.
+			writer.write(1, 0)  // not default dequant dc
+			for channel in 0..<3 {
+				try Float16Coder.write(dcQuantization[channel] * 128, to: &writer)
+			}
+		} else {
+			writer.write(1, 1)  // default dequant dc
+		}
 		writeQuantScales(
 			globalScale: params.globalScale, quantDC: params.quantDC, writer: &writer)
 		writer.write(1, 0)  // non-default block context map

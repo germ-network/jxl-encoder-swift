@@ -231,7 +231,7 @@ public enum Encoder {
 		linear: [Float], width: Int, height: Int, params: DistanceParams,
 		optimizeCodes: Bool = true,
 		writer: inout BitWriter
-	) {
+	) throws {
 		let dim = ImageDim(width: width, height: height)
 		var dcCode = EntropyCode.staticDC
 		var acCode = EntropyCode.staticAC
@@ -270,7 +270,7 @@ public enum Encoder {
 		// The globals carry the codes, so they can only be written once the
 		// codes are final.
 		var dcGlobal = BitWriter()
-		FrameAssembly.writeDCGlobal(
+		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
 			writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
@@ -305,7 +305,7 @@ public enum Encoder {
 		try ImageHeader.write(
 			width: image.width, height: image.height,
 			transferFunction: transferFunction, to: &writer)
-		encodeFrame(
+		try encodeFrame(
 			linear: linear, width: image.width, height: image.height,
 			params: params, optimizeCodes: optimizeCodes, writer: &writer)
 		writer.zeroPadToByte()
