@@ -343,7 +343,18 @@ extension Encoder {
 		optimizeCodes: Bool,
 		writer: inout BitWriter
 	) throws -> (dc: EntropyCode, ac: EntropyCode) {
-		let dim = ImageDim(width: transcode.width, height: transcode.height)
+		// When chroma is subsampled the block grid rounds up to a whole MCU, so
+		// the chroma planes divide evenly. A 37-pixel row is five blocks but six
+		// at 4:2:2, which is also what the JPEG's own MCU grid holds — the two
+		// agree by construction. Using the unpadded count writes short and
+		// desynchronises the section.
+		let alignment = (
+			x: 1 << transcode.subsampling.maxHorizontalShift,
+			y: 1 << transcode.subsampling.maxVerticalShift
+		)
+		let dim = ImageDim(
+			width: transcode.width, height: transcode.height,
+			blockAlignment: alignment)
 		var dcCode = EntropyCode.staticDC
 		var acCode = EntropyCode.staticAC
 
@@ -364,7 +375,9 @@ extension Encoder {
 			let rect = dim.pixelRect(
 				ix: i % dim.widthInDCGroups, iy: i / dim.widthInDCGroups,
 				dim: Geometry.dcGroupDim)
-			let groupDim = ImageDim(width: rect.width, height: rect.height)
+			let groupDim = ImageDim(
+				width: rect.width, height: rect.height,
+				blockAlignment: alignment)
 			return DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks,
@@ -374,7 +387,9 @@ extension Encoder {
 		for gy in 0..<dim.heightInGroups {
 			for gx in 0..<dim.widthInGroups {
 				let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
-				let groupDim = ImageDim(width: rect.width, height: rect.height)
+				let groupDim = ImageDim(
+					width: rect.width, height: rect.height,
+					blockAlignment: alignment)
 				let acIndex = 2 + dim.dcGroupCount + gy * dim.widthInGroups + gx
 				let blockX0 = gx * Geometry.groupDimInBlocks
 				let blockY0 = gy * Geometry.groupDimInBlocks

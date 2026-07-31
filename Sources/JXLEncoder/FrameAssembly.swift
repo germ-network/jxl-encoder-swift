@@ -142,7 +142,21 @@ enum FrameAssembly {
 			contextMap: ACContext.compactBlockContextMap, prefixCodes: [])
 		EntropyCodeWriter.writeContextMap(blockContextCode, writer: &writer)
 
-		writer.write(1, 1)  // default DC cmap
+		if dcQuantization != nil {
+			// The default colour correlation is `base_correlation_b = kYToBRatio`,
+			// which is 1.0: the decoder adds a whole luma block to channel 2.
+			// That is right for XYB, where B really does track Y, and wrong for
+			// Cr — accepting the default leaves every coefficient correct and the
+			// chroma reconstructed against the wrong reference.
+			writer.write(1, 0)  // not default DC cmap
+			writer.write(2, 0)  // colour factor: the default
+			try Float16Coder.write(0, to: &writer)  // base correlation X
+			try Float16Coder.write(0, to: &writer)  // base correlation B
+			writer.write(8, 128)  // ytox_dc = 0, offset by -128
+			writer.write(8, 128)  // ytob_dc = 0
+		} else {
+			writer.write(1, 1)  // default DC cmap
+		}
 		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
 		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(code, writer: &writer)

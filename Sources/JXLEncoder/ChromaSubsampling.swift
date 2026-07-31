@@ -22,6 +22,10 @@ public struct ChromaSubsampling: Equatable, Sendable {
 	let maxHShift: Int
 	let maxVShift: Int
 
+	/// How far the block grid must round up so every channel divides evenly.
+	public var maxHorizontalShift: Int { maxHShift }
+	public var maxVerticalShift: Int { maxVShift }
+
 	public init(channelMode: [Int]) {
 		precondition(channelMode.count == 3)
 		self.channelMode = channelMode

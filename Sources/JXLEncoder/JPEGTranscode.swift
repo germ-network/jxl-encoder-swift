@@ -18,6 +18,9 @@ public struct JPEGTranscode {
 	public let subsampling: ChromaSubsampling
 	/// JXL channel index to JPEG component index.
 	public let componentMap: [Int]
+	/// A single-component source. JXL still codes three channels, and the two
+	/// chroma ones carry zeros rather than a copy of the luma.
+	public let isGrayscale: Bool
 
 	public enum TranscodeError: Error, Equatable, Sendable {
 		/// Sampling factors JXL cannot express: it carries a 2-bit mode per
@@ -32,15 +35,18 @@ public struct JPEGTranscode {
 		let count = image.components.count
 		switch count {
 		case 1:
-			// Grey: every channel reads the single component. JXL still codes
-			// three, and the chroma planes end up zero.
+			// Grey. Only channel 1 reads the component; libjxl zero-fills the
+			// other two rather than repeating luma into them, which would decode
+			// as a strong colour cast.
 			componentMap = [0, 0, 0]
+			isGrayscale = true
 			subsampling = ChromaSubsampling(channelMode: [0, 0, 0])
 		case 3:
 			// libjxl's `JpegOrder` for kYCbCr. JXL orders channels X, Y, B, and
 			// under a YCbCr colour transform that reads as Cb, Y, Cr — so the
 			// first two components swap.
 			componentMap = [1, 0, 2]
+			isGrayscale = false
 			guard
 				let subsampling = ChromaSubsampling.fromJPEG(
 					horizontalSampling: image.components.map(

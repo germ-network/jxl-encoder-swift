@@ -263,6 +263,14 @@ extension ACGroupEncoder {
 							blockY: blockY0 + by)
 					else { continue }
 
+					// A grey source has nothing to say about chroma; repeating
+					// luma there decodes as a colour cast.
+					if transcode.isGrayscale && channel != 1 {
+						quantized[channel] = [Int32](
+							repeating: 0, count: 64)
+						continue
+					}
+
 					// The group's position in the image, mapped onto this
 					// channel's own subsampled grid.
 					let sourceX = subsampling.subsampledX(

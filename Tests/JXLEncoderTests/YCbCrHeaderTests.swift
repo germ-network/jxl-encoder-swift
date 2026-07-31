@@ -89,10 +89,17 @@ struct YCbCrHeaderTests {
 		#expect(reader.read(9) == 63)  // width - 1
 		#expect(reader.read(1) == 0)  // not all default metadata
 		#expect(reader.read(1) == 0)  // no extra fields
-		#expect(reader.read(1) == 1)  // floating point samples
-		#expect(reader.read(2) == 0)  // 32 bits per sample
-		#expect(reader.read(4) == 7)  // 8 exponent bits
-		#expect(reader.read(1) == 0)  // modular 16 bit sufficient
+		if xyb {
+			#expect(reader.read(1) == 1)  // floating point samples
+			#expect(reader.read(2) == 0)  // 32 bits per sample
+			#expect(reader.read(4) == 7)  // 8 exponent bits
+			#expect(reader.read(1) == 0)  // modular 16 bit sufficient
+		} else {
+			// A transcode carries 8-bit samples in their original colour space.
+			#expect(reader.read(1) == 0)  // integer samples
+			#expect(reader.read(2) == 0)  // 8 bits per sample
+			#expect(reader.read(1) == 1)  // modular 16 bit sufficient
+		}
 		#expect(reader.read(2) == 0)  // no extra channels
 		#expect(reader.read(1) == (xyb ? 1 : 0))
 	}

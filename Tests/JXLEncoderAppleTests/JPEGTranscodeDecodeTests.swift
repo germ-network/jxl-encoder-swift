@@ -74,35 +74,25 @@
 			return total / Double(ours.rgb.count)
 		}
 
-		/// Known broken, recorded so the numbers stay visible and so the day the
-		/// transcode starts working this reports an unexpected pass rather than
-		/// staying quietly green.
-		///
-		/// Mean absolute error against the source: 4:4:4 about 27 levels,
-		/// greyscale about 67, subsampled about 210 — the last being noise. A
-		/// transcode carries the source's own coefficients, so anything past a
-		/// level or two means they are not arriving intact.
+		/// A transcode carries the source's own coefficients, so the only honest
+		/// difference from decoding the JPEG itself is the inverse transform —
+		/// well under one level. The threshold is deliberately tight: it is what
+		/// distinguishes a working transcode from one that merely decodes.
 		@Test(
 			"unsubsampled transcodes match the source",
 			arguments: ["hopper_444", "hopper_gray_odd"], [true, false])
 		func unsubsampled(name: String, optimize: Bool) throws {
-			try withKnownIssue("the transcode is not yet correct") {
-				let error = try Self.meanError(name, optimize: optimize)
-				#expect(error < 2.0, "mean absolute error \(error)")
-			}
+			let error = try Self.meanError(name, optimize: optimize)
+			#expect(error < 2.0, "mean absolute error \(error)")
 		}
 
-		/// The failure itself, so it is reproducible here rather than only through a
-		/// command-line run. Expected to fail until the optimised entropy path is
-		/// fixed for subsampled input.
+		/// Subsampled input, which needs the block grid rounded up to a whole MCU.
 		@Test(
 			"subsampled transcodes, optimised entropy codes",
 			arguments: ["hopper_422", "hopper_420_restart"])
 		func subsampledOptimized(name: String) throws {
-			try withKnownIssue("the transcode is not yet correct") {
-				let error = try Self.meanError(name, optimize: true)
-				#expect(error < 2.0, "mean absolute error \(error)")
-			}
+			let error = try Self.meanError(name, optimize: true)
+			#expect(error < 2.0, "mean absolute error \(error)")
 		}
 
 		/// The entropy path makes no difference to the pixels, which is what an
@@ -127,10 +117,8 @@
 			"subsampled transcodes, static entropy tables",
 			arguments: ["hopper_422", "hopper_420_restart"])
 		func subsampledStatic(name: String) throws {
-			try withKnownIssue("the transcode is not yet correct") {
-				let error = try Self.meanError(name, optimize: false)
-				#expect(error < 2.0, "mean absolute error \(error)")
-			}
+			let error = try Self.meanError(name, optimize: false)
+			#expect(error < 2.0, "mean absolute error \(error)")
 		}
 	}
 

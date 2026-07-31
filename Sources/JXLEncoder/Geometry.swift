@@ -78,11 +78,20 @@ public struct ImageDim: Equatable, Sendable {
 	public var groupCount: Int { widthInGroups * heightInGroups }
 	public var dcGroupCount: Int { widthInDCGroups * heightInDCGroups }
 
-	public init(width: Int, height: Int) {
+	/// `blockAlignment` rounds the block grid up to a whole MCU, which chroma
+	/// subsampling requires so the chroma planes divide evenly. The pixel path
+	/// passes (1, 1) and gets the plain ceiling.
+	public init(width: Int, height: Int, blockAlignment: (x: Int, y: Int) = (1, 1)) {
 		self.width = width
 		self.height = height
-		widthInBlocks = Geometry.divCeil(width, Geometry.blockDim)
-		heightInBlocks = Geometry.divCeil(height, Geometry.blockDim)
+		widthInBlocks =
+			Geometry.divCeil(
+				Geometry.divCeil(width, Geometry.blockDim), blockAlignment.x)
+			* blockAlignment.x
+		heightInBlocks =
+			Geometry.divCeil(
+				Geometry.divCeil(height, Geometry.blockDim), blockAlignment.y)
+			* blockAlignment.y
 		widthInTiles = Geometry.divCeil(width, Geometry.tileDim)
 		heightInTiles = Geometry.divCeil(height, Geometry.tileDim)
 		widthInGroups = Geometry.divCeil(width, Geometry.groupDim)

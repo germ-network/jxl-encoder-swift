@@ -56,10 +56,21 @@ public enum ImageHeader {
 
 		writer.write(1, 0)  // not all default image metadata
 		writer.write(1, 0)  // no extra fields
-		writer.write(1, 1)  // floating point samples
-		writer.write(2, 0)  // 32 bits per sample
-		writer.write(4, 7)  // 8 exponent bits
-		writer.write(1, 0)  // modular 16 bit sufficient
+		if xybEncoded {
+			writer.write(1, 1)  // floating point samples
+			writer.write(2, 0)  // 32 bits per sample
+			writer.write(4, 7)  // 8 exponent bits
+			writer.write(1, 0)  // modular 16 bit sufficient
+		} else {
+			// A JPEG transcode carries 8-bit samples in their original colour
+			// space, and the sample format is how the decoder learns what range
+			// the reconstructed values live in. Declaring the XYB path's float32
+			// here leaves every coefficient correct and every pixel wrong, which
+			// is exactly what it did.
+			writer.write(1, 0)  // integer samples
+			writer.write(2, 0)  // 8 bits per sample
+			writer.write(1, 1)  // modular 16 bit sufficient
+		}
 		writer.write(2, 0)  // no extra channels
 		writer.write(1, xybEncoded ? 1 : 0)  // xyb encoded
 		writer.write(1, 0)  // not all default color encoding
