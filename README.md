@@ -65,7 +65,8 @@ measurement taken, over-estimating a large encode by up to about half.
 
 Recompressing a JPEG is far cheaper than re-encoding its pixels — coefficients
 cost exactly 6 bytes a pixel at 4:2:0, so that 48 MP photograph needs 279 MB
-rather than 1.4 GB. That path is not finished yet.
+rather than 1.4 GB. JPEG input takes that path automatically, and it is not
+subject to `maxSourceBytes` because it never materialises pixels.
 
 Off Apple platforms, drive the core directly with 8-bit sRGB samples:
 
@@ -81,7 +82,7 @@ let bytes = try Encoder.encode(image, distance: 1.0)
 Working. With static entropy tables the output is **byte-identical to
 `cjxl_tiny`** across the corpus, single- and multi-group; with per-image
 optimized prefix codes the encoding decisions are unchanged and only the
-entropy layer differs. 122 tests, CI on macOS, Mac Catalyst, iOS Simulator and
+entropy layer differs. 186 tests, CI on macOS, Mac Catalyst, iOS Simulator and
 Linux.
 
 Implemented: lossy VarDCT (8×8), XYB color, adaptive quantization, DC modular
