@@ -19,7 +19,10 @@ enum QuantMatrixWriter {
 	/// `kLog2NumQuantModes`.
 	static let modeBits = 3
 	static let modeLibrary: UInt64 = 0
-	static let modeRAW: UInt64 = 6
+	/// Last of the eight modes: Library, ID, DCT2, DCT4, DCT4X8, AFV, DCT, RAW.
+	/// Counting them off a grep is how this first came out as 6, which the
+	/// decoder rejects as "Invalid mode".
+	static let modeRAW: UInt64 = 7
 
 	/// `qtable_den` for an unshifted RAW table. The decoder rebuilds each weight
 	/// as `1 / (den * qtable[i])`, so this is what turns a JPEG divisor back into
