@@ -334,11 +334,15 @@ extension Encoder {
 		return writer.take()
 	}
 
+	/// Returns the entropy codes it settled on, which is what the globals
+	/// carry. Only the tests read them, to check the transmitted context maps
+	/// against the decoder's rules.
+	@discardableResult
 	static func encodeJPEGFrame(
 		_ transcode: JPEGTranscode,
 		optimizeCodes: Bool,
 		writer: inout BitWriter
-	) throws {
+	) throws -> (dc: EntropyCode, ac: EntropyCode) {
 		let dim = ImageDim(width: transcode.width, height: transcode.height)
 		var dcCode = EntropyCode.staticDC
 		var acCode = EntropyCode.staticAC
@@ -459,5 +463,6 @@ extension Encoder {
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)
+		return (dcCode, acCode)
 	}
 }
