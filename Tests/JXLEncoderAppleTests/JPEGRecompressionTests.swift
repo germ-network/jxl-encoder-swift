@@ -5,6 +5,7 @@
 	import ImageIO
 	import JXLEncoder
 	import Testing
+	import UniformTypeIdentifiers
 
 	@testable import JXLEncoderApple
 
@@ -117,6 +118,66 @@
 				JXLEncoderApple.recompressedJPEG(Data([0x89, 0x50, 0x4E, 0x47]))
 					== nil)
 			#expect(JXLEncoderApple.recompressedJPEG(Data()) == nil)
+		}
+
+		// MARK: - Multi-group geometry
+
+		/// A subsampled JPEG large enough to span several AC groups (256 px) and,
+		/// past 2048 px, a DC-group boundary too — sized in blocks of a colour that
+		/// repeats with a period coprime to both, so a block landing in the wrong
+		/// place reliably shows up as the wrong colour rather than by chance
+		/// matching its neighbour.
+		///
+		/// Every named fixture is well under 256 px, so none of them exercises a
+		/// DC group folding in more than one AC group's worth of subsampled
+		/// chroma. That gap let a real bug through: the fold-in indexed every
+		/// channel's DC plane with the luma stride, which is only correct when
+		/// chroma is not subsampled or a DC group holds exactly one AC group.
+		/// Mean error on a 600x600 case that should have caught it was 87.7 —
+		/// found only once something bigger than a single group existed to test.
+		static func checkerboardJPEG(size: Int) -> Data {
+			let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+			let context = CGContext(
+				data: nil, width: size, height: size, bitsPerComponent: 8,
+				bytesPerRow: 0, space: colorSpace,
+				bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+			let colors: [(CGFloat, CGFloat, CGFloat)] = [
+				(1, 0, 0), (0, 1, 0), (0, 0, 1), (1, 1, 0), (1, 0, 1), (0, 1, 1),
+				(1, 0.5, 0), (0.5, 0, 1),
+			]
+			let block = 91
+			let blocksPerSide = size / block + 1
+			for by in 0..<blocksPerSide {
+				for bx in 0..<blocksPerSide {
+					let (r, g, b) = colors[(by * 13 + bx * 7) % colors.count]
+					context.setFillColor(
+						CGColor(red: r, green: g, blue: b, alpha: 1))
+					context.fill(
+						CGRect(
+							x: bx * block, y: by * block, width: block,
+							height: block))
+				}
+			}
+			let image = context.makeImage()!
+			let dest = NSMutableData()
+			let destination = CGImageDestinationCreateWithData(
+				dest, UTType.jpeg.identifier as CFString, 1, nil)!
+			CGImageDestinationAddImage(
+				destination, image,
+				[kCGImageDestinationLossyCompressionQuality: 0.9] as CFDictionary)
+			CGImageDestinationFinalize(destination)
+			return dest as Data
+		}
+
+		/// 600 px spans several AC groups within a single DC group; 2200 px also
+		/// crosses the 2048 px DC-group boundary, so the DC group's own destination
+		/// offset is exercised too, not just the AC group's.
+		@Test("multi-group subsampled JPEGs recompress correctly", arguments: [600, 2200])
+		func multiGroupFidelity(size: Int) throws {
+			let source = Self.checkerboardJPEG(size: size)
+			let encoded = try #require(JXLEncoderApple.recompressedJPEG(source))
+			let error = try Self.meanError(encoded, against: source)
+			#expect(error < 2.5, "\(size)x\(size): mean absolute error \(error)")
 		}
 
 		// MARK: - Fidelity

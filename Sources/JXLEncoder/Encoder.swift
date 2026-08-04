@@ -535,24 +535,38 @@ extension Encoder {
 				let offsetY =
 					blockY0 - dcGroupY
 					* (Geometry.dcGroupDim / Geometry.blockDim)
+				// Each channel has its own subsampled grid, so this cannot share
+				// one stride across channels: `groupDC[c]` was written by
+				// `ACGroupEncoder.encodeJPEG` using that channel's own row width
+				// (`channelWidths[c]` there), and `dcData[dcIndex].quantDC[c]` is
+				// laid out using that DC group's own per-channel `planeWidths[c]`
+				// — neither of which is `groupDim.widthInBlocks`, the AC group's
+				// full-resolution width, except by coincidence when chroma is not
+				// subsampled or a DC group holds exactly one AC group. Using the
+				// full-resolution stride for every channel silently scrambled
+				// subsampled chroma DC across any image wider than one AC group.
 				for c in 0..<3 {
-					for by in 0..<groupDim.heightInBlocks {
-						for bx in 0..<groupDim.widthInBlocks {
-							let target =
-								(offsetY + by)
-								* dcData[dcIndex].widthInBlocks
-								+ offsetX + bx
-							guard
-								target
-									< dcData[dcIndex].quantDC[c]
-									.count
-							else {
-								continue
-							}
-							dcData[dcIndex].quantDC[c][target] =
-								groupDC[c][
-									by * groupDim.widthInBlocks
-										+ bx]
+					let sourceWidth = transcode.subsampling.blocksAcross(
+						channel: c,
+						fullWidthInBlocks: groupDim.widthInBlocks)
+					let sourceHeight = transcode.subsampling.blocksDown(
+						channel: c,
+						fullHeightInBlocks: groupDim.heightInBlocks)
+					let destWidth = dcData[dcIndex].planeWidths[c]
+					let destHeight = dcData[dcIndex].planeHeights[c]
+					let destX0 = transcode.subsampling.subsampledX(
+						channel: c, blockX: offsetX)
+					let destY0 = transcode.subsampling.subsampledY(
+						channel: c, blockY: offsetY)
+					for by in 0..<sourceHeight {
+						let destY = destY0 + by
+						guard destY < destHeight else { continue }
+						for bx in 0..<sourceWidth {
+							let destX = destX0 + bx
+							guard destX < destWidth else { continue }
+							dcData[dcIndex].quantDC[c][
+								destY * destWidth + destX] =
+								groupDC[c][by * sourceWidth + bx]
 						}
 					}
 				}

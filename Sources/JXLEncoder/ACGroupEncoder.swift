@@ -238,14 +238,6 @@ extension ACGroupEncoder {
 		let channelWidths = (0..<3).map {
 			subsampling.blocksAcross(channel: $0, fullWidthInBlocks: widthInBlocks)
 		}
-		let dcWidths = (0..<3).map {
-			subsampling.dcPlaneSize(
-				channel: $0, blocks: widthInBlocks, vertical: false)
-		}
-		let dcHeights = (0..<3).map {
-			subsampling.dcPlaneSize(
-				channel: $0, blocks: heightInBlocks, vertical: true)
-		}
 		var nonZeros: [[UInt8]] = (0..<3).map {
 			[UInt8](repeating: 0, count: channelWidths[$0])
 		}
