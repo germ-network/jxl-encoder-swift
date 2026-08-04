@@ -5,8 +5,7 @@ C or C++ dependencies.
 
 Apple platforms decode JPEG XL natively (iOS 17+, macOS 14+) but ship no
 encoder — `public.jpeg-xl` is absent from `CGImageDestinationCopyTypeIdentifiers()`
-as of macOS 27 and iOS 26. This package fills that gap without linking libjxl,
-which is too large for an App Clip and is unsafe-language code besides.
+as of macOS 27 and iOS 26. This package fills that gap.
 
 The encoder is a port of Google's simplified reference encoder
 [libjxl-tiny](https://github.com/libjxl/libjxl-tiny): lossy VarDCT, XYB color,
@@ -184,14 +183,23 @@ decoder and quality metric. Two traps when comparing against the reference:
   instead gives the reference different data and makes every byte comparison
   meaningless.
 
+## Scope
+
+**This is a reimplementation, not a new encoder.** It is deliberately narrow: a
+Swift transliteration of Google's reference implementation, following its
+algorithms and its bitstream decisions, with no novel contributions to the
+format or to the coding techniques it uses. Where this port and the reference
+disagree, the reference is right and this is a bug.
+
+Every stage was gated byte-for-byte against `cjxl_tiny`. Contributions are
+welcome within that scope; see [CONTRIBUTING.md](CONTRIBUTING.md).
+
 ## License
 
-BSD-3-Clause — see [LICENSE](LICENSE), which carries both this project's
-copyright and the JPEG XL Project Authors', since the port is a derivative work
-of libjxl-tiny.
+BSD-3-Clause, the same licence as the reference implementation — see
+[LICENSE](LICENSE), which carries both this project's copyright and the JPEG XL
+Project Authors', since the port is a derivative work of libjxl-tiny.
 
 [NOTICE.md](NOTICE.md) records which files are transliterated from upstream,
 which hold generated upstream tables, and which were written against published
-specifications instead. It also covers the dependency licensing and the open
-question about upstream's separate patent grant, which is **not** reproduced
-here and should not be assumed to reach this code.
+specifications instead, along with the dependency licensing.

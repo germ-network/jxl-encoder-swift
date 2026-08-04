@@ -7,9 +7,7 @@ which carries both copyright lines.
 
 Ownership is not partitioned by file. The encoder was ported stage by stage and
 diffed against the reference until the output matched byte for byte, so upstream
-structure runs through it line by line; claiming a clean split between our work
-and theirs would be fiction. This file records what is derived and how, so the
-claim can be checked rather than taken on trust.
+structure runs through it line by line.
 
 ## What is derived from libjxl-tiny
 
@@ -57,18 +55,6 @@ libjxl-tiny counterpart:
   handling that the reference expresses inline through Highway; reorganised here,
   though the arithmetic they drive is ported.
 - `Sources/JXLEncoderApple/` — the platform shim. No upstream counterpart.
-
-## Patents
-
-libjxl-tiny carries an
-[additional IP rights grant](https://github.com/libjxl/libjxl-tiny/blob/main/PATENTS)
-from Google, separate from its copyright licence. It is not reproduced here yet.
-
-The grant is scoped to "the copyrightable works distributed by Google as part of
-the JPEG XL project", and whether that reaches an independent Swift
-reimplementation is a legal question rather than a mechanical one. Nothing in
-this repository should be read as a representation that the grant extends to this
-code. Seek your own advice.
 
 ## Third-party dependencies
 
