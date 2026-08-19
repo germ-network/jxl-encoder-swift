@@ -50,3 +50,13 @@ jobs:
         run: swift build --target JXLEncoder
       - name: Test core
         run: swift test --filter JXLEncoderTests
+
+  lint:
+    name: Lint (swift-format)
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    container: swift:6.1
+    steps:
+      - uses: actions/checkout@v5
+      - name: swift-format lint
+        run: swift format lint --recursive --configuration .swift-format --strict Sources Tests

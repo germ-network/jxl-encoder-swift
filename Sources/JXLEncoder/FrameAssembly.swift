@@ -139,7 +139,7 @@ enum FrameAssembly {
 		// The compact block context map has no prefix codes of its own; only its
 		// context map is transmitted.
 		let blockContextCode = EntropyCode(
-			contextMap: ACContext.compactBlockContextMap, prefixCodes: [])
+			contextMap: ACContext.compactBlockIndexMap, prefixCodes: [])
 		EntropyCodeWriter.writeContextMap(blockContextCode, writer: &writer)
 
 		if dcQuantization != nil {
