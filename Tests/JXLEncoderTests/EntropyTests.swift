@@ -82,8 +82,8 @@ struct PackSignedTests {
 struct ACContextTests {
 	@Test("context map sizes match the model")
 	func sizes() {
-		#expect(ACContext.numACContexts == 1980)
-		#expect(StaticEntropyCodes.acContextMap.count == ACContext.numACContexts)
+		#expect(ACContext.totalCount == 1980)
+		#expect(StaticEntropyCodes.acContextMap.count == ACContext.totalCount)
 		#expect(StaticEntropyCodes.dcContextMap.count == 45)
 		#expect(StaticEntropyCodes.acPrefixCodes.count == 8)
 		#expect(StaticEntropyCodes.dcPrefixCodes.count == 8)
@@ -172,8 +172,8 @@ struct ACContextTests {
 				}
 			}
 		}
-		#expect(maxUnderInvariant == ACContext.zeroDensityContextCount - 1)
-		#expect(maxOverall == ACContext.zeroDensityContextLimit - 1)
+		#expect(maxUnderInvariant == ACContext.zeroDensityCount - 1)
+		#expect(maxOverall == ACContext.zeroDensityLimit - 1)
 	}
 }
 
