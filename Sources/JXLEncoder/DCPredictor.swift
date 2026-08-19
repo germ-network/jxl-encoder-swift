@@ -21,12 +21,12 @@ enum DCPredictor {
 	/// overflow wraps rather than trapping, then relies on the clamp.
 	static func clampedGradient(top n: Int32, left w: Int32, topLeft l: Int32) -> Int32 {
 		let m = min(n, w)
-		let M = max(n, w)
+		let mx = max(n, w)
 		let gradient = Int32(
 			bitPattern: UInt32(bitPattern: n) &+ UInt32(bitPattern: w)
 				&- UInt32(bitPattern: l))
-		let clampedHigh = l < m ? M : gradient
-		return l > M ? m : clampedHigh
+		let clampedHigh = l < m ? mx : gradient
+		return l > mx ? m : clampedHigh
 	}
 
 	/// Maps the gradient property onto one of the DC contexts.
