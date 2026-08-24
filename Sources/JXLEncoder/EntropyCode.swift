@@ -17,14 +17,21 @@ public struct EntropyCode: Sendable {
 	/// needs a map over the original context space, so the two compose when the
 	/// context map is written out.
 	public let originalContextMap: [UInt8]?
+	/// Non-nil selects ANS over prefix coding — real libjxl's per-code
+	/// `use_prefix_code` bit. `prefixCodes` still holds a valid, unused
+	/// prefix encoding in this case; only `EntropyCodeWriter`/`SectionWriter`
+	/// read this field to decide which one actually gets serialized.
+	public let ansInfoTables: [[ANSEncSymbolInfo]]?
 
 	public init(
 		contextMap: [UInt8], prefixCodes: [PrefixCode],
-		originalContextMap: [UInt8]? = nil
+		originalContextMap: [UInt8]? = nil,
+		ansInfoTables: [[ANSEncSymbolInfo]]? = nil
 	) {
 		self.contextMap = contextMap
 		self.prefixCodes = prefixCodes
 		self.originalContextMap = originalContextMap
+		self.ansInfoTables = ansInfoTables
 	}
 
 	public var contextCount: Int { contextMap.count }

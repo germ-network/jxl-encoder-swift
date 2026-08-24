@@ -297,8 +297,11 @@ public enum Encoder {
 			let dcRange = 1..<(1 + dim.dcGroupCount)
 			dcCode = SectionOptimizer.optimize(
 				sections: &sections, range: dcRange, baseCode: dcCode)
+			// allowANS: true once docs/gap-closure-plan.md's known decode bug
+			// is fixed — see the ANS section there. Left false so the pipeline
+			// stays on the verified prefix path in the meantime.
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode)
+				sections: &sections, range: acRange, baseCode: acCode, allowANS: false)
 		}
 
 		// The globals carry the codes, so they can only be written once the
@@ -405,8 +408,11 @@ extension Encoder {
 			dcCode = SectionOptimizer.optimize(
 				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
 				baseCode: dcCode)
+			// allowANS: true once docs/gap-closure-plan.md's known decode bug
+			// is fixed — see the ANS section there. Left false so the pipeline
+			// stays on the verified prefix path in the meantime.
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode)
+				sections: &sections, range: acRange, baseCode: acCode, allowANS: false)
 		}
 
 		var dcGlobal = BitWriter()
@@ -603,8 +609,11 @@ extension Encoder {
 			dcCode = SectionOptimizer.optimize(
 				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
 				baseCode: dcCode)
+			// allowANS: true once docs/gap-closure-plan.md's known decode bug
+			// is fixed — see the ANS section there. Left false so the pipeline
+			// stays on the verified prefix path in the meantime.
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode)
+				sections: &sections, range: acRange, baseCode: acCode, allowANS: false)
 		}
 
 		var dcGlobal = BitWriter()

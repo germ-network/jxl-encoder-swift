@@ -88,6 +88,7 @@ struct PrefixCodeWriterTests {
 		let expected = try #require(reference.streams[which])
 
 		var writer = BitWriter()
+		writer.write(1, 1)  // use_prefix_code — the caller's job since ANS landed
 		PrefixCodeWriter.writePrefixCodes(codes, writer: &writer)
 		#expect(writer.bitsWritten == expected.bits)
 		writer.zeroPadToByte()

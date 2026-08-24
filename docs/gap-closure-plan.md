@@ -164,9 +164,9 @@ serializer alone recovers only ~11 KB of the 83.5 KB transcode gap):
   context map). **Landed 2026-08-08** — see "Landed" below. Recovers only
   ~1.1–2.3 KB, far less than originally estimated; most of the remaining
   gap is elsewhere in the bundle this item's estimate came from.
-- ANS serializer: `enc_ans.cc` table build, alias table, reverse-order
-  stream writer (~800–1,000 relevant lines of 1,388; prefix and LZ77
-  portions excluded — verify LZ77 is off for our sections at e4).
+- [ ] ANS serializer: `enc_ans.cc` table build, alias table, reverse-order
+  stream writer. **Built 2026-08-08, not yet activated — see "ANS: built,
+  gated off pending a bug" below.**
 - Histogram clustering drift-check: our `HistogramCluster` (from tiny)
   against `enc_cluster.cc` (372 lines) at e4 settings.
 - Coefficient reordering, which e4 enables: `enc_coeff_order.cc` (334) +
@@ -334,6 +334,75 @@ estimate over-attributed to this specific piece; coefficient reordering
 (still unstarted, below) is now the more likely holder of most of the
 remaining ~40–54 KB, not block-context-map. Re-attribute once reordering
 lands, rather than assume.
+
+### ANS: built, gated off pending a bug (2026-08-08)
+
+Traced fully to source before implementing: `InitAliasTable`
+(`ans_common.cc`, ~110 lines, ported verbatim — zero tolerance, since it's
+never transmitted and both sides must reconstruct it identically),
+`ANSBuildInfoTable` (inverts it into a per-symbol `reverseMap`),
+`ANSCoder::PutSymbol` (the rANS state recursion — plain division
+substituted for the reciprocal-multiplication trick, which is a pure
+perf optimization equivalent to the division it replaces), and
+`WriteTokens`' reverse-order encode loop with its bit-chunk accumulator
+(matches our own `BitWriter.maxBitsPerCall = 56`, the same constraint
+libjxl's own writer has, for the same shift-overflow reason).
+
+Two deliberate simplifications, both justified by the plan's own
+non-goals (byte-exactness against cjxl is explicitly not a gate):
+`RebalanceHistogram`'s greedy bin-by-bin size search over a precomputed
+12x4096 allowed-counts table is replaced with standard largest-remainder
+rounding to full precision (real libjxl's own `shift = ANS_LOG_TAB_SIZE`
+case, not an invented one — larger headers, identical wire *shape*).
+`ANSHistogramWriter` ports `Encode`'s RLE + static-Huffman bit-width
+signaling faithfully, since that part *is* wire-format-required, not a
+size optimization — `omit_pos` in particular is load-bearing (the
+decoder identifies the omitted symbol by which has the largest
+transmitted bit-width, not by an explicit flag).
+
+Scoped to AC sections only, not DC: `DCGroupEncoder.write` interleaves
+raw header bits with tokens (`writeRaw`, then tokens, then `writeRaw`
+again, then more tokens), which ANS cannot split mid-stream since it
+needs a section's whole token list up front to encode in reverse. Grepped
+confirmed AC sections are pure token streams with no such interleaving.
+This also happens to align with where the size win lives — DC's own
+coder-loss was 2-3%, AC's 10.9%, per Phase A's split.
+
+Wired end to end — `EntropyCode` gained an `ansInfoTables` field,
+`EntropyCodeWriter.write` branches on it (`use_prefix_code` bit + either
+path), `SectionWriter` gained `flushANS`, `SectionOptimizer.optimize`
+gained `allowANS` (only ever true for the AC call sites) and real
+libjxl's own `total_tokens < 100` threshold for preferring prefix
+(`enc_ans.cc`) — small sections stay prefix-coded exactly as before,
+unaffected by ANS being available at all.
+
+**Result: decode succeeds but produces wrong pixels (mean error ~200,
+against a <2.5 gate) on every case where ANS actually engaged** —
+consistent, not intermittent, across every fixture tested. The alias
+table is independently verified (hand-traced 75/25 rebalancing case,
+full-partition invariant over a 5-symbol distribution, both passing as
+unit tests with no pipeline involved) and the static-table
+(`optimizeCodes: false`) and small-fixture prefix paths remain fully
+green throughout, which together isolate the bug to the histogram
+signaling or the token writer specifically, not a broader regression —
+but the specific defect was not found by re-reading against source a
+second and third time.
+
+**Deactivated, not reverted**: `allowANS` is hardcoded `false` at all
+three `SectionOptimizer.optimize` call sites in `Encoder.swift` (a
+one-line flip once fixed), so the pipeline runs on the verified prefix
+path unchanged and the full suite is green. All the new infrastructure
+(`ANSCoder.swift`, `ANSHistogramWriter.swift`, `ANSTokenWriter.swift`,
+`ANSCoderTests.swift`) ships as inert, tested-where-testable code, not
+reverted, so the next attempt starts from a known-correct alias table
+rather than from scratch.
+
+**Suggested next diagnostic**, not yet tried: a self-contained round-trip
+test — decode `ANSHistogramWriter.write`'s own output with a
+hand-written, independently-derived histogram parser (mirroring
+`dec_ans.cc`'s reconstruction, not reusing any of this port's own code)
+to check whether the *signaling* reconstructs the same counts, isolating
+it from the token writer before suspecting both at once.
 
 ## Phase C — pixel-path alignment to the named command
 

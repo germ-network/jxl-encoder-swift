@@ -295,15 +295,23 @@ enum PrefixCodeWriter {
 		writer.write(bitCount, UInt64(n) - (UInt64(1) << UInt64(bitCount)))
 	}
 
-	/// Writes a set of prefix codes: the hybrid-uint configuration for each,
-	/// then their alphabet sizes, then the codes themselves.
-	static func writePrefixCodes(_ codes: [PrefixCode], writer: inout BitWriter) {
-		writer.write(1, 1)  // use_prefix_code
-		for _ in codes {
+	/// The hybrid-uint configuration `UintCoder.encode` matches, written once
+	/// per histogram regardless of which serializer follows — real libjxl's
+	/// `EncodeUintConfigs`. Both the prefix and ANS paths share it, since
+	/// both share `UintCoder.encode` itself.
+	static func writeUintConfigs(count: Int, writer: inout BitWriter) {
+		for _ in 0..<count {
 			writer.write(4, 4)  // split_exponent
 			writer.write(3, 2)  // msb_in_token
 			writer.write(2, 0)  // lsb_in_token
 		}
+	}
+
+	/// Writes a set of prefix codes: the hybrid-uint configuration for each,
+	/// then their alphabet sizes, then the codes themselves. The caller
+	/// writes `use_prefix_code` — this only ever runs for the prefix path.
+	static func writePrefixCodes(_ codes: [PrefixCode], writer: inout BitWriter) {
+		writeUintConfigs(count: codes.count, writer: &writer)
 		func symbolCount(_ code: PrefixCode) -> Int {
 			var count = 1
 			for i in 0..<StaticEntropyCodes.alphabetSize where code.depths[i] != 0 {

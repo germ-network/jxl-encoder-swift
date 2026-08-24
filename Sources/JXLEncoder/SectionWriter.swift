@@ -71,17 +71,42 @@ public struct SectionWriter: Sendable {
 	/// span the full context space the tokens were staged with.
 	mutating func flush(code: EntropyCode) {
 		guard case .staging = mode else { return }
-		for record in staged {
-			switch record {
-			case .token(let context, let value):
-				writer.write(
-					token: Token(context: context, value: value), code: code)
-			case .rawBits(let count, let value):
-				writer.write(count, value)
+		if let infoTables = code.ansInfoTables {
+			flushANS(contextMap: code.contextMap, infoTables: infoTables)
+		} else {
+			for record in staged {
+				switch record {
+				case .token(let context, let value):
+					writer.write(
+						token: Token(context: context, value: value), code: code)
+				case .rawBits(let count, let value):
+					writer.write(count, value)
+				}
 			}
 		}
 		staged = []
 		mode = .direct(code)
+	}
+
+	/// ANS requires the whole token stream up front (it encodes in reverse),
+	/// unlike the prefix path's one-token-at-a-time replay above — so this
+	/// only holds for a section whose `staged` records are all tokens.
+	/// `SectionOptimizer` only calls it for AC sections, which are: DC
+	/// sections interleave raw header bits with tokens
+	/// (`DCGroupEncoder.write`), which ANS cannot split mid-stream.
+	private mutating func flushANS(contextMap: [UInt8], infoTables: [[ANSEncSymbolInfo]]) {
+		var tokens: [Token] = []
+		tokens.reserveCapacity(staged.count)
+		for record in staged {
+			switch record {
+			case .token(let context, let value):
+				tokens.append(Token(context: context, value: value))
+			case .rawBits:
+				preconditionFailure("ANS sections must not interleave raw bits")
+			}
+		}
+		ANSTokenWriter.write(
+			tokens: tokens, contextMap: contextMap, infoTables: infoTables, writer: &writer)
 	}
 
 	public func finished() -> BitWriter { writer }
@@ -104,19 +129,31 @@ enum SectionOptimizer {
 	/// used collapse away, which is most of them on a thumbnail, and contexts
 	/// tiny's static tables would have pre-merged stay separable until the
 	/// image's own statistics say otherwise.
+	/// Real libjxl's own `total_tokens < 100` threshold (enc_ans.cc) for
+	/// preferring prefix coding: ANS's histogram-signaling overhead isn't
+	/// worth it below this, so small sections and small images are
+	/// unaffected by ANS being available at all.
+	static let ansMinimumTokens = 100
+
 	static func optimize(
 		sections: inout [SectionWriter],
 		range: Range<Int>,
-		baseCode: EntropyCode
+		baseCode: EntropyCode,
+		/// Only ever true for the AC groups' entropy code — DC sections
+		/// interleave raw header bits with tokens (`DCGroupEncoder.write`),
+		/// which ANS cannot split mid-stream; see `SectionWriter.flushANS`.
+		allowANS: Bool = false
 	) -> EntropyCode {
 		var histograms = [Histogram](
 			repeating: Histogram(), count: baseCode.contextCount)
+		var totalTokens = 0
 
 		for index in range {
 			for record in sections[index].staged {
 				guard case .token(let context, let value) = record else {
 					continue
 				}
+				totalTokens += 1
 				let (symbol, _, _) = UintCoder.encode(value)
 				histograms[Int(context)].add(symbol)
 			}
@@ -124,11 +161,23 @@ enum SectionOptimizer {
 
 		let (clusters, contextMap) = HistogramCluster.cluster(
 			histograms, limit: clustersLimit)
+
+		let ansInfoTables: [[ANSEncSymbolInfo]]? =
+			allowANS && totalTokens >= ansMinimumTokens
+			? clusters.map { histogram in
+				let counts = ANSHistogramNormalizer.normalize(histogram.counts)
+				let alphabetSize = ANSHistogramWriter.alphabetSize(for: counts)
+				return ANSInfoTable.build(
+					distribution: counts, alphabetSize: alphabetSize,
+					logAlphaSize: ANSConstants.logAlphaSize)
+			} : nil
+
 		// `contextMap` already spans the full raw context space — no base-code
 		// composition needed, unlike the pre-bucketed approach this replaced.
 		let optimized = EntropyCode(
 			contextMap: contextMap,
-			prefixCodes: HistogramCluster.buildPrefixCodes(clusters))
+			prefixCodes: HistogramCluster.buildPrefixCodes(clusters),
+			ansInfoTables: ansInfoTables)
 
 		if let sink = EntropyDiagnostics.sink {
 			sink(

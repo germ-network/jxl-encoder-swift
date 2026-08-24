@@ -47,6 +47,11 @@ enum EntropyCodeWriter {
 		let mapCode = HistogramCluster.optimizePrefixCodes(
 			tokens: tokens, contextMap: [0], prefixCodeCount: 1)
 
+		// A context-map array is always small enough that real libjxl's own
+		// token-count threshold would pick prefix coding anyway — this
+		// sub-encoding never carries ANS, only the caller's main token
+		// stream (below) might.
+		writer.write(1, 1)  // use_prefix_code
 		PrefixCodeWriter.writePrefixCodes(mapCode.prefixCodes, writer: &writer)
 		for token in tokens {
 			writer.write(token: token, code: mapCode)
@@ -55,6 +60,16 @@ enum EntropyCodeWriter {
 
 	static func write(_ code: EntropyCode, writer: inout BitWriter) {
 		writeContextMap(code, writer: &writer)
-		PrefixCodeWriter.writePrefixCodes(code.prefixCodes, writer: &writer)
+		if let ansInfoTables = code.ansInfoTables {
+			writer.write(1, 0)  // use_prefix_code = false
+			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+			PrefixCodeWriter.writeUintConfigs(count: ansInfoTables.count, writer: &writer)
+			for table in ansInfoTables {
+				ANSHistogramWriter.write(counts: table.map(\.freq), writer: &writer)
+			}
+		} else {
+			writer.write(1, 1)  // use_prefix_code
+			PrefixCodeWriter.writePrefixCodes(code.prefixCodes, writer: &writer)
+		}
 	}
 }
