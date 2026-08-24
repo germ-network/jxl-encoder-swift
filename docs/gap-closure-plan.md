@@ -160,15 +160,19 @@ serializer alone recovers only ~11 KB of the 83.5 KB transcode gap):
   the single largest measured component. **Landed 2026-08-08** — see
   "Progress" below; recovered ~41–56 KB of the 83.5 KB transcode gap
   measured at Phase A.
+- [x] libjxl's adaptive context assignment for transcoded JPEG (block
+  context map). **Landed 2026-08-08** — see "Landed" below. Recovers only
+  ~1.1–2.3 KB, far less than originally estimated; most of the remaining
+  gap is elsewhere in the bundle this item's estimate came from.
 - ANS serializer: `enc_ans.cc` table build, alias table, reverse-order
   stream writer (~800–1,000 relevant lines of 1,388; prefix and LZ77
   portions excluded — verify LZ77 is off for our sections at e4).
-- libjxl's context assignment for transcoded JPEG (block context map),
-  which carries most of the remaining transcode gap.
 - Histogram clustering drift-check: our `HistogramCluster` (from tiny)
   against `enc_cluster.cc` (372 lines) at e4 settings.
 - Coefficient reordering, which e4 enables: `enc_coeff_order.cc` (334) +
-  `coeff_order.cc` (158).
+  `coeff_order.cc` (158) — now the most likely holder of the remaining
+  transcode gap; re-attribute against real measurement once it lands,
+  not against the pre-correction estimate.
 
 The existing tokenization/context-map/hybrid-uint machinery is shared by
 both back-ends in libjxl's own architecture (`use_prefix_code` per
@@ -259,8 +263,77 @@ encoder side is missing. Sizing (2) needs a source read of
 `EncodeBlockCtxMap`'s actual serialization before estimating effort
 honestly — not done yet.
 
-Not started. Recorded so scope is explicit before picking it up, rather
-than discovered mid-implementation.
+**Sized (2026-08-08).** `enc_context_map.cc`'s `EncodeBlockCtxMap` (36
+lines) + `EncodeContextMap` (105 lines) is smaller than feared: the
+general routine (simple/full fallback, entropy-coded small-int array) is
+close to what `EntropyCodeWriter.writeContextMap` already does for the
+token-level context map — this is the same wire concept applied to a
+different array, not a new one. The formula is now fully pinned:
+`num_thresholds = clamp(⌈log₂(total_dc_luma)⌉ − ⌈log₂(qt[1..5] sum)⌉ − 7,
+1, 7)`, where `qt[1..5]` are the JPEG's own luma quant table's first five
+transposed AC entries — data our parser already extracts. Thresholds are
+placed at even population splits of the luma DC value histogram; chroma
+channels get zero thresholds of their own and derive context from the
+co-located luma bucket (`i/2`). `kNumOrders = 13` (AC-strategy-order
+buckets) means the transmitted `ctx_map` array is sized `3 × 13 ×
+num_dc_ctxs`, but transcode is always DCT8 (order 0), so only ~24 of up to
+~312 entries are ever meaningful — the array shape must still match what
+the decoder derives from the signaled counts, so the padding is
+transmitted (cheaply, given move-to-front + entropy coding), not
+implementation complexity.
+
+The real cost is architectural, not the wire section: **this requires a
+global pre-pass**. `ACGroupEncoder.encodeJPEG` currently extracts each
+block's DC value and tokenizes its AC coefficients in the same pass, group
+by group (`Sources/JXLEncoder/ACGroupEncoder.swift:290`-ish). But
+threshold placement needs the *whole image's* luma DC histogram before any
+block can be assigned a bucket — a genuine two-pass requirement the
+current single-pass group driver doesn't have. Scope: a DC-only pre-pass
+over every AC group (reusing the existing DC-extraction logic, skipping
+tokenization) to build the histogram and compute thresholds, then the
+existing group pass looks up each block's bucket during tokenization.
+
+### Landed (2026-08-08)
+
+Implemented as designed: a parallel module (`JPEGBlockContextMap.swift`,
+`AdaptiveACContext`) rather than parameterizing `ACContext` — the pixel
+path and the JPEG static-table path (`optimizeCodes: false`, still
+actively tested) are byte-for-byte untouched; the adaptive scheme only
+applies when `optimizeCodes: true`. `EntropyCodeWriter.writeContextMap`
+was refactored (pure signature change, verified behavior-preserving) to
+share its array-writing machinery with the new block-context-map section,
+matching how full libjxl's own `EncodeContextMap` serves both callers.
+
+Two source-verification catches worth recording, since both would have
+been silent wrong-pixel bugs if assumed instead of checked:
+`BlockCtxMap::Context`'s channel-to-slot permutation (`c<2 ? c^1 : 2`) —
+my first draft indexed by raw channel — and confirming every channel's
+context at a block position reads the *same* luma-derived DC bucket
+(`row_qdc[bx]`, indexed by the full-resolution position, not each
+channel's own subsampled one).
+
+Gated per the plan: unit tests for the threshold-placement algorithm in
+isolation (5 hand-computed cases, including the `>7` clamp and the exact
+channel-slot permutation) before any wiring; full suite green throughout,
+including the two `optimizeCodes: false` tests that would have caught a
+leak into the static path; a new permanent test
+(`blockContextMapIsAdaptive`) asserting the map is genuinely non-trivial
+on the existing 2200px checkerboard fixture — pixel fidelity alone
+wouldn't have caught a regression to a degenerate map, since a trivial
+one still decodes correctly, just larger.
+
+**Measured impact is much smaller than A3's estimate — and that's a
+correction to record, not a bug.** A3 attributed ~30 KB of the 83.5 KB
+transcode gap to "libjxl's richer context definitions, coefficient
+reordering, DC modular modeling, signaling" as one bundled residual. This
+item is confirmed working (real photos: 4 thresholds, 11 categories;
+checkerboard2200: 6 thresholds, 15 categories — verified non-trivial, not
+a no-op) but recovers only ~1.1–2.3 KB on the two real transcodes
+(497,273 / 621,867 bytes, down from 498,411 / 624,139). The bundled
+estimate over-attributed to this specific piece; coefficient reordering
+(still unstarted, below) is now the more likely holder of most of the
+remaining ~40–54 KB, not block-context-map. Re-attribute once reordering
+lands, rather than assume.
 
 ## Phase C — pixel-path alignment to the named command
 

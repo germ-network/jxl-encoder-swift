@@ -471,8 +471,29 @@ extension Encoder {
 		let dim = ImageDim(
 			width: transcode.width, height: transcode.height,
 			blockAlignment: alignment)
+
+		// The adaptive block context map has no meaning without per-image
+		// optimisation to carry it — the static-table path keeps the fixed
+		// formula `ACContext.blockContext` already computes, unchanged.
+		let blockContextMap: JPEGBlockContextMap.Result? =
+			optimizeCodes ? JPEGBlockContextMap.compute(transcode) : nil
+
 		var dcCode = EntropyCode.staticDC
-		var acCode = EntropyCode.staticAC
+		// A wider raw context space than the static table's fixed 4
+		// categories, sized to whatever this image's adaptive map actually
+		// uses — `SectionOptimizer.optimize` reads only `contextCount`, so
+		// the map/prefix-code values here are never read.
+		var acCode: EntropyCode =
+			if let blockContextMap {
+				EntropyCode(
+					contextMap: [UInt8](
+						repeating: 0,
+						count: blockContextMap.numContexts
+							* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+					prefixCodes: [])
+			} else {
+				.staticAC
+			}
 
 		let mode: SectionWriter.Mode =
 			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
@@ -523,6 +544,7 @@ extension Encoder {
 					widthInBlocks: groupDim.widthInBlocks,
 					heightInBlocks: groupDim.heightInBlocks,
 					quantDC: &groupDC,
+					blockContextMap: blockContextMap,
 					writer: &sections[acIndex])
 
 				// Fold the group's DC into whichever DC group covers it.
@@ -592,6 +614,7 @@ extension Encoder {
 			dcQuantization: (0..<3).map { transcode.dcQuantization(channel: $0) },
 			globalScale: FrameAssembly.jpegGlobalScale,
 			quantDC: 1,
+			blockContextMap: blockContextMap,
 			writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 

@@ -3,10 +3,10 @@
 	import CoreGraphics
 	import Foundation
 	import ImageIO
-	import JXLEncoder
 	import Testing
 	import UniformTypeIdentifiers
 
+	@testable import JXLEncoder
 	@testable import JXLEncoderApple
 
 	/// The shim's JPEG path end to end: which inputs take it, which fall back,
@@ -178,6 +178,22 @@
 			let encoded = try #require(JXLEncoderApple.recompressedJPEG(source))
 			let error = try Self.meanError(encoded, against: source)
 			#expect(error < 2.5, "\(size)x\(size): mean absolute error \(error)")
+		}
+
+		/// Pixel fidelity alone would not catch a regression to a degenerate
+		/// block context map (e.g. `blockContextMap` silently going back to
+		/// nil) — a trivial map still decodes correctly, just larger. None of
+		/// the small hopper/small fixtures reach enough blocks to exercise more
+		/// than one threshold; this one already does (2026-08-08 measurement:
+		/// 6 thresholds, 15 of the format's 16-category ceiling).
+		@Test("a large transcode's block context map is genuinely adaptive")
+		func blockContextMapIsAdaptive() throws {
+			let source = Self.checkerboardJPEG(size: 2200)
+			let image = try JPEGParser.parse([UInt8](source))
+			let transcode = try JPEGTranscode(image)
+			let result = JPEGBlockContextMap.compute(transcode)
+			#expect(result.thresholds.count > 1)
+			#expect(result.numContexts > 4)
 		}
 
 		// MARK: - Fidelity

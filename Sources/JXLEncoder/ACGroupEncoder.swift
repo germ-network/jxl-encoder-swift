@@ -229,6 +229,12 @@ extension ACGroupEncoder {
 		widthInBlocks: Int,
 		heightInBlocks: Int,
 		quantDC: inout [[Int16]],
+		/// Non-nil switches every block to the adaptive per-image context
+		/// assignment; nil keeps the fixed formula `ACContext.blockContext`
+		/// already computes, unchanged. The static-table (`optimizeCodes:
+		/// false`) path always passes nil — this adaptive scheme has no
+		/// meaning without per-image optimisation to carry it.
+		blockContextMap: JPEGBlockContextMap.Result?,
 		writer: inout SectionWriter
 	) {
 		let subsampling = transcode.subsampling
@@ -295,6 +301,13 @@ extension ACGroupEncoder {
 						Int16(clamping: block[0])
 				}
 
+				// Every channel's context at this position shares the same
+				// bucket: it comes from luma's own DC value, read once here,
+				// not resampled per channel (confirmed at the source —
+				// `row_qdc[bx]` is indexed by the full-resolution position).
+				let dcBucket = blockContextMap?.bucket(
+					dc: quantized[1].isEmpty ? 0 : quantized[1][0])
+
 				for channel in ACTokenizer.channelOrder {
 					guard
 						subsampling.codesBlock(
@@ -302,14 +315,27 @@ extension ACGroupEncoder {
 							blockY: blockY0 + by)
 					else { continue }
 					codedThisRow[channel] = true
-					ACTokenizer.writeBlock(
-						quantized: quantized[channel][...],
-						channel: channel,
-						blockX: subsampling.subsampledX(
-							channel: channel, blockX: bx),
-						nonZeroRow: &nonZeros[channel],
-						nonZeroRowAbove: nonZerosAbove[channel],
-						writer: &writer)
+					let subsampledX = subsampling.subsampledX(
+						channel: channel, blockX: bx)
+					if let blockContextMap, let dcBucket {
+						ACTokenizer.writeBlockAdaptive(
+							quantized: quantized[channel][...],
+							blockCategory: blockContextMap.category(
+								channel: channel, dcBucket: dcBucket),
+							numCategories: blockContextMap.numContexts,
+							blockX: subsampledX,
+							nonZeroRow: &nonZeros[channel],
+							nonZeroRowAbove: nonZerosAbove[channel],
+							writer: &writer)
+					} else {
+						ACTokenizer.writeBlock(
+							quantized: quantized[channel][...],
+							channel: channel,
+							blockX: subsampledX,
+							nonZeroRow: &nonZeros[channel],
+							nonZeroRowAbove: nonZerosAbove[channel],
+							writer: &writer)
+					}
 				}
 			}
 			for channel in 0..<3 where codedThisRow[channel] {

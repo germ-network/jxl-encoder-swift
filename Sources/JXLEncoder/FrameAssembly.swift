@@ -113,6 +113,10 @@ enum FrameAssembly {
 		/// Overrides the distance-derived scales, which a transcode does not use.
 		globalScale: Int? = nil,
 		quantDC: Int? = nil,
+		/// Non-nil writes the adaptive JPEG-transcode block context map in
+		/// place of the fixed one below. Always nil on the pixel path and on
+		/// the JPEG static-table path.
+		blockContextMap: JPEGBlockContextMap.Result? = nil,
 		writer: inout BitWriter
 	) throws {
 		if let dcQuantization {
@@ -133,14 +137,19 @@ enum FrameAssembly {
 		writeQuantScales(
 			globalScale: globalScale ?? params.globalScale,
 			quantDC: quantDC ?? params.quantDC, writer: &writer)
-		writer.write(1, 0)  // non-default block context map
-		writer.write(16, 0)  // no dc context, no quant field table
 
-		// The compact block context map has no prefix codes of its own; only its
-		// context map is transmitted.
-		let blockContextCode = EntropyCode(
-			contextMap: ACContext.compactBlockIndexMap, prefixCodes: [])
-		EntropyCodeWriter.writeContextMap(blockContextCode, writer: &writer)
+		if let blockContextMap {
+			JPEGBlockContextMap.write(blockContextMap, writer: &writer)
+		} else {
+			writer.write(1, 0)  // non-default block context map
+			writer.write(16, 0)  // no dc context, no quant field table
+
+			// The compact block context map has no prefix codes of its own;
+			// only its context map is transmitted.
+			let blockContextCode = EntropyCode(
+				contextMap: ACContext.compactBlockIndexMap, prefixCodes: [])
+			EntropyCodeWriter.writeContextMap(blockContextCode, writer: &writer)
+		}
 
 		if dcQuantization != nil {
 			// The default colour correlation is `base_correlation_b = kYToBRatio`,

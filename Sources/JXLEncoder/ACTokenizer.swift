@@ -97,4 +97,53 @@ public enum ACTokenizer {
 			k += 1
 		}
 	}
+
+	/// JPEG-transcode variant of `writeBlock`, taking an externally computed
+	/// block category (`JPEGBlockContextMap`) instead of deriving one from
+	/// `ACContext.blockContext`'s fixed formula. Otherwise identical —
+	/// duplicated rather than parameterising `writeBlock` itself, so the
+	/// pixel path and the JPEG static-table path keep touching only the
+	/// already-gated fixed-category code.
+	public static func writeBlockAdaptive(
+		quantized: ArraySlice<Int32>,
+		blockCategory: Int,
+		numCategories: Int,
+		blockX: Int,
+		nonZeroRow: inout [UInt8],
+		nonZeroRowAbove: [UInt8]?,
+		writer: inout SectionWriter
+	) {
+		var nonZeros = nonZeroCountExcludingDC(quantized)
+		nonZeroRow[blockX] = UInt8(nonZeros)
+
+		let predicted = predictFromTopAndLeft(
+			top: nonZeroRowAbove?[...], row: nonZeroRow[...], x: blockX,
+			defaultValue: 32)
+		let nonZeroContext = AdaptiveACContext.nonZeroContext(
+			nonZeros: predicted, blockCategory: blockCategory,
+			numCategories: numCategories)
+		let histogramOffset = AdaptiveACContext.zeroDensityContextsOffset(
+			blockCategory: blockCategory, numCategories: numCategories)
+
+		writer.write(
+			token: Token(context: UInt32(nonZeroContext), value: UInt32(nonZeros)))
+
+		let base = quantized.startIndex
+		var previous = nonZeros > DCT.blockSize / 16 ? 0 : 1
+		var k = 1
+		while k < DCT.blockSize && nonZeros != 0 {
+			let coefficient = quantized[base + coeffOrder[k]]
+			let context =
+				histogramOffset
+				+ ACContext.zeroDensityContext(
+					nonzerosLeft: nonZeros, k: k,
+					coveredBlocks: 1, log2CoveredBlocks: 0, previous: previous)
+			writer.write(
+				token: Token(
+					context: UInt32(context), value: packSigned(coefficient)))
+			previous = coefficient != 0 ? 1 : 0
+			nonZeros -= previous
+			k += 1
+		}
+	}
 }

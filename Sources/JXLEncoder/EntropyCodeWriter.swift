@@ -14,15 +14,6 @@ enum EntropyCodeWriter {
 	static func writeContextMap(_ code: EntropyCode, writer: inout BitWriter) {
 		guard code.transmittedContextCount != 0 else { return }
 
-		// When every context shares one code the map carries no information.
-		// This is the common case for a re-clustered code on a small image, and
-		// it collapses the map to three bits.
-		if code.contextMap.max() == 0 {
-			writer.write(3, 1)  // simple code, 0 bits per entry
-			return
-		}
-		writer.write(3, 0)  // no simple code, no move-to-front, no lz77
-
 		// A re-clustered code composes with the map it was built from, so the
 		// decoder still sees an entry per original context.
 		let entries: [UInt8] =
@@ -31,6 +22,27 @@ enum EntropyCodeWriter {
 			} else {
 				code.contextMap
 			}
+		writeContextMapEntries(entries, writer: &writer)
+	}
+
+	/// Writes an array of small integers as an entropy-coded context map —
+	/// shared by an entropy code's own map above and, from
+	/// `JPEGBlockContextMap`, the JPEG-transcode AC block-context map,
+	/// exactly as full libjxl's `EncodeContextMap` serves both callers. Port
+	/// of `EncodeContextMap` (enc_context_map.cc) minus the move-to-front
+	/// choice, a pure size optimisation not yet ported.
+	static func writeContextMapEntries(_ entries: [UInt8], writer: inout BitWriter) {
+		guard !entries.isEmpty else { return }
+
+		// When every entry is the same the map carries no information. This is
+		// the common case for a re-clustered code on a small image, and it
+		// collapses the map to three bits.
+		if entries.max() == 0 {
+			writer.write(3, 1)  // simple code, 0 bits per entry
+			return
+		}
+		writer.write(3, 0)  // no simple code, no move-to-front, no lz77
+
 		let tokens = entries.map { Token(context: 0, value: UInt32($0)) }
 		let mapCode = HistogramCluster.optimizePrefixCodes(
 			tokens: tokens, contextMap: [0], prefixCodeCount: 1)
