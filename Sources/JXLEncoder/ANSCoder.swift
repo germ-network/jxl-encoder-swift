@@ -33,10 +33,11 @@ enum ANSConstants {
 	static let tabSize = 1 << logTabSize  // 4096
 	/// `ANS_MAX_ALPHABET_SIZE`; our token alphabet (64) sits well under it.
 	static let maxAlphabetSize = 256
-	/// `CeilLog2Nonzero(StaticEntropyCodes.alphabetSize)`, pinned as a
-	/// constant rather than computed per histogram: our token alphabet is
-	/// fixed-size, not data-narrowed the way full libjxl's is.
-	static let logAlphaSize = 6
+	/// `CeilLog2Nonzero(StaticEntropyCodes.alphabetSize)`. Derived rather
+	/// than a second hand-maintained constant, since our token alphabet is
+	/// fixed-size (not data-narrowed the way full libjxl's is) but still
+	/// only defined once, in `StaticEntropyCodes`.
+	static let logAlphaSize = ceilLog2Nonzero(StaticEntropyCodes.alphabetSize)
 }
 
 /// One entry of the alias table used only to *construct* `reverseMap` below;

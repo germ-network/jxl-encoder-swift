@@ -154,6 +154,12 @@ enum CoeffOrder {
 	/// reordering isn't worthwhile, matching `used_orders == 0`) plus whether
 	/// any channel actually differs — the reference transmits all three
 	/// permutations together once any one of them is non-default.
+	///
+	/// One value computed once per frame has to reach two places: `.orders`
+	/// tokenizes the AC groups, and the whole `Result` is what
+	/// `FrameAssembly.writeACGlobal` transmits. Both consumers must see the
+	/// *same* `Result` for a given encode — the tokenized order and the
+	/// signalled order are unrelated to the decoder otherwise.
 	public struct Result: Sendable {
 		public let orders: [[Int]]
 		public let isCustom: Bool

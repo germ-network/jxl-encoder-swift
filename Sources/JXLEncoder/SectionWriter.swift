@@ -147,23 +147,29 @@ enum SectionOptimizer {
 		var histograms = [Histogram](
 			repeating: Histogram(), count: baseCode.contextCount)
 		var totalTokens = 0
+		var hasRawBits = false
 
 		for index in range {
 			for record in sections[index].staged {
-				guard case .token(let context, let value) = record else {
-					continue
+				switch record {
+				case .token(let context, let value):
+					totalTokens += 1
+					let (symbol, _, _) = UintCoder.encode(value)
+					histograms[Int(context)].add(symbol)
+				case .rawBits:
+					hasRawBits = true
 				}
-				totalTokens += 1
-				let (symbol, _, _) = UintCoder.encode(value)
-				histograms[Int(context)].add(symbol)
 			}
 		}
 
 		let (clusters, contextMap) = HistogramCluster.cluster(
 			histograms, limit: clustersLimit)
 
+		// `allowANS` alone isn't the real invariant — `flushANS` can only
+		// replay a section that staged nothing but tokens, so that's derived
+		// from what was actually staged rather than trusted from the caller.
 		let ansInfoTables: [[ANSEncSymbolInfo]]? =
-			allowANS && totalTokens >= ansMinimumTokens
+			allowANS && !hasRawBits && totalTokens >= ansMinimumTokens
 			? clusters.map { histogram in
 				let counts = ANSHistogramNormalizer.normalize(histogram.counts)
 				let alphabetSize = ANSHistogramWriter.alphabetSize(for: counts)
@@ -172,17 +178,25 @@ enum SectionOptimizer {
 					logAlphaSize: ANSConstants.logAlphaSize)
 			} : nil
 
+		// Building the real Huffman trees is wasted work whenever ANS is
+		// selected — `EntropyCode`'s own prefixCodes go unused for encoding
+		// in that case — except diagnostics still need them to measure
+		// prefix-coded bits against the Shannon bound.
+		let prefixCodes: [PrefixCode] =
+			ansInfoTables == nil || EntropyDiagnostics.sink != nil
+			? HistogramCluster.buildPrefixCodes(clusters) : []
+
 		// `contextMap` already spans the full raw context space — no base-code
 		// composition needed, unlike the pre-bucketed approach this replaced.
 		let optimized = EntropyCode(
 			contextMap: contextMap,
-			prefixCodes: HistogramCluster.buildPrefixCodes(clusters),
+			prefixCodes: prefixCodes,
 			ansInfoTables: ansInfoTables)
 
 		if let sink = EntropyDiagnostics.sink {
 			sink(
 				EntropyDiagnostics.report(
-					clusters: clusters, codes: optimized.prefixCodes,
+					clusters: clusters, codes: prefixCodes,
 					baseContexts: baseCode.contextCount))
 		}
 

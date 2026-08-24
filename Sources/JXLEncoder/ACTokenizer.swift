@@ -121,11 +121,11 @@ public enum ACTokenizer {
 		let predicted = predictFromTopAndLeft(
 			top: nonZeroRowAbove?[...], row: nonZeroRow[...], x: blockX,
 			defaultValue: 32)
-		let nonZeroContext = AdaptiveACContext.nonZeroContext(
-			nonZeros: predicted, blockCategory: blockCategory,
+		let nonZeroContext = ACContext.nonZeroContext(
+			nonZeros: predicted, blockContext: blockCategory,
 			numCategories: numCategories)
-		let histogramOffset = AdaptiveACContext.zeroDensityContextsOffset(
-			blockCategory: blockCategory, numCategories: numCategories)
+		let histogramOffset = ACContext.zeroDensityContextsOffset(
+			blockContext: blockCategory, numCategories: numCategories)
 
 		writer.write(
 			token: Token(context: UInt32(nonZeroContext), value: UInt32(nonZeros)))

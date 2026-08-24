@@ -11,7 +11,10 @@
 //
 
 enum EntropyCodeWriter {
-	static func writeContextMap(_ code: EntropyCode, writer: inout BitWriter) {
+	/// `allowANS` only ever applies to the context-map sub-encoding this
+	/// writes, never to `code`'s own main token stream (`code.ansInfoTables`
+	/// decides that independently, below) — see `writeContextMapEntries`.
+	static func writeContextMap(_ code: EntropyCode, allowANS: Bool = false, writer: inout BitWriter) {
 		guard code.transmittedContextCount != 0 else { return }
 
 		// A re-clustered code composes with the map it was built from, so the
@@ -22,7 +25,7 @@ enum EntropyCodeWriter {
 			} else {
 				code.contextMap
 			}
-		writeContextMapEntries(entries, writer: &writer)
+		writeContextMapEntries(entries, allowANS: allowANS, writer: &writer)
 	}
 
 	/// Writes an array of small integers as an entropy-coded context map —
@@ -31,7 +34,16 @@ enum EntropyCodeWriter {
 	/// exactly as full libjxl's `EncodeContextMap` serves both callers. Port
 	/// of `EncodeContextMap` (enc_context_map.cc) minus the move-to-front
 	/// choice, a pure size optimisation not yet ported.
-	static func writeContextMapEntries(_ entries: [UInt8], writer: inout BitWriter) {
+	///
+	/// `allowANS` must stay `false` for any caller whose context map has to
+	/// stay byte-exact against libjxl-tiny's own (ANS-less) reference —
+	/// `.staticAC`/`.staticDC`'s 1980/45-entry maps route through here too,
+	/// and size alone can't tell those apart from a genuinely large, dynamic,
+	/// ANS-eligible map (the optimised AC code's context map is the same
+	/// 1980-entry raw space, just re-clustered).
+	static func writeContextMapEntries(
+		_ entries: [UInt8], allowANS: Bool = false, writer: inout BitWriter
+	) {
 		guard !entries.isEmpty else { return }
 
 		// When every entry is the same the map carries no information. This is
@@ -44,13 +56,27 @@ enum EntropyCodeWriter {
 		writer.write(3, 0)  // no simple code, no move-to-front, no lz77
 
 		let tokens = entries.map { Token(context: 0, value: UInt32($0)) }
+
+		if allowANS && entries.count >= SectionOptimizer.ansMinimumTokens {
+			let histogram = HistogramCluster.buildHistograms(
+				tokens: tokens, contextMap: [0], contextCount: 1)[0]
+			let counts = ANSHistogramNormalizer.normalize(histogram.counts)
+			let alphabetSize = ANSHistogramWriter.alphabetSize(for: counts)
+			let infoTable = ANSInfoTable.build(
+				distribution: counts, alphabetSize: alphabetSize,
+				logAlphaSize: ANSConstants.logAlphaSize)
+			writer.write(1, 0)  // use_prefix_code = false
+			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+			PrefixCodeWriter.writeUintConfigs(
+				count: 1, logAlphaSize: ANSConstants.logAlphaSize, writer: &writer)
+			ANSHistogramWriter.write(counts: counts, writer: &writer)
+			ANSTokenWriter.write(
+				tokens: tokens, contextMap: [0], infoTables: [infoTable], writer: &writer)
+			return
+		}
+
 		let mapCode = HistogramCluster.optimizePrefixCodes(
 			tokens: tokens, contextMap: [0], prefixCodeCount: 1)
-
-		// A context-map array is always small enough that real libjxl's own
-		// token-count threshold would pick prefix coding anyway — this
-		// sub-encoding never carries ANS, only the caller's main token
-		// stream (below) might.
 		writer.write(1, 1)  // use_prefix_code
 		PrefixCodeWriter.writePrefixCodes(mapCode.prefixCodes, writer: &writer)
 		for token in tokens {
@@ -58,8 +84,8 @@ enum EntropyCodeWriter {
 		}
 	}
 
-	static func write(_ code: EntropyCode, writer: inout BitWriter) {
-		writeContextMap(code, writer: &writer)
+	static func write(_ code: EntropyCode, allowContextMapANS: Bool = false, writer: inout BitWriter) {
+		writeContextMap(code, allowANS: allowContextMapANS, writer: &writer)
 		if let ansInfoTables = code.ansInfoTables {
 			writer.write(1, 0)  // use_prefix_code = false
 			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))

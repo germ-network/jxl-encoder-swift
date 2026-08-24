@@ -343,7 +343,11 @@ public enum Encoder {
 			optimizeCodes ? .staging(acCode) : .direct(acCode)
 		var outputs: [ACGroupOutput] = []
 		outputs.reserveCapacity(dim.groupCount)
-		for compute in computes {
+		// Drains rather than iterates: each group's coefficients are only
+		// needed once, and a frame's worth of them is large enough to be
+		// worth releasing as tokenization consumes them.
+		while !computes.isEmpty {
+			let compute = computes.removeLast()
 			outputs.append(tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode))
 		}
 		assemble(outputs: outputs, dim: dim, sections: &sections)
@@ -361,13 +365,13 @@ public enum Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			writer: &dcGlobal)
+			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
-			writer: &acGlobal)
+			allowContextMapANS: optimizeCodes, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -439,7 +443,7 @@ extension Encoder {
 			repeating: SectionWriter(mode: dcMode),
 			count: 2 + dim.dcGroupCount + dim.groupCount)
 
-		let computes = await withTaskGroup(of: ACGroupCompute.self) { group in
+		var computes = await withTaskGroup(of: ACGroupCompute.self) { group in
 			for index in 0..<dim.groupCount {
 				group.addTask {
 					computeACGroup(
@@ -470,6 +474,9 @@ extension Encoder {
 			for await output in group { collected.append(output) }
 			return collected
 		}
+		// Frees the frame's coefficients before assembly/optimisation rather
+		// than leaving them reachable for the rest of the encode.
+		computes = []
 		assemble(outputs: outputs, dim: dim, sections: &sections)
 
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
@@ -484,13 +491,13 @@ extension Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			writer: &dcGlobal)
+			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
-			writer: &acGlobal)
+			allowContextMapANS: optimizeCodes, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -718,7 +725,7 @@ extension Encoder {
 			globalScale: FrameAssembly.jpegGlobalScale,
 			quantDC: 1,
 			blockContextMap: blockContextMap,
-			writer: &dcGlobal)
+			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
@@ -726,7 +733,7 @@ extension Encoder {
 			groupCount: dim.groupCount, code: acCode,
 			quantTables: (0..<3).map { transcode.quantTable(channel: $0) },
 			coeffOrder: coeffOrder,
-			writer: &acGlobal)
+			allowContextMapANS: optimizeCodes, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(

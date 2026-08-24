@@ -117,6 +117,10 @@ enum FrameAssembly {
 		/// place of the fixed one below. Always nil on the pixel path and on
 		/// the JPEG static-table path.
 		blockContextMap: JPEGBlockContextMap.Result? = nil,
+		/// Whether `code`'s own context map may use ANS — only ever true when
+		/// `code` was built by `SectionOptimizer.optimize`, never for
+		/// `.staticDC`, which must stay byte-exact against libjxl-tiny.
+		allowContextMapANS: Bool = false,
 		writer: inout BitWriter
 	) throws {
 		if let dcQuantization {
@@ -168,7 +172,7 @@ enum FrameAssembly {
 		}
 		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
 		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(code, writer: &writer)
+		EntropyCodeWriter.write(code, allowContextMapANS: allowContextMapANS, writer: &writer)
 	}
 
 	static func writeACGlobal(
@@ -177,6 +181,10 @@ enum FrameAssembly {
 		/// signals the built-in ones.
 		quantTables: [[UInt16]]? = nil,
 		coeffOrder: CoeffOrder.Result = .identity,
+		/// Whether `code`'s own context map may use ANS — only ever true when
+		/// `code` was built by `SectionOptimizer.optimize`, never for
+		/// `.staticAC`, which must stay byte-exact against libjxl-tiny.
+		allowContextMapANS: Bool = false,
 		writer: inout BitWriter
 	) throws {
 		if let quantTables {
@@ -189,7 +197,7 @@ enum FrameAssembly {
 		writer.write(2, 3)  // used_orders selector: the Bits(13) branch
 		CoeffOrder.write(coeffOrder, writer: &writer)
 		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(code, writer: &writer)
+		EntropyCodeWriter.write(code, allowContextMapANS: allowContextMapANS, writer: &writer)
 	}
 
 	static func ceilLog2(_ n: Int) -> Int {

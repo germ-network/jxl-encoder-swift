@@ -73,14 +73,21 @@ public enum ACContext {
 			+ previous
 	}
 
-	public static func zeroDensityContextsOffset(blockContext: Int) -> Int {
-		numBlockCategories * nonZeroBuckets + zeroDensityCount * blockContext
+	/// `numCategories` defaults to the pixel path's fixed category count; the
+	/// JPEG-transcode adaptive block-context-map path passes its own
+	/// per-image category count instead of duplicating this formula.
+	public static func zeroDensityContextsOffset(
+		blockContext: Int, numCategories: Int = numBlockCategories
+	) -> Int {
+		numCategories * nonZeroBuckets + zeroDensityCount * blockContext
 	}
 
 	/// Groups contexts with the same non-zero count together, which clusters
 	/// better than interleaving them with block context.
-	public static func nonZeroContext(nonZeros: Int, blockContext: Int) -> Int {
+	public static func nonZeroContext(
+		nonZeros: Int, blockContext: Int, numCategories: Int = numBlockCategories
+	) -> Int {
 		let bucket = nonZeros < 8 ? nonZeros : (nonZeros >= 64 ? 36 : 4 + nonZeros / 2)
-		return bucket * numBlockCategories + blockContext
+		return bucket * numCategories + blockContext
 	}
 }

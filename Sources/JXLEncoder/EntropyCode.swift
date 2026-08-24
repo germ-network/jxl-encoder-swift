@@ -55,6 +55,9 @@ extension BitWriter {
 	/// Writes one token: the prefix code for its symbol, followed by the
 	/// hybrid-uint extra bits packed above it in the same word.
 	public mutating func write(token: Token, code: EntropyCode) {
+		precondition(
+			code.ansInfoTables == nil,
+			"an ANS-carrying code must be written via flushANS, not this prefix path")
 		let (symbol, bitCount, bits) = UintCoder.encode(token.value)
 		let prefix = code.prefixCodes[Int(code.contextMap[Int(token.context)])]
 		let depth = prefix.isDegenerate ? 0 : Int(prefix.depths[Int(symbol)])

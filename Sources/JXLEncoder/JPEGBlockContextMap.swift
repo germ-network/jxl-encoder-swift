@@ -168,21 +168,10 @@ public enum JPEGBlockContextMap {
 			}
 		}
 		writer.write(4, 0)  // qf_thresholds: always empty for a transcode
-		EntropyCodeWriter.writeContextMapEntries(result.contextMap, writer: &writer)
-	}
-}
-
-/// Parallel to `ACContext`'s two composition formulas, parameterised by the
-/// category count instead of assuming the fixed `numBlockCategories`.
-/// `ACContext` itself is untouched, so the pixel path and the JPEG
-/// static-table path keep their exact, already-gated behaviour.
-enum AdaptiveACContext {
-	static func nonZeroContext(nonZeros: Int, blockCategory: Int, numCategories: Int) -> Int {
-		let bucket = nonZeros < 8 ? nonZeros : (nonZeros >= 64 ? 36 : 4 + nonZeros / 2)
-		return bucket * numCategories + blockCategory
-	}
-
-	static func zeroDensityContextsOffset(blockCategory: Int, numCategories: Int) -> Int {
-		numCategories * ACContext.nonZeroBuckets + ACContext.zeroDensityCount * blockCategory
+		// Always a per-image, dynamically computed map — no static-tiny
+		// reference to stay byte-exact against, unlike the pixel/JPEG
+		// static-table path's fixed context map.
+		EntropyCodeWriter.writeContextMapEntries(
+			result.contextMap, allowANS: true, writer: &writer)
 	}
 }

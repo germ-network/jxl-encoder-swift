@@ -543,6 +543,56 @@ entropy saving) — real libjxl has no cost/benefit check here either, it
 customizes whenever the size floor is met, so this small regression on
 tiny images is the reference's own behaviour, not a defect in the port.
 
+### Phase B code review (2026-08-24)
+
+An 8-angle review (line-by-line, removed-behaviour, cross-file trace, reuse,
+simplification, efficiency, altitude, conventions) over the full Phase B diff
+(clustering through coefficient reordering), each candidate independently
+verified. 10 findings survived; 9 landed, all behaviour-preserving (full
+suite green, real-corpus `djxl` decode unchanged):
+
+- Peak memory: the pixel path's compute-then-tokenize split (needed so the
+  frame-global coefficient order is known before any group tokenizes) was
+  holding every group's coefficients in memory through the whole tokenize
+  pass — measured at 22–41% of this project's own documented peak-RSS
+  budget at 2/12/48 MP. Now drained/cleared as tokenization consumes them.
+- Two more instances of "ANS/prefix inconsistency enforced only by a runtime
+  crash, not the type system" — the same *class* of bug as the ANS and
+  CoeffOrder bugs found earlier in Phase B, just not live: `write(token:
+  code:)` now preconditions against an ANS-carrying code, and `allowANS`
+  is derived from whether a section actually staged raw bits, not just
+  asserted by the caller.
+- `ANSConstants.logAlphaSize` now derives from `StaticEntropyCodes.
+  alphabetSize` instead of a hand-pinned literal that happened to agree.
+- `computeGroup`/`tokenizeGroup`'s flat-index formula, previously written
+  out twice and kept in sync only by a comment, now shares one function.
+- `SectionOptimizer.optimize` no longer builds real Huffman trees for
+  sections that end up using ANS instead (the built-but-discarded prefix
+  codes `EntropyCode.ansInfoTables`'s doc comment already called out) —
+  except when `--entropy-report` is active, which still needs them.
+- `AdaptiveACContext` (a hand-duplicate of `ACContext`'s two formulas for a
+  parameterised category count) is gone; `ACContext` itself now takes an
+  optional `numCategories`.
+
+One finding — large adaptive-block-context-map JPEG transcodes always
+signalling their own context map as prefix, even well past the same
+`total_tokens < 100` ANS threshold used everywhere else — needed a real fix,
+not a one-liner: the shared context-map writer also serves `.staticAC`/
+`.staticDC` (1980/45 entries, must stay byte-exact against libjxl-tiny
+forever, which has no ANS at all), so entry count alone can't gate ANS
+eligibility. First attempt gated on size alone and broke that byte-exact
+gate immediately (caught by the existing test suite, not by hand). Fixed
+properly: `allowANS` threaded explicitly from `optimizeCodes` through
+`writeDCGlobal`/`writeACGlobal` → `EntropyCodeWriter.write`/
+`writeContextMap` → `writeContextMapEntries`, `.staticAC`/`.staticDC` never
+opt in (`optimizeCodes == false` there by construction), `JPEGBlockContextMap`'s
+own map always does (no static counterpart to protect). Verified: full
+suite green, and a measured (if modest) size win on the JPEG-recompression
+corpus fixtures that actually exercise it (recomp_420 −18 B, recomp_444
+−44 B) — consistent with the ANS-vs-prefix gains seen elsewhere in Phase B,
+where this port's simplified always-full-precision histogram normalisation
+trades away some of libjxl's own header-size search.
+
 ## Phase C — pixel-path alignment to the named command
 
 In order: quant calibration (uniform field `0.79/d`, global scale mapping —

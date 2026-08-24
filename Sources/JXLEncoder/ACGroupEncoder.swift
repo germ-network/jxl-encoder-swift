@@ -23,6 +23,15 @@ public enum ACGroupEncoder {
 	/// `kInvDCQuant[2] * kDCQuant[1]` is 0.5.
 	static let dcCflFactor: [Float] = [0, 0, inverseDCQuant[2] * dcQuant[1]]
 
+	/// A channel's flat index into a per-channel, block-major array — both
+	/// `computeGroup`'s coefficient storage and `tokenizeGroup`'s read of it
+	/// — given that channel's own subsampled block position. Shared so the
+	/// two functions' block walks can't independently drift on how they
+	/// address the same storage.
+	static func flatBlockIndex(channel: Int, sx: [Int], sy: [Int], channelWidths: [Int]) -> Int {
+		sy[channel] * channelWidths[channel] + sx[channel]
+	}
+
 	/// Quantizes one DC coefficient.
 	///
 	/// The multiply-subtract is written as an explicit fused multiply-add
@@ -122,7 +131,7 @@ public enum ACGroupEncoder {
 					subsampling.subsampledY(channel: $0, blockY: by)
 				}
 				func index(_ channel: Int) -> Int {
-					sy[channel] * channelWidths[channel] + sx[channel]
+					flatBlockIndex(channel: channel, sx: sx, sy: sy, channelWidths: channelWidths)
 				}
 
 				// Y first: its reconstruction is what X and B decorrelate against.
@@ -237,8 +246,8 @@ public enum ACGroupEncoder {
 							channel: channel, blockX: bx, blockY: by)
 					else { continue }
 					codedThisRow[channel] = true
-					let index =
-						sy[channel] * channelWidths[channel] + sx[channel]
+					let index = flatBlockIndex(
+						channel: channel, sx: sx, sy: sy, channelWidths: channelWidths)
 					let base = index * DCT.blockSize
 					ACTokenizer.writeBlock(
 						quantized: coefficients[channel][base..<base + DCT.blockSize],
