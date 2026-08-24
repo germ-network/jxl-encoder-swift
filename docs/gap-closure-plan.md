@@ -94,13 +94,67 @@ Recorded because the plan's shape depends on them:
   committed under `Reference/` (the measurement corpus lives in ephemeral
   scratch today and has already been wiped once).
 
+## Phase A results (2026-08-08)
+
+All four steps ran; the exit decision left open is the filter flag.
+
+**A1 — the EPF question answered itself: EPF is a no-op at e4.** Across the
+full gaborish × epf 0–3 grid on six corpus images, the epf setting moved
+size by ≤4 bytes and ssimulacra2 by ≤0.3 — noise. EPF signaling leaves the
+port's scope entirely. Gaborish is the whole filter effect: +1.0 to +3.1
+points for +7–31% size. The named-command choice is exactly gaborish on or
+off; `e4 g0` sits ~0.4 points under the e7 bar on average (range −1.2 to
++1.7), `e4 g1` beats the bar on every image at +17–41% size.
+
+**A2 — calibration is real but insufficient.** Encoding our RD curve
+(d 1.0 → 0.4) and reading it at e4's size per image: still 1.8–3.5 points
+below e4 at matched bytes on every photo. The gradient is categorical —
+our size floor is ~16–17 KB at any distance vs e4's 8.2 KB. The deficit at
+matched size is the entropy layer showing up on the quality axis: bits
+spent on coding overhead are bits not spent on signal. Consequence: the
+AdaptiveQuant deletion cannot be judged until after Phase B — the
+quant-field comparison is confounded until the entropy layer is fixed.
+Decision deferred to a post-B re-measure, not abandoned.
+
+**A3 — the gap is modeling more than coding.** Instrumented split
+(`jxlencode --entropy-report`), on the 4:2:0 transcode's 83.5 KB gap:
+
+| component | share |
+|---|---|
+| prefix coder vs Shannon bound, current clustering | ~11 KB (2–3%) |
+| clustering ceiling — tiny stages tokens through its static tables' 8 buckets; clustering the full context space at libjxl's limit of 128 yields 53 AC clusters | ~42 KB (10.9%) |
+| residual: libjxl's richer context definitions, coefficient reordering, DC modular modeling, signaling | ~30 KB |
+
+"Port the ANS serializer behind the existing seam" is therefore *not
+sufficient*: Phase B must also cluster the full context space (replacing
+the staged-bucket re-clustering inherited from tiny) and port libjxl's
+context assignment for the transcode. Pixel-path DC on smooth content is
+the one place the coder itself dominates (29% coder loss on the gradient's
+modular DC — prefix's whole-bit floor on skewed distributions).
+
+Instrumentation landed as emission-neutral changes, verified by the
+byte-exact suite: staging now retains original token contexts (maps
+compose identically at write-out), and `EntropyDiagnostics` +
+`jxlencode --entropy-report` produce the split on demand.
+
+**A4 — transcode e4 = e3 = the plateau** (456,104 / 568,375 bytes),
+so `-e 4` serves both paths. Corpus regeneration is committed as
+`Reference/make_corpus.sh`.
+
 ## Phase B — entropy back-end (both paths benefit)
 
-Port from full libjxl, in dependency order:
+Port from full libjxl, in dependency order (scope updated by A3 — the
+serializer alone recovers only ~11 KB of the 83.5 KB transcode gap):
 
 - ANS serializer: `enc_ans.cc` table build, alias table, reverse-order
   stream writer (~800–1,000 relevant lines of 1,388; prefix and LZ77
   portions excluded — verify LZ77 is off for our sections at e4).
+- Full-context-space clustering at libjxl's limit of 128, replacing the
+  staged-bucket re-clustering inherited from tiny's static tables — the
+  single largest measured component (~42 KB). Staging already retains
+  original contexts, so this is a change to `SectionOptimizer` only.
+- libjxl's context assignment for transcoded JPEG (block context map),
+  which carries most of the ~30 KB residual.
 - Histogram clustering drift-check: our `HistogramCluster` (from tiny)
   against `enc_cluster.cc` (372 lines) at e4 settings.
 - Coefficient reordering, which e4 enables: `enc_coeff_order.cc` (334) +
