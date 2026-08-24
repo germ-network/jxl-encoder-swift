@@ -31,6 +31,9 @@ let package = Package(
 			resources: [.copy("Fixtures")]
 		),
 		.executableTarget(name: "jxlbench", dependencies: ["JXLEncoder"]),
+		//Measurement harness for docs/gap-closure-plan.md — encodes a file at a
+		//given distance so corpus sweeps can compare against the reference.
+		.executableTarget(name: "jxlencode", dependencies: ["JXLEncoderApple"]),
 		.testTarget(
 			name: "JXLEncoderAppleTests",
 			dependencies: ["JXLEncoder", "JXLEncoderApple"],

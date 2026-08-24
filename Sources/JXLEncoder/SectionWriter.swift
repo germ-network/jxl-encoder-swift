@@ -14,9 +14,10 @@
 /// One entry in a staged section: either a token to be entropy coded once the
 /// code is known, or bits that bypass entropy coding.
 enum StagedRecord: Sendable {
-	/// `context` is already mapped through the base code's context map, so it
-	/// indexes a prefix code rather than the full context space.
-	case token(mappedContext: UInt8, value: UInt32)
+	/// The token's original context, unmapped — mapping through the base
+	/// code's context map happens when the optimized code is built, so the
+	/// full context space stays measurable until then.
+	case token(context: UInt32, value: UInt32)
 	case rawBits(count: Int, value: UInt64)
 }
 
@@ -50,11 +51,8 @@ public struct SectionWriter: Sendable {
 		switch mode {
 		case .direct(let code):
 			writer.write(token: token, code: code)
-		case .staging(let base):
-			staged.append(
-				.token(
-					mappedContext: base.contextMap[Int(token.context)],
-					value: token.value))
+		case .staging:
+			staged.append(.token(context: token.context, value: token.value))
 		}
 	}
 
@@ -69,17 +67,15 @@ public struct SectionWriter: Sendable {
 		}
 	}
 
-	/// Replays staged records through a finished code. Contexts were already
-	/// mapped when staged, so the replay code's map must be the identity over
-	/// the staged range.
+	/// Replays staged records through a finished code, whose context map must
+	/// span the full context space the tokens were staged with.
 	mutating func flush(code: EntropyCode) {
 		guard case .staging = mode else { return }
 		for record in staged {
 			switch record {
-			case .token(let mappedContext, let value):
+			case .token(let context, let value):
 				writer.write(
-					token: Token(context: UInt32(mappedContext), value: value),
-					code: code)
+					token: Token(context: context, value: value), code: code)
 			case .rawBits(let count, let value):
 				writer.write(count, value)
 			}
@@ -109,21 +105,43 @@ enum SectionOptimizer {
 
 		for index in range {
 			for record in sections[index].staged {
-				guard case .token(let mappedContext, let value) = record else {
+				guard case .token(let context, let value) = record else {
 					continue
 				}
 				let (symbol, _, _) = UintCoder.encode(value)
-				histograms[Int(mappedContext)].add(symbol)
+				histograms[Int(baseCode.contextMap[Int(context)])].add(symbol)
 			}
 		}
 
 		let (clusters, contextMap) = HistogramCluster.cluster(histograms)
-		// The decoder needs a map over the original context space, so the two
-		// maps compose when the code is written out.
+		// Compose the base and cluster maps into one map over the full context
+		// space — the transmitted bytes are identical to composing at
+		// write-out, and replay can then take tokens with original contexts.
 		let optimized = EntropyCode(
-			contextMap: contextMap,
-			prefixCodes: HistogramCluster.buildPrefixCodes(clusters),
-			originalContextMap: baseCode.contextMap)
+			contextMap: baseCode.contextMap.map { contextMap[Int($0)] },
+			prefixCodes: HistogramCluster.buildPrefixCodes(clusters))
+
+		if let sink = EntropyDiagnostics.sink {
+			var full = [Histogram](
+				repeating: Histogram(), count: baseCode.contextCount)
+			for index in range {
+				for record in sections[index].staged {
+					guard case .token(let context, let value) = record else {
+						continue
+					}
+					let (symbol, _, _) = UintCoder.encode(value)
+					full[Int(context)].add(symbol)
+				}
+			}
+			// libjxl's cluster limit, not tiny's 8 — the report measures what
+			// the reference's context modeling could reach with these tokens.
+			let (fullClusters, _) = HistogramCluster.cluster(full, limit: 128)
+			sink(
+				EntropyDiagnostics.report(
+					clusters: clusters, codes: optimized.prefixCodes,
+					baseContexts: baseCode.prefixCodeCount,
+					fullContextClusters: fullClusters))
+		}
 
 		for index in range {
 			sections[index].flush(code: optimized)

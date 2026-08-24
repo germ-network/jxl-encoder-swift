@@ -126,12 +126,12 @@ enum HistogramCluster {
 	}
 
 	static func cluster(
-		_ histograms: [Histogram]
+		_ histograms: [Histogram], limit: Int = clustersLimit
 	) -> (clusters: [Histogram], contextMap: [UInt8]) {
 		guard histograms.count > 1 else {
 			return (histograms, [UInt8](repeating: 0, count: histograms.count))
 		}
-		let maxHistograms = min(clustersLimit, histograms.count)
+		let maxHistograms = min(limit, histograms.count)
 		let (clusters, symbols) = fastCluster(histograms, maxHistograms: maxHistograms)
 		return reindex(symbols: symbols, clusters: clusters)
 	}
