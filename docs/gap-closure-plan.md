@@ -227,6 +227,41 @@ Remaining transcode gap (~42–56 KB) is the context-assignment item still
 queued below — libjxl's block-context map for JPEG transcode, not just
 wider clustering of ours.
 
+### Scoped: JPEG-transcode block context map (2026-08-08)
+
+Larger than the plan's original one-line estimate. Traced at the source
+(`enc_frame.cc`'s `ComputeJPEGTranscodingData`, ~1071–1116): full libjxl
+buckets each block into up to 8 luma-DC-value quantiles
+(`num_thresholds = clamp(log2(total_dc_luma) − log2(Σ quant-table values)
+− 7, 1, 7)`, walking the DC histogram to place thresholds at even
+population splits), then derives a per-block **AC context category** from
+{channel × AC-strategy-order × DC-bucket} — up to 16 categories, signaled
+per image via a dedicated wire section (`EncodeBlockCtxMap`, called
+separately from the entropy code's own context-map writer at
+`enc_frame.cc:1246`).
+
+This is *not* how DC values themselves get coded — that stays through the
+modular DC image (`AddVarDCTDC(..., jpeg_transcode: true)`), architecture
+unchanged from what tiny already does and our port already matches. It's
+an additional, adaptive input to **AC** context selection, on top of what
+`ACContext.blockContext(channel:acStrategyCode:)` already computes.
+
+The gap to the plan's original estimate: our port has never emitted a
+non-trivial block context map at all. `ACContext`'s `numBlockCategories =
+4` is a fixed constant (tiny's design — channel-only, no per-image
+adaptation), and nothing in `Sources/JXLEncoder` writes the wire section
+that would signal something richer. So this item is two things bundled
+together, not one: (1) the DC-threshold algorithm above, JPEG-transcode
+specific, and (2) a wire-format section our port has zero prior
+implementation of — decoders (ImageIO, djxl) already support it, since
+it's spec-required and every other real encoder emits it; only our
+encoder side is missing. Sizing (2) needs a source read of
+`EncodeBlockCtxMap`'s actual serialization before estimating effort
+honestly — not done yet.
+
+Not started. Recorded so scope is explicit before picking it up, rather
+than discovered mid-implementation.
+
 ## Phase C — pixel-path alignment to the named command
 
 In order: quant calibration (uniform field `0.79/d`, global scale mapping —
