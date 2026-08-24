@@ -1,11 +1,15 @@
 # Retargeting the port to full libjxl at a named configuration (issue #2)
 
 Plan of record. The port's reference changes from libjxl-tiny to **full
-libjxl invoked as one exact, reproducible command line**. Everything this
-encoder emits should converge to what that command emits; every stage where
+libjxl, implemented incrementally as a ladder of exact, reproducible command
+lines** — `cjxl -e 4`, then `-e 5`, and so on. Everything this encoder emits
+should converge to what the current rung's command emits; every stage where
 we differ, the named command is right and this is a bug. No feature is
-chosen by our own cost/benefit ranking — the configuration is chosen once,
-here, and then implemented.
+chosen by our own cost/benefit ranking, and no rung is chosen by comparison
+to what this project shipped before — each rung is exactly what that `-e N`
+invocation does, nothing added, nothing forced on. The implementation
+surface grows rung by rung toward full libjxl; there is no fixed stopping
+point.
 
 ## Why a named configuration
 
@@ -19,43 +23,45 @@ left to instrument when output diverges. A named configuration keeps the
 discipline that found every real bug in this project: when in doubt, run
 the reference command, instrument it, and diff.
 
-## The named target
+## The named target — rung 1
 
 ```
 cjxl <input> <output>.jxl -d <distance> -e 4 --container=0
 ```
 
 pinned at cjxl v0.12.x, plus `-j 1` for JPEG input (the recompression
-path), plus pixel-path filter flags (`--gaborish=1 --epf=<N>`) whose values
-are fixed by Phase A's sweep and then become part of the named command.
-
-Effort 4 is chosen on source and measurement evidence, not convenience:
+path). **No forced flags.** Every setting `cjxl -e 4` picks by default is
+what this rung implements, including gaborish and EPF defaulting off —
+confirmed at the source: `SpeedTier::kCheetah` (= e4) is the tier
+`AcStrategyHeuristics::ProcessRect` uses for DCT8-only fill, and gaborish
+only turns on by default starting at `kHare` (e5), per `common.h`'s tier
+comments. e4 is not chosen because of how it compares to anything this
+project shipped before — that comparison caused real diversions during
+Phase A (a filter-flag decision driven by "does this beat e7", not by what
+e4 actually does) and is dropped as a criterion. e4 is chosen because it is
+the simplest rung to reach first:
 
 - **e1–e4 are DCT8-only.** `AcStrategyHeuristics::ProcessRect` fills the
   whole strategy image with DCT8 at `speed_tier >= kCheetah` (= e4). The
   existing 8×8-only core is a *correct implementation choice* for this
-  target, not a divergence.
-- **e4 matches the app's old quality bar.** The bar is what jxl-coder
-  shipped: cjxl e7 at d=1.0. Measured on the corpus (2026-08-08, d=1.0,
-  ssimulacra2 / bytes):
-
-  | image | e4 | e4 +gab +epf1 | e7 (old bar) | ours today |
-  |---|---|---|---|---|
-  | hopper | 89.82 / 10,307 | 92.22 / 12,187 | 90.63 / 10,002 | 82.70 / 8,413 |
-  | macan | 85.17 / 44,913 | 88.25 / 58,849 | 83.50 / 41,862 | 76.94 / 33,303 |
-  | bliznaca | 88.21 / 40,888 | 90.48 / 47,820 | 88.76 / 40,711 | 83.32 / 37,644 |
-
-  Plain e4 sits within ~1 ssimulacra2 point of e7 at a few percent size
-  premium; forcing Gaborish+EPF pushes quality *above* e7 on every photo at
-  a 17–41% size premium. Whether the named command includes the filter
-  flags is a size-vs-quality product decision (Phase A exit, Mark's call).
+  rung, not a divergence.
 - **The transcode effort ladder plateaus by e3**, so e4 loses nothing
   there (456,104 bytes at e3 vs 456,100 at e7 on the reference JPEG;
-  verify e4 lands on the plateau at Phase A — expected, cheap to check).
-- **e4 excludes the expensive tail.** Patches/dots/splines (e7 defaults),
+  verified at Phase A — e4 lands exactly on the plateau).
+- **e4 excludes the expensive tail** — patches/dots/splines (e7 defaults),
   error diffusion (e6), AC-strategy search and the adaptive quant field
-  (e5), and the butteraugli iteration loops (e8+) are all out of scope by
-  configuration, not by our judgment.
+  (e5), gaborish/EPF (e5 defaults), and the butteraugli iteration loops
+  (e8+) — by configuration, not by our judgment. Every one of those is a
+  later rung; see "Growing past e4" below.
+
+For reference only, not as a gate — measured on the corpus (2026-08-08,
+d=1.0, ssimulacra2 / bytes), plain e4 against what jxl-coder shipped:
+
+| image | e4 (this rung) | e7 (old jxl-coder default) | ours today |
+|---|---|---|---|
+| hopper | 89.82 / 10,307 | 90.63 / 10,002 | 82.70 / 8,413 |
+| macan | 85.17 / 44,913 | 83.50 / 41,862 | 76.94 / 33,303 |
+| bliznaca | 88.21 / 40,888 | 88.76 / 40,711 | 83.32 / 37,644 |
 
 ## What the measurements overturned (2026-08-08)
 
@@ -82,8 +88,8 @@ Recorded because the plan's shape depends on them:
 ## Phase A — pin the target and bound the work (no porting)
 
 - A1. Filter-flag sweep: e4 × {gaborish on/off} × {epf 0–3} on the corpus,
-  ssimulacra2 + bytes. Output: the exact named command, chosen against the
-  e7 bar. Decision on record in this file.
+  ssimulacra2 + bytes. Output: confirm what e4's real defaults are and
+  what they cost, so rung 1 implements them exactly rather than by guess.
 - A2. Matched-size RD check: our encoder at reduced `d` until size matches
   e4's per image; compare ssimulacra2. Confirms (or refutes) the
   rate-calibration reading and the AdaptiveQuant deletion.
@@ -96,15 +102,18 @@ Recorded because the plan's shape depends on them:
 
 ## Phase A results (2026-08-08)
 
-All four steps ran; the exit decision left open is the filter flag.
+All four steps ran.
 
-**A1 — the EPF question answered itself: EPF is a no-op at e4.** Across the
-full gaborish × epf 0–3 grid on six corpus images, the epf setting moved
-size by ≤4 bytes and ssimulacra2 by ≤0.3 — noise. EPF signaling leaves the
-port's scope entirely. Gaborish is the whole filter effect: +1.0 to +3.1
-points for +7–31% size. The named-command choice is exactly gaborish on or
-off; `e4 g0` sits ~0.4 points under the e7 bar on average (range −1.2 to
-+1.7), `e4 g1` beats the bar on every image at +17–41% size.
+**A1 — confirms e4's real defaults are gaborish off, EPF irrelevant.**
+Across the full gaborish × epf 0–3 grid on six corpus images: the epf
+setting moved size by ≤4 bytes and ssimulacra2 by ≤0.3 regardless of
+gaborish — noise, and consistent with EPF's sigma field being driven by
+the quant field, which is uniform at e4. Gaborish is the whole filter
+effect: +1.0 to +3.1 points for +7–31% size when forced on. Neither is
+part of rung 1 — `cjxl -e 4` unmodified doesn't enable them, so this port
+doesn't either. (The comparison to e7's quality that earlier drove a
+should-we-force-gaborish debate is recorded above as reference data only;
+it is not why gaborish is off here — it's off because e4 is off.)
 
 **A2 — calibration is real but insufficient.** Encoding our RD curve
 (d 1.0 → 0.4) and reading it at e4's size per image: still 1.8–3.5 points
@@ -176,11 +185,11 @@ the named command (expected ≤3%); pixel-path decoded pixels unchanged
 ## Phase C — pixel-path alignment to the named command
 
 In order: quant calibration (uniform field `0.79/d`, global scale mapping —
-including the AdaptiveQuant deletion if A2 confirms), Gaborish
-(`enc_gaborish.cc`, 74 lines — encoder-side inverse convolution plus
-signaling), EPF signaling (at uniform quant the sigma field is constant —
-small), CfL-default alignment check (e4 uses the default correlation map;
-we already emit defaults — verify byte-level agreement).
+including the AdaptiveQuant deletion if A2 confirms), CfL-default
+alignment check (e4 uses the default correlation map; we already emit
+defaults — verify byte-level agreement). Gaborish and EPF are not rung-1
+work — they are off by default at e4 (A1), so there is nothing to port
+until a later rung enables them (see "Growing past e4").
 
 Gate per stage: corpus ssimulacra2 and size move *toward* the named
 command's numbers, decode gates pass. End-state gate: within the corridor
@@ -190,6 +199,43 @@ of the named command on every corpus image, both axes.
 
 Rerun germDM-ios-refresh#661's tables against the named command. Un-drafting
 #661 is decided on those numbers.
+
+## API surface
+
+The public entry points (`distance:` on `JXLEncoderApple.encode`) are
+unaffected — distance stays continuous, chosen by the caller, and is
+orthogonal to which rung is implemented. Effort is not: it becomes a
+closed enum, one case per rung actually implemented, each documented as
+the literal `cjxl` invocation it reproduces:
+
+```swift
+public enum Effort: Int, Sendable {
+    /// ≡ `cjxl -e 4` (default gaborish/EPF: off)
+    case e4 = 4
+}
+```
+
+No range validation, no clamping — an effort not yet implemented is a
+compile error (the case doesn't exist) or, for a caller passing a
+non-static value, a thrown `unsupportedEffort` naming what's supported.
+Silently substituting a lower rung for a requested one hides a real budget
+mismatch from the caller; this project's repeated failure mode has been
+believing an unverified number, not a caller getting an explicit error.
+Adding `case e5` later is purely additive.
+
+## Growing past e4
+
+Rung 1 is not a destination. Once e4's gates pass, the next rung is e5 —
+its own named command (`cjxl -e 5 ...`), its own phased plan following this
+same shape (bound the work, port, gate, close the loop), and its own entry
+in this document. e5 is where the adaptive quant field, gaborish, EPF, and
+richer AC-strategy heuristics actually enter scope; e6 adds error
+diffusion; e7 adds patches/dots/splines. Each rung is implemented because
+it's the next `-e N`, not because it beats a prior rung's output — that
+framing produced the gaborish detour in Phase A and is retired as a
+decision criterion for good. The growth path is the implementation surface
+converging on full libjxl, rung by rung, for as long as it's worth the
+engineering cost — not a fixed stopping point chosen now.
 
 ## Interim honesty
 
@@ -209,11 +255,13 @@ the two repos (verified by diff, 2026-08-08); LICENSE is unchanged. The
 "no novel contributions" statement survives — implementing a subset of a
 named upstream configuration invents nothing.
 
-## Non-goals
+## Non-goals (for this rung)
 
-Everything e4 does not do: variable block sizes and AC-strategy search,
-the adaptive quant field, error diffusion, patches/dots/splines,
-butteraugli iteration, progressive passes, animation, HDR, modular mode
-beyond the existing DC/alpha uses. Byte-exactness against cjxl (full
-libjxl is SIMD/threading-nondeterministic; gates are decode-exactness,
-corridors, and metrics). Effort levels other than 4.
+Everything e4 does not do — variable block sizes and AC-strategy search,
+the adaptive quant field, error diffusion, patches/dots/splines, gaborish,
+EPF, butteraugli iteration — is out of scope for *this* rung, not excluded
+from the project. Each is a later rung's work item; see "Growing past e4."
+Standing non-goals regardless of rung: progressive passes, animation, HDR,
+modular mode beyond the existing DC/alpha uses, and byte-exactness against
+cjxl itself (full libjxl is SIMD/threading-nondeterministic — gates are
+decode-exactness, corridors, and metrics, at every rung).
