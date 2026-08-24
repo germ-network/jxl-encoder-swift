@@ -430,6 +430,82 @@ some of libjxl's own header-size optimization away for simplicity.
 `allowANS: true` at all three `SectionOptimizer.optimize` AC call sites
 in `Encoder.swift`.
 
+### Scoped: coefficient reordering (2026-08-24)
+
+Confirmed active at the named target, not a speculative add: `-e N` maps to
+`SpeedTier(10 - N)` (`encode.cc`), so `-e 4` is `SpeedTier::kCheetah` (6) —
+whose own source comment reads "Turns on clustering and enables coefficient
+reordering." The gate that disables it (`speed >= kFalcon`, i.e. `-e <= 3`)
+doesn't apply at e4. It also only activates past a size floor (frames
+narrower than 5 blocks on both axes keep the default order), so tiny fixtures
+are unaffected — consistent with everything else in this port.
+
+What it does: `TokenizeCoefficients` reads each AC coefficient as
+`block[order[k]]` instead of `block[coeffOrder[k]]` (`ACTokenizer`'s existing
+fixed zig-zag table) — a per-frame, per-channel permutation of the scan
+order, computed from the frame's own zero/nonzero statistics per coefficient
+position (positions that are more often nonzero move earlier), then
+transmitted as a Lehmer (factorial-base) code so a near-identity permutation
+costs almost nothing.
+
+Porting surface, fully traced against `enc_coeff_order.cc` (334 lines),
+`coeff_order.cc`/`.h` (220 lines) and `lehmer_code.h` (85 lines), narrowed
+by DCT8-only content (one order bucket, not the 13 the general format
+supports):
+
+- **Natural order is free** — `ComputeNaturalCoeffOrder`'s output for an
+  8x8, single-covered-block transform is, byte for byte, `ACTokenizer.
+  coeffOrder` (verified by running the reference's index arithmetic in
+  isolation and diffing). The inverse LUT this feature also needs is a
+  60-second derivation from the same table, not a second port.
+- **Lehmer code** (`ComputeLehmerCode`, Fenwick-tree factorial-base
+  encoding) — encode direction only, no decoder needed; ported verbatim,
+  no simplification available or needed.
+- **`CoeffOrderContext`** reduces, for our fixed alphabet, to
+  `val == 0 ? 0 : min(floorLog2Nonzero(val) + 1, 7)` — traced from
+  `HybridUintConfig(0,0,0).Encode`'s general formula, not reimplemented
+  generically.
+- **Wire header**: `used_orders` is a `U32Enc(Val(0x5F), Val(0x13), Val(0),
+  Bits(13))` selector field. With one order bucket the value is only ever 0
+  or 1, so this is a 6-line dedicated writer (2-bit selector + optional 13
+  raw bits), not a general `U32Enc` port — same scoping call already made
+  for `JPEGBlockContextMap`'s `ThresholdCoder`.
+- **Permutation tokens** get their own small entropy code
+  (`kPermutationContexts = 8`), written directly (always prefix, like
+  `writeContextMapEntries`) rather than routed through the ANS-eligible
+  path — the token count here (≤63 per channel) makes the wire-size
+  difference a rounding error, and it avoids adding a second ANS call site
+  to reason about for no measurable gain.
+
+**One deliberate simplification**: `ComputeCoeffOrder`'s zero-counting
+samples only half the frame's blocks at this speed tier, via a seeded
+xorshift128+ PRNG, purely as a speed optimisation. Full-frame sampling
+(no PRNG state to port, strictly better statistics, and free — the
+counting pass is cheap next to the DCT/quantize work it rides alongside)
+is the obvious substitution, justified the same way as ANS's
+`RebalanceHistogram` skip: cjxl byte-exactness is a non-goal, and
+full-sample is a real, valid case of the same algorithm, not an invented
+one.
+
+**Structural consequence — the real cost of this feature**: the order is
+one value per frame, written once in the AC-global section, before any AC
+group's tokens. Every AC group needs it before it can tokenize, so
+`Encoder.swift`'s single-pass-per-group flow (compute coefficients, then
+immediately tokenize them, per group, concurrently) doesn't fit anymore.
+Splits into three passes: (1) compute + quantize every group's AC
+coefficients for the whole frame, materializing them (matches real
+libjxl's own `enc_state.coeffs` — considered and rejected recomputing
+DCT+quantize a second time instead to avoid the buffer, but caching the
+padded XYB needed to make that cheap costs the same 12 bytes/pixel as just
+caching the quantized coefficients directly, so recomputing buys nothing
+and adds a second code path to keep in sync); (2) accumulate zero counts
+across all of it, compute the order, write the coefficient-order section;
+(3) tokenize every group's already-computed coefficients using that order.
+Applies to both the pixel path and JPEG transcode (both produce DCT8 AC
+coefficients through the same `TokenizeCoefficients` shape in the
+reference), so both `Encoder.swift` AC drivers and `ACGroupEncoder.encode`/
+`.encodeJPEG` need the split and the `order` parameter threaded through.
+
 ## Phase C — pixel-path alignment to the named command
 
 In order: quant calibration (uniform field `0.79/d`, global scale mapping —
