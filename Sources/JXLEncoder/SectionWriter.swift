@@ -88,20 +88,29 @@ public struct SectionWriter: Sendable {
 }
 
 enum SectionOptimizer {
+	/// libjxl's cluster limit (`kClustersLimit`, enc_context_map.h). Tiny's
+	/// static tables pre-bucket the raw context space down to as few as 8
+	/// entries before optimisation ever runs; clustering at the reference's
+	/// own limit, directly over the tokens' original contexts, is rung 1's
+	/// single largest recovered gap — see docs/gap-closure-plan.md Phase A/B.
+	static let clustersLimit = 128
+
 	/// Builds a code from every staged token across a set of sections, then
 	/// replays them through it.
 	///
-	/// Re-optimisation happens *within* the base code's grouping: staged
-	/// contexts already index one of its prefix codes, so this reclusters those
-	/// buckets rather than the full context space. Buckets the image never used
-	/// collapse away, which is most of them on a thumbnail.
+	/// Clusters the *full* raw context space the tokens were staged with, not
+	/// the base code's static buckets — the base code only supplied that
+	/// space's size and is otherwise unused here. Contexts the image never
+	/// used collapse away, which is most of them on a thumbnail, and contexts
+	/// tiny's static tables would have pre-merged stay separable until the
+	/// image's own statistics say otherwise.
 	static func optimize(
 		sections: inout [SectionWriter],
 		range: Range<Int>,
 		baseCode: EntropyCode
 	) -> EntropyCode {
 		var histograms = [Histogram](
-			repeating: Histogram(), count: baseCode.prefixCodeCount)
+			repeating: Histogram(), count: baseCode.contextCount)
 
 		for index in range {
 			for record in sections[index].staged {
@@ -109,38 +118,23 @@ enum SectionOptimizer {
 					continue
 				}
 				let (symbol, _, _) = UintCoder.encode(value)
-				histograms[Int(baseCode.contextMap[Int(context)])].add(symbol)
+				histograms[Int(context)].add(symbol)
 			}
 		}
 
-		let (clusters, contextMap) = HistogramCluster.cluster(histograms)
-		// Compose the base and cluster maps into one map over the full context
-		// space — the transmitted bytes are identical to composing at
-		// write-out, and replay can then take tokens with original contexts.
+		let (clusters, contextMap) = HistogramCluster.cluster(
+			histograms, limit: clustersLimit)
+		// `contextMap` already spans the full raw context space — no base-code
+		// composition needed, unlike the pre-bucketed approach this replaced.
 		let optimized = EntropyCode(
-			contextMap: baseCode.contextMap.map { contextMap[Int($0)] },
+			contextMap: contextMap,
 			prefixCodes: HistogramCluster.buildPrefixCodes(clusters))
 
 		if let sink = EntropyDiagnostics.sink {
-			var full = [Histogram](
-				repeating: Histogram(), count: baseCode.contextCount)
-			for index in range {
-				for record in sections[index].staged {
-					guard case .token(let context, let value) = record else {
-						continue
-					}
-					let (symbol, _, _) = UintCoder.encode(value)
-					full[Int(context)].add(symbol)
-				}
-			}
-			// libjxl's cluster limit, not tiny's 8 — the report measures what
-			// the reference's context modeling could reach with these tokens.
-			let (fullClusters, _) = HistogramCluster.cluster(full, limit: 128)
 			sink(
 				EntropyDiagnostics.report(
 					clusters: clusters, codes: optimized.prefixCodes,
-					baseContexts: baseCode.prefixCodeCount,
-					fullContextClusters: fullClusters))
+					baseContexts: baseCode.contextCount))
 		}
 
 		for index in range {

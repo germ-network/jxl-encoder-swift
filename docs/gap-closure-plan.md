@@ -155,15 +155,16 @@ so `-e 4` serves both paths. Corpus regeneration is committed as
 Port from full libjxl, in dependency order (scope updated by A3 — the
 serializer alone recovers only ~11 KB of the 83.5 KB transcode gap):
 
+- [x] Full-context-space clustering at libjxl's limit of 128, replacing
+  the staged-bucket re-clustering inherited from tiny's static tables —
+  the single largest measured component. **Landed 2026-08-08** — see
+  "Progress" below; recovered ~41–56 KB of the 83.5 KB transcode gap
+  measured at Phase A.
 - ANS serializer: `enc_ans.cc` table build, alias table, reverse-order
   stream writer (~800–1,000 relevant lines of 1,388; prefix and LZ77
   portions excluded — verify LZ77 is off for our sections at e4).
-- Full-context-space clustering at libjxl's limit of 128, replacing the
-  staged-bucket re-clustering inherited from tiny's static tables — the
-  single largest measured component (~42 KB). Staging already retains
-  original contexts, so this is a change to `SectionOptimizer` only.
 - libjxl's context assignment for transcoded JPEG (block context map),
-  which carries most of the ~30 KB residual.
+  which carries most of the remaining transcode gap.
 - Histogram clustering drift-check: our `HistogramCluster` (from tiny)
   against `enc_cluster.cc` (372 lines) at e4 settings.
 - Coefficient reordering, which e4 enables: `enc_coeff_order.cc` (334) +
@@ -181,6 +182,50 @@ the source's dumped coefficients (existing gate); ImageIO decodes
 everything (existing CI); transcode size within the A3-derived corridor of
 the named command (expected ≤3%); pixel-path decoded pixels unchanged
 (serialization cannot alter them — assert it).
+
+### Progress: full-context clustering landed (2026-08-08)
+
+Shipped ahead of the ANS serializer, since it needed none of the C++ port:
+`SectionOptimizer.optimize` clustered from histograms pre-bucketed through
+the base code's static context map (≤8 buckets) before ever running
+`HistogramCluster.cluster`. That pre-bucketing is a faithful port of
+tiny's actual behavior — confirmed at the source
+(`libjxl-tiny/encoder/enc_frame.cc`'s `OptimizeSections` builds histograms
+sized to `code->num_prefix_codes`, and `ClusterHistograms`' `kClustersLimit
+= 8` is hardcoded — not a simplification our port introduced, tiny's real
+optimizer has the same ceiling). It is not full libjxl's behavior:
+`enc_context_map.h`'s `kClustersLimit = 128`, and full libjxl clusters the
+raw token contexts directly.
+
+Changed `optimize` to build histograms over the full raw context space
+(`baseCode.contextCount` — 1980 for AC, 45 for DC) and cluster at limit
+128; `contextMap` then spans the full space directly, so the prior
+base-code composition step is gone. Emission-neutral for every existing
+fixture (all 191 tests across both suites still pass unchanged) because
+none reaches a scale where more than 8 natural clusters would ever form —
+consistent with the divergence only showing up at 1024px+ in Phase A/the
+original gap measurement, never at the ≤600px scale the byte-exact corpus
+covers.
+
+Measured impact, matching A3's ~42 KB / 10.9% estimate almost exactly:
+
+| corpus image | before | after | Δ |
+|---|---|---|---|
+| recomp_420 (transcode) | 539,619 | 498,411 | −7.6%, closes 49% of the gap to the e4/e7 plateau (456,104) |
+| recomp_444 (transcode) | 675,702 | 624,139 | −7.6%, closes 48% of the gap to plateau (568,375) |
+| flower | 477,792 | 438,987 | −8.1% |
+| gradient | 17,165 | 16,068 | −6.4% |
+| hopper | 8,413 | 8,014 | −4.7% |
+| macan | 33,303 | 31,811 | −4.5% |
+
+Gates run: djxl decodes every output; decoded pixels' ssimulacra2 against
+the corpus source is unchanged to the measured decimal on every image
+checked (gradient, hopper, macan, flower) — confirms serialization altered
+nothing but bits spent, as required.
+
+Remaining transcode gap (~42–56 KB) is the context-assignment item still
+queued below — libjxl's block-context map for JPEG transcode, not just
+wider clustering of ours.
 
 ## Phase C — pixel-path alignment to the named command
 

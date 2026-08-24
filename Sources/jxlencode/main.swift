@@ -16,17 +16,12 @@ if CommandLine.arguments.contains("--entropy-report") {
 	EntropyDiagnostics.sink = { report in
 		let coderLoss =
 			Double(report.prefixSymbolBits) / report.entropyBoundBits - 1
-		let modelLoss =
-			report.entropyBoundBits / report.fullContextBoundBits - 1
 		print(
 			String(
-				format: "entropy: base=%d clusters=%d tokens=%d prefix=%d "
-					+ "bound=%.0f coder-loss=%.1f%% "
-					+ "full-ctx: clusters=%d bound=%.0f model-loss=%.1f%%",
+				format:
+					"entropy: rawContexts=%d clusters=%d tokens=%d prefix=%d bits bound=%.0f bits coder-loss=%.1f%%",
 				report.baseContexts, report.clusters, report.tokenCount,
-				report.prefixSymbolBits, report.entropyBoundBits,
-				coderLoss * 100, report.fullContextClusters,
-				report.fullContextBoundBits, modelLoss * 100))
+				report.prefixSymbolBits, report.entropyBoundBits, coderLoss * 100))
 	}
 }
 
