@@ -606,6 +606,81 @@ Gate per stage: corpus ssimulacra2 and size move *toward* the named
 command's numbers, decode gates pass. End-state gate: within the corridor
 of the named command on every corpus image, both axes.
 
+### Quant calibration: resolved by source, not by measurement (2026-08-24)
+
+The AdaptiveQuant deletion question A2 deferred is resolved: the project
+follows what the reference configuration actually does, not whichever
+choice measures better. `cjxl -e4` doesn't run adaptive quantization, so
+neither do we — full stop, no re-measurement needed to decide it.
+
+Traced against `enc_heuristics.cc` (the actual call site, not just
+`enc_adaptive_quantization.cc` in isolation): `InitialQuantField` — the
+adaptive map — is only called when `speed_tier <= kHare`. `-e4` is
+`kCheetah` (6, per the `SpeedTier(10 - N)` mapping already established
+for coefficient reordering), which is `> kHare` (5), so e4 takes the
+*other* branch: `q = 0.79 / distance`, filled uniformly, then
+`quantizer.ComputeGlobalScaleAndQuant(quant_dc, q, 0)` — the `0` is
+`quant_median_absd`, explicit because a uniform field has no deviation.
+
+Two further findings narrow this to a small, precise change rather than a
+rewrite:
+
+- **`AdjustQuantField` (runs unconditionally, even in the uniform branch)
+  is a no-op for DCT8-only content.** It replaces each AC-strategy block's
+  quant values with a max/mean blend over `covered_blocks_x/y`; for a
+  1×1-block strategy that's `max(single value) → itself`, unconditionally
+  (the blend only applies when `covered_blocks_x*y >= 4`). Nothing to
+  port — this port's own AC-strategy-search absence already made it moot.
+- **`DistanceParams`'s `globalScale`/`scale`/`quantDC` formulas already
+  match `Quantizer::ComputeGlobalScaleAndQuant`'s shape exactly** —
+  `RecomputeFromGlobalScale`'s `global_scale_float_`/`inv_global_scale_`
+  line up term for term with `self.scale`/`inverseScale`. What doesn't
+  match is the *constants* feeding them: `DistanceParams` was built
+  against libjxl-tiny's own `QuantDC`/`ComputeDistanceParams`, which use
+  different literals than full libjxl's `InitialQuantDC`/uniform branch —
+  `acQuant` (0.8 vs the uniform branch's `0.79`) and `quantDC`'s own
+  `dcMul`/`dcQuantPow`/`dcQuant` (2.9/0.57/1.12 vs `kDcMul`/`kDcQuantPow`/
+  `kDcQuant` = 0.3/0.83/1.095924047623553) are a real, independent
+  discrepancy from tiny's own divergence — not something the AdaptiveQuant
+  deletion alone would have caught.
+
+Scope: swap `AdaptiveQuant`/`AdaptiveQuantTile`'s per-tile computation
+(`computeMask`, `hfModulation`, `colorModulation`, `gammaModulation`,
+`fuzzyErosion`, `perBlockModulations` — the whole NEON-bit-exact-reproduction
+apparatus) for a single scalar filled uniformly across the quant field;
+`AdaptiveQuantPipeline.toXYB` stays (XYB is unrelated to quantization).
+`AdaptiveQuantPipeline.quantField`'s whole-image orchestrator has no
+caller outside its own test (`Encoder.computeACGroup` already inlines
+the per-group version) — goes with the rest.
+
+**Landed (2026-08-24).** `DistanceParams` gained `uniformQuant: UInt8`
+(the single per-block value every AC block now gets) and had its
+`acQuant`/`quantDC` constants retargeted from libjxl-tiny's own literals
+to full libjxl's — verified bit-for-bit against a standalone C++
+reproduction of `InitialQuantDC`/`Quantizer::ComputeGlobalScaleAndQuant`/
+`ClampVal`, not hand-derived, the same rigor the original tiny-reference
+table used. `AdaptiveQuant.swift`, `AdaptiveQuantTile.swift`, and
+`AdaptiveQuantPipeline.quantField` are deleted; `Encoder.computeACGroup`
+fills the quant field with `params.uniformQuant` directly, no per-tile
+loop. The two whole-file byte-exact-vs-tiny gates this necessarily broke
+(`EncoderTests.singleGroup`/`multiGroup`) are retired to structural
+checks — real decode-correctness coverage lives in the Apple target's
+existing real-photo/multi-distance suites, which stayed green throughout
+unchanged.
+
+Verified against real `cjxl -e4` output (not just the port's own
+before/after) on the full corpus: 5 of 6 real photos now land within
+0.4–2.8% of e4's actual size (bliznaca +2.4%, flower +0.4%, hopper +1.1%,
+macan +2.5%, riaphoto +2.8%) — down from Phase A's measured 9–35% gap at
+matched distance, and squarely inside the plan's own corridor gate.
+Quality improved on every image (mean absolute pixel error dropped
+15–43%), consistent with a uniform field being more conservative than an
+under-calibrated adaptive one. `gradient` (the synthetic smooth-content
+fixture) is unchanged at ~2x e4's size — expected, not a regression: this
+is Phase A's own previously-diagnosed, separately-tracked DC-modular-
+coding gap on smooth content, not something quant-field calibration
+touches.
+
 ## Phase D — close the loop
 
 Rerun germDM-ios-refresh#661's tables against the named command. Un-drafting

@@ -84,8 +84,8 @@ public enum Encoder {
 		let quantField: [UInt8]
 	}
 
-	/// Computes one AC group's coefficients: colour transform, adaptive quant,
-	/// forward DCT and quantization — everything except tokenization.
+	/// Computes one AC group's coefficients: colour transform, forward DCT
+	/// and quantization — everything except tokenization.
 	///
 	/// This is where nearly all the per-pixel cost sits, and it reads nothing but
 	/// `linear` and the geometry — groups never see each other. Separating it
@@ -102,9 +102,11 @@ public enum Encoder {
 		let groupDim = ImageDim(
 			width: groupRect.width, height: groupRect.height)
 
-		// The quant field is computed stripe by stripe over the group.
-		var quantField = [UInt8](
-			repeating: 1,
+		// `-e 4`'s quant field is uniform — the same value for every block,
+		// not a per-tile computation. See docs/gap-closure-plan.md, "Quant
+		// calibration."
+		let quantField = [UInt8](
+			repeating: params.uniformQuant,
 			count: groupDim.widthInBlocks * groupDim.heightInBlocks)
 		var xybPlanes = [[Float]](
 			repeating: [Float](
@@ -144,38 +146,6 @@ public enum Encoder {
 							xyb.planes[c][
 								y * padded.width + x
 							]
-					}
-				}
-			}
-
-			let tilesAcross = Geometry.divCeil(
-				padded.width, Geometry.tileDim)
-			for tx in 0..<tilesAcross {
-				let tileRect = Rect(
-					x0: tx * Geometry.tileDimInBlocks, y0: 0,
-					maxWidth: Geometry.tileDimInBlocks,
-					maxHeight: Geometry.tileDimInBlocks,
-					xEnd: padded.width / Geometry.blockDim,
-					yEnd: padded.height / Geometry.blockDim)
-				let aqMap = AdaptiveQuant.computeTile(
-					stripe: xyb, rect: tileRect,
-					distance: params.distance)
-				let raw = AdaptiveQuant.rawQuantField(
-					aqMap: aqMap,
-					inverseScale: params.inverseScale)
-				for y in 0..<tileRect.height {
-					let by = ty * Geometry.tileDimInBlocks + y
-					guard by < groupDim.heightInBlocks else {
-						continue
-					}
-					for x in 0..<tileRect.width {
-						let bx = tileRect.x0 + x
-						guard bx < groupDim.widthInBlocks
-						else { continue }
-						quantField[
-							by * groupDim.widthInBlocks
-								+ bx] =
-							raw[y * tileRect.width + x]
 					}
 				}
 			}

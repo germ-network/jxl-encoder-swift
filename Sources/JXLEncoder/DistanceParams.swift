@@ -2,9 +2,15 @@
 //  DistanceParams.swift
 //  JXLEncoder
 //
-//  Port of `QuantDC` and `ComputeDistanceParams` from libjxl-tiny's
-//  encoder/enc_frame.cc: turns a butteraugli distance into the frame-level
-//  quantizer settings.
+//  Turns a butteraugli distance into the frame-level quantizer settings.
+//  `globalScale`/`scale`/`quantDC` follow the same shape as full libjxl's
+//  `Quantizer::ComputeGlobalScaleAndQuant` (`quantizer.cc`) — inherited from
+//  libjxl-tiny's own `ComputeDistanceParams`, which already assumed no
+//  per-block deviation (`quant_median_absd = 0`), exactly matching what
+//  `-e 4`'s own uniform quant field does. `quantDC`'s constants and
+//  `uniformQuant` are retargeted to `InitialQuantDC`/the uniform branch's
+//  own literals (`enc_adaptive_quantization.cc`, `enc_heuristics.cc`), not
+//  tiny's — see docs/gap-closure-plan.md, "Quant calibration."
 //
 
 import RealModule
@@ -24,11 +30,23 @@ public struct DistanceParams: Equatable, Sendable {
 	public let xQuantMatrixScale: UInt32
 	/// Edge-preserving filter iterations the decoder will run.
 	public let epfIterations: UInt32
+	/// The per-block AC quant value every block gets: `-e 4`'s own quant
+	/// field is uniform (`ComputeUsedOrders`'s speed tier — kCheetah — never
+	/// calls the adaptive map), so there is only one value to compute.
+	public let uniformQuant: UInt8
 
 	static let globalScaleDenominator = 1 << 16
 	static let globalScaleNumerator = 4096
-	static let acQuant: Float = 0.8
+	/// `kCheetah`'s (`-e 4`'s) own literal in the uniform-quant-field branch
+	/// (`enc_heuristics.cc`), not `kAcQuant` (0.765, the adaptive branch's
+	/// constant) or libjxl-tiny's own historically-diverged 0.8.
+	static let acQuant: Float = 0.79
 	static let quantFieldTarget: Float = 5
+	/// `Quantizer::kQuantMax`, minus one: `raw_quant_field` is `ImageI` in
+	/// the reference (int32, no 255 ceiling) but this port stores it as
+	/// `UInt8` — 256 has never been reached at any distance this port's
+	/// corpus covers, so this pre-existing ceiling is left as is.
+	static let quantMax: Int = 255
 
 	public init(distance: Float) throws {
 		guard distance >= 0 else { throw EncoderError.invalidDistance(distance) }
@@ -56,6 +74,9 @@ public struct DistanceParams: Equatable, Sendable {
 		quantDC = clamp1(Int(dcQuant / self.scale + 0.5), 1, 1 << 16)
 		scaleDC = Float(quantDC) * self.scale
 
+		let q = Self.acQuant / distance
+		uniformQuant = UInt8(clamp1(Int(q * inverseScale + 0.5), 1, Self.quantMax))
+
 		var xScale: UInt32 = 2
 		for step in [Float(1.25), 9.0] where distance > step {
 			xScale += 1
@@ -73,11 +94,14 @@ public struct DistanceParams: Equatable, Sendable {
 		epfIterations = iterations
 	}
 
+	/// `InitialQuantDC` (`enc_adaptive_quantization.cc`), not libjxl-tiny's
+	/// own `QuantDC` — same clamp structure, historically-diverged
+	/// constants (`kDcQuantPow`/`kDcQuant`/`kDcMul`).
 	static func quantDC(distance: Float) -> Float {
-		let dcQuantPow: Float = 0.57
-		let dcQuant: Float = 1.12
+		let dcQuantPow: Float = 0.83
+		let dcQuant: Float = 1.095_924_047_623_553
 		// Butteraugli target where the non-linearity kicks in.
-		let dcMul: Float = 2.9
+		let dcMul: Float = 0.3
 
 		var effective = dcMul * Float.pow(distance / dcMul, dcQuantPow)
 		effective = clamp1(effective, 0.5 * distance, distance)
