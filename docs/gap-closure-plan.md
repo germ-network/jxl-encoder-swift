@@ -335,7 +335,7 @@ estimate over-attributed to this specific piece; coefficient reordering
 remaining ~40–54 KB, not block-context-map. Re-attribute once reordering
 lands, rather than assume.
 
-### ANS: built, gated off pending a bug (2026-08-08)
+### ANS: landed (2026-08-08, fixed 2026-08-24)
 
 Traced fully to source before implementing: `InitAliasTable`
 (`ans_common.cc`, ~110 lines, ported verbatim — zero tolerance, since it's
@@ -388,21 +388,47 @@ signaling or the token writer specifically, not a broader regression —
 but the specific defect was not found by re-reading against source a
 second and third time.
 
-**Deactivated, not reverted**: `allowANS` is hardcoded `false` at all
-three `SectionOptimizer.optimize` call sites in `Encoder.swift` (a
-one-line flip once fixed), so the pipeline runs on the verified prefix
-path unchanged and the full suite is green. All the new infrastructure
-(`ANSCoder.swift`, `ANSHistogramWriter.swift`, `ANSTokenWriter.swift`,
-`ANSCoderTests.swift`) ships as inert, tested-where-testable code, not
-reverted, so the next attempt starts from a known-correct alias table
-rather than from scratch.
+**Found the defect by diffing `EncodeUintConfig` (`enc_ans.cc`) line by
+line against `PrefixCodeWriter.writeUintConfigs`**, not by the suggested
+round-trip diagnostic — the histogram signaling and token writer were both
+already correct. The bug was one level up: `writeUintConfigs` hardcoded
+the *bit widths* used to signal each histogram's hybrid-uint config
+(`write(4, splitExponent)`, `write(3, msbInToken)`, `write(2, lsbInToken)`)
+as constants. Those widths are only correct for the prefix path, where
+`log_alpha_size` is pinned to `PREFIX_MAX_BITS = 15`
+(`CeilLog2Nonzero(15+1) = 4`, etc.). Real libjxl derives them from
+whatever `log_alpha_size` the code actually uses —
+`CeilLog2Nonzero(log_alpha_size + 1)` and so on — and ANS signals a much
+narrower `log_alpha_size` (6, for this port's fixed 64-symbol alphabet:
+`CeilLog2Nonzero(6+1) = 3`, one bit short of the hardcoded value). Every
+ANS-coded histogram's config header was misaligned by one bit, which
+desynced every bit read after it — the histogram signaling and the entire
+token stream — while still parsing as *something*, hence "decodes, wrong
+pixels" rather than an outright failure. Fixed by giving
+`writeUintConfigs` an explicit `logAlphaSize` parameter and computing the
+three field widths from it (`ceilLog2Nonzero`, added next to the
+existing `floorLog2Nonzero`); the prefix call site now passes
+`prefixMaxBits = 15` explicitly instead of relying on hardcoded widths
+that happened to match it.
 
-**Suggested next diagnostic**, not yet tried: a self-contained round-trip
-test — decode `ANSHistogramWriter.write`'s own output with a
-hand-written, independently-derived histogram parser (mirroring
-`dec_ans.cc`'s reconstruction, not reusing any of this port's own code)
-to check whether the *signaling* reconstructs the same counts, isolating
-it from the token writer before suspecting both at once.
+**Verified**: full suite green (37 tests/6 suites), including the
+49-case optimized-photo suite that round-trips through real `djxl` and
+ImageIO at every distance. Independently re-verified outside the test
+suite: all 6 real-photo corpus images (`bliznaca`, `flower`, `gradient`,
+`hopper`, `macan`, `riaphoto`) encode with ANS engaged (2–46 clusters,
+coder-loss now 1.7–15.2% vs. Phase A's 10.9% AC estimate — the low end is
+where ANS actually helps; `gradient`'s single-cluster AC histogram has no
+loss to speak of), decode cleanly through the debug `djxl` build
+("Decoded to pixels"), and land within 0.5–2.6 mean absolute error per
+channel against source (max per-channel error 7–75) — ordinary lossy
+error at distance 1.0, nothing like the ~200 mean error the bug produced.
+Size impact on this corpus is modest (flower −2.6%, macan −3.7%,
+bliznaca/hopper/riaphoto −0.8 to −1.8%, gradient +0.4%), consistent with
+the largest-remainder-rounding simplification documented above trading
+some of libjxl's own header-size optimization away for simplicity.
+
+`allowANS: true` at all three `SectionOptimizer.optimize` AC call sites
+in `Encoder.swift`.
 
 ## Phase C — pixel-path alignment to the named command
 

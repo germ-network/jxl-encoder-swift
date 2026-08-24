@@ -21,6 +21,13 @@ func floorLog2Nonzero(_ n: Int) -> Int {
 	return Int.bitWidth - 1 - n.leadingZeroBitCount
 }
 
+/// `CeilLog2Nonzero` (base/bits.h): `FloorLog2Nonzero`, plus one unless `n`
+/// is itself a power of two.
+func ceilLog2Nonzero(_ n: Int) -> Int {
+	let floor = floorLog2Nonzero(n)
+	return (n & (n - 1)) == 0 ? floor : floor + 1
+}
+
 enum ANSHistogramWriter {
 	private static let maxSymbolsForSmallCode = 2
 

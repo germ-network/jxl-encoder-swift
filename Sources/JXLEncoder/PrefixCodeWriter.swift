@@ -12,6 +12,10 @@
 //
 
 enum PrefixCodeWriter {
+	/// `PREFIX_MAX_BITS` (ans_params.h): the `log_alpha_size` the prefix path
+	/// always signals, regardless of the code's actual alphabet size.
+	static let prefixMaxBits = 15
+
 	static let codeLengthCodes = 18
 
 	/// Storage order for the code-length alphabet, so the common lengths come
@@ -297,13 +301,27 @@ enum PrefixCodeWriter {
 
 	/// The hybrid-uint configuration `UintCoder.encode` matches, written once
 	/// per histogram regardless of which serializer follows — real libjxl's
-	/// `EncodeUintConfigs`. Both the prefix and ANS paths share it, since
-	/// both share `UintCoder.encode` itself.
-	static func writeUintConfigs(count: Int, writer: inout BitWriter) {
+	/// `EncodeUintConfigs`. Both the prefix and ANS paths share the same
+	/// fixed (4, 2, 0) config, but the *bit widths* used to signal those
+	/// three numbers depend on `logAlphaSize`, which differs between the two
+	/// paths (prefix always signals `PREFIX_MAX_BITS`; ANS signals its own,
+	/// narrower, `log_alpha_size`) — a fixed width here silently desyncs the
+	/// ANS path's decoder from the very first field after `use_prefix_code`.
+	static func writeUintConfigs(count: Int, logAlphaSize: Int, writer: inout BitWriter) {
+		let splitExponent = 4
+		let msbInToken = 2
+		let lsbInToken = 0
+		let splitBits = ceilLog2Nonzero(logAlphaSize + 1)
 		for _ in 0..<count {
-			writer.write(4, 4)  // split_exponent
-			writer.write(3, 2)  // msb_in_token
-			writer.write(2, 0)  // lsb_in_token
+			writer.write(splitBits, UInt64(splitExponent))
+			// libjxl's own early-return: when split_exponent == logAlphaSize,
+			// msb/lsb can't matter (there's no room left to split) and are
+			// omitted entirely — not just zero-width.
+			guard splitExponent != logAlphaSize else { continue }
+			let msbBits = ceilLog2Nonzero(splitExponent + 1)
+			writer.write(msbBits, UInt64(msbInToken))
+			let lsbBits = ceilLog2Nonzero(splitExponent - msbInToken + 1)
+			writer.write(lsbBits, UInt64(lsbInToken))
 		}
 	}
 
@@ -311,7 +329,7 @@ enum PrefixCodeWriter {
 	/// then their alphabet sizes, then the codes themselves. The caller
 	/// writes `use_prefix_code` — this only ever runs for the prefix path.
 	static func writePrefixCodes(_ codes: [PrefixCode], writer: inout BitWriter) {
-		writeUintConfigs(count: codes.count, writer: &writer)
+		writeUintConfigs(count: codes.count, logAlphaSize: prefixMaxBits, writer: &writer)
 		func symbolCount(_ code: PrefixCode) -> Int {
 			var count = 1
 			for i in 0..<StaticEntropyCodes.alphabetSize where code.depths[i] != 0 {

@@ -63,7 +63,9 @@ enum EntropyCodeWriter {
 		if let ansInfoTables = code.ansInfoTables {
 			writer.write(1, 0)  // use_prefix_code = false
 			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
-			PrefixCodeWriter.writeUintConfigs(count: ansInfoTables.count, writer: &writer)
+			PrefixCodeWriter.writeUintConfigs(
+				count: ansInfoTables.count, logAlphaSize: ANSConstants.logAlphaSize,
+				writer: &writer)
 			for table in ansInfoTables {
 				ANSHistogramWriter.write(counts: table.map(\.freq), writer: &writer)
 			}
