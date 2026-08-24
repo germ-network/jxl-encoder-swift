@@ -35,12 +35,11 @@ struct ACGroupTests {
 		let quantField = [UInt8](
 			repeating: Self.quant, count: dim.widthInBlocks * dim.heightInBlocks)
 
-		var writer = SectionWriter(mode: .direct(.staticAC))
 		var quantDC = [[Int16]](
 			repeating: [Int16](
 				repeating: 0, count: dim.widthInBlocks * dim.heightInBlocks),
 			count: 3)
-		ACGroupEncoder.encode(
+		let coefficients = ACGroupEncoder.computeGroup(
 			xyb: xyb,
 			widthInBlocks: dim.widthInBlocks,
 			heightInBlocks: dim.heightInBlocks,
@@ -48,7 +47,14 @@ struct ACGroupTests {
 			scale: Self.scale,
 			scaleDC: Self.scaleDC,
 			xQuantMatrixScale: Self.xQuantMatrixScale,
-			quantDC: &quantDC,
+			quantDC: &quantDC)
+		var writer = SectionWriter(mode: .direct(.staticAC))
+		ACGroupEncoder.tokenizeGroup(
+			coefficients: coefficients,
+			widthInBlocks: dim.widthInBlocks,
+			heightInBlocks: dim.heightInBlocks,
+			subsampling: .none,
+			order: CoeffOrder.Result.identity.orders,
 			writer: &writer)
 
 		#expect(writer.bitsWritten == expectedBits)
@@ -78,17 +84,16 @@ struct ACGroupTests {
 		let quantField = [UInt8](
 			repeating: Self.quant, count: dim.widthInBlocks * dim.heightInBlocks)
 
-		var writer = SectionWriter(mode: .direct(.staticAC))
 		var quantDC = [[Int16]](
 			repeating: [Int16](
 				repeating: 0, count: dim.widthInBlocks * dim.heightInBlocks),
 			count: 3)
-		ACGroupEncoder.encode(
+		_ = ACGroupEncoder.computeGroup(
 			xyb: xyb, widthInBlocks: dim.widthInBlocks,
 			heightInBlocks: dim.heightInBlocks, quantField: quantField,
 			scale: Self.scale, scaleDC: Self.scaleDC,
 			xQuantMatrixScale: Self.xQuantMatrixScale,
-			quantDC: &quantDC, writer: &writer)
+			quantDC: &quantDC)
 
 		for channel in 0..<3 {
 			var mismatches = 0

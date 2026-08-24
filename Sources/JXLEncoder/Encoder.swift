@@ -69,22 +69,34 @@ public enum Encoder {
 		let quantField: [UInt8]
 	}
 
-	/// Computes one AC group: colour transform, adaptive quant, forward DCT,
-	/// quantization and tokenization.
+	/// One AC group's quantized coefficients, ahead of tokenization —
+	/// tokenizing needs the frame-global coefficient order (`CoeffOrder`),
+	/// which in turn needs every group's coefficients counted first.
+	struct ACGroupCompute: Sendable {
+		let groupX: Int
+		let groupY: Int
+		let widthInBlocks: Int
+		let heightInBlocks: Int
+		/// Per channel, flat and block-major — `ACGroupEncoder.computeGroup`'s
+		/// output, passed straight through to `tokenizeGroup`.
+		let coefficients: [[Int32]]
+		let quantDC: [[Int16]]
+		let quantField: [UInt8]
+	}
+
+	/// Computes one AC group's coefficients: colour transform, adaptive quant,
+	/// forward DCT and quantization — everything except tokenization.
 	///
 	/// This is where nearly all the per-pixel cost sits, and it reads nothing but
 	/// `linear` and the geometry — groups never see each other. Separating it
 	/// from assembly is what lets them run concurrently.
-	static func encodeACGroup(
+	static func computeACGroup(
 		linear: [Float],
 		dim: ImageDim,
 		groupX imageGX: Int,
 		groupY imageGY: Int,
-		params: DistanceParams,
-		mode: SectionWriter.Mode
-	) -> ACGroupOutput {
-		var writer = SectionWriter(mode: mode)
-
+		params: DistanceParams
+	) -> ACGroupCompute {
 		let groupRect = dim.pixelRect(
 			ix: imageGX, iy: imageGY, dim: Geometry.groupDim)
 		let groupDim = ImageDim(
@@ -180,7 +192,7 @@ public enum Encoder {
 					* groupDim.heightInBlocks),
 			count: 3)
 
-		ACGroupEncoder.encode(
+		let coefficients = ACGroupEncoder.computeGroup(
 			xyb: groupXYB,
 			widthInBlocks: groupDim.widthInBlocks,
 			heightInBlocks: groupDim.heightInBlocks,
@@ -188,14 +200,47 @@ public enum Encoder {
 			scale: params.scale,
 			scaleDC: params.scaleDC,
 			xQuantMatrixScale: params.xQuantMatrixScale,
-			quantDC: &groupDC,
-			writer: &writer)
+			quantDC: &groupDC)
 
-		return ACGroupOutput(
+		return ACGroupCompute(
 			groupX: imageGX, groupY: imageGY,
 			widthInBlocks: groupDim.widthInBlocks,
 			heightInBlocks: groupDim.heightInBlocks,
-			section: writer, quantDC: groupDC, quantField: quantField)
+			coefficients: coefficients, quantDC: groupDC, quantField: quantField)
+	}
+
+	/// Tokenizes one already-computed AC group using the frame-global
+	/// coefficient order.
+	static func tokenizeACGroup(
+		_ compute: ACGroupCompute, order: [[Int]], mode: SectionWriter.Mode
+	) -> ACGroupOutput {
+		var writer = SectionWriter(mode: mode)
+		ACGroupEncoder.tokenizeGroup(
+			coefficients: compute.coefficients,
+			widthInBlocks: compute.widthInBlocks,
+			heightInBlocks: compute.heightInBlocks,
+			subsampling: .none,
+			order: order,
+			writer: &writer)
+		return ACGroupOutput(
+			groupX: compute.groupX, groupY: compute.groupY,
+			widthInBlocks: compute.widthInBlocks,
+			heightInBlocks: compute.heightInBlocks,
+			section: writer, quantDC: compute.quantDC, quantField: compute.quantField)
+	}
+
+	/// Reduces every group's coefficients into the frame-global zero
+	/// statistics `CoeffOrder` computes the transmitted order from.
+	static func computeCoeffOrder(
+		_ computes: [ACGroupCompute], dim: ImageDim
+	) -> CoeffOrder.Result {
+		var counts = [CoeffOrder.ZeroCounts](repeating: CoeffOrder.ZeroCounts(), count: 3)
+		for compute in computes {
+			for c in 0..<3 { counts[c].addAll(compute.coefficients[c]) }
+		}
+		return CoeffOrder.compute(
+			counts: counts, widthInBlocks: dim.widthInBlocks,
+			heightInBlocks: dim.heightInBlocks)
 	}
 
 	/// Folds finished AC groups into their DC groups and writes the DC sections.
@@ -279,17 +324,27 @@ public enum Encoder {
 			for i in acRange { sections[i] = SectionWriter(mode: .direct(acCode)) }
 		}
 
+		var computes: [ACGroupCompute] = []
+		computes.reserveCapacity(dim.groupCount)
+		for index in 0..<dim.groupCount {
+			computes.append(
+				computeACGroup(
+					linear: linear, dim: dim,
+					groupX: index % dim.widthInGroups,
+					groupY: index / dim.widthInGroups,
+					params: params))
+		}
+		// No meaning without per-image code optimisation to carry it — the
+		// static-table path keeps the fixed zig-zag order, unchanged.
+		let coeffOrder: CoeffOrder.Result =
+			optimizeCodes ? computeCoeffOrder(computes, dim: dim) : .identity
+
 		let acMode: SectionWriter.Mode =
 			optimizeCodes ? .staging(acCode) : .direct(acCode)
 		var outputs: [ACGroupOutput] = []
 		outputs.reserveCapacity(dim.groupCount)
-		for index in 0..<dim.groupCount {
-			outputs.append(
-				encodeACGroup(
-					linear: linear, dim: dim,
-					groupX: index % dim.widthInGroups,
-					groupY: index / dim.widthInGroups,
-					params: params, mode: acMode))
+		for compute in computes {
+			outputs.append(tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode))
 		}
 		assemble(outputs: outputs, dim: dim, sections: &sections)
 
@@ -311,7 +366,8 @@ public enum Encoder {
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
-			groupCount: dim.groupCount, code: acCode, writer: &acGlobal)
+			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -383,14 +439,30 @@ extension Encoder {
 			repeating: SectionWriter(mode: dcMode),
 			count: 2 + dim.dcGroupCount + dim.groupCount)
 
-		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
+		let computes = await withTaskGroup(of: ACGroupCompute.self) { group in
 			for index in 0..<dim.groupCount {
 				group.addTask {
-					encodeACGroup(
+					computeACGroup(
 						linear: linear, dim: dim,
 						groupX: index % dim.widthInGroups,
 						groupY: index / dim.widthInGroups,
-						params: params, mode: acMode)
+						params: params)
+				}
+			}
+			var collected: [ACGroupCompute] = []
+			collected.reserveCapacity(dim.groupCount)
+			for await compute in group { collected.append(compute) }
+			return collected
+		}
+		// No meaning without per-image code optimisation to carry it — the
+		// static-table path keeps the fixed zig-zag order, unchanged.
+		let coeffOrder: CoeffOrder.Result =
+			optimizeCodes ? computeCoeffOrder(computes, dim: dim) : .identity
+
+		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
+			for compute in computes {
+				group.addTask {
+					tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode)
 				}
 			}
 			var collected: [ACGroupOutput] = []
@@ -417,7 +489,8 @@ extension Encoder {
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
-			groupCount: dim.groupCount, code: acCode, writer: &acGlobal)
+			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -521,6 +594,35 @@ extension Encoder {
 				subsampling: transcode.subsampling)
 		}
 
+		// No meaning without per-image code optimisation to carry it — the
+		// static-table path keeps the fixed zig-zag order, unchanged. Unlike
+		// the pixel path, a JPEG's coefficients are already fully parsed
+		// (`transcode`), so this only needs a read-only sweep, not a full
+		// compute-then-tokenize split.
+		var coeffOrder = CoeffOrder.Result.identity
+		if optimizeCodes {
+			var counts = [CoeffOrder.ZeroCounts](
+				repeating: CoeffOrder.ZeroCounts(), count: 3)
+			for gy in 0..<dim.heightInGroups {
+				for gx in 0..<dim.widthInGroups {
+					let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
+					let groupDim = ImageDim(
+						width: rect.width, height: rect.height,
+						blockAlignment: alignment)
+					ACGroupEncoder.countZerosJPEG(
+						transcode: transcode,
+						blockX0: gx * Geometry.groupDimInBlocks,
+						blockY0: gy * Geometry.groupDimInBlocks,
+						widthInBlocks: groupDim.widthInBlocks,
+						heightInBlocks: groupDim.heightInBlocks,
+						into: &counts)
+				}
+			}
+			coeffOrder = CoeffOrder.compute(
+				counts: counts, widthInBlocks: dim.widthInBlocks,
+				heightInBlocks: dim.heightInBlocks)
+		}
+
 		for gy in 0..<dim.heightInGroups {
 			for gx in 0..<dim.widthInGroups {
 				let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
@@ -545,6 +647,7 @@ extension Encoder {
 					heightInBlocks: groupDim.heightInBlocks,
 					quantDC: &groupDC,
 					blockContextMap: blockContextMap,
+					order: coeffOrder.orders,
 					writer: &sections[acIndex])
 
 				// Fold the group's DC into whichever DC group covers it.
@@ -622,6 +725,7 @@ extension Encoder {
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode,
 			quantTables: (0..<3).map { transcode.quantTable(channel: $0) },
+			coeffOrder: coeffOrder,
 			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 

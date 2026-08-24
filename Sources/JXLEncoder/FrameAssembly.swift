@@ -176,6 +176,7 @@ enum FrameAssembly {
 		/// A JPEG's own tables, already transposed. Nil on the pixel path, which
 		/// signals the built-in ones.
 		quantTables: [[UInt16]]? = nil,
+		coeffOrder: CoeffOrder.Result = .identity,
 		writer: inout BitWriter
 	) throws {
 		if let quantTables {
@@ -185,8 +186,8 @@ enum FrameAssembly {
 		}
 		let histogramBits = ceilLog2(groupCount)
 		if histogramBits != 0 { writer.write(histogramBits, 0) }
-		writer.write(2, 3)
-		writer.write(13, 0)  // all default coefficient order
+		writer.write(2, 3)  // used_orders selector: the Bits(13) branch
+		CoeffOrder.write(coeffOrder, writer: &writer)
 		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(code, writer: &writer)
 	}

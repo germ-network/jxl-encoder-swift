@@ -430,7 +430,7 @@ some of libjxl's own header-size optimization away for simplicity.
 `allowANS: true` at all three `SectionOptimizer.optimize` AC call sites
 in `Encoder.swift`.
 
-### Scoped: coefficient reordering (2026-08-24)
+### Landed: coefficient reordering (2026-08-24)
 
 Confirmed active at the named target, not a speculative add: `-e N` maps to
 `SpeedTier(10 - N)` (`encode.cc`), so `-e 4` is `SpeedTier::kCheetah` (6) —
@@ -503,8 +503,45 @@ across all of it, compute the order, write the coefficient-order section;
 (3) tokenize every group's already-computed coefficients using that order.
 Applies to both the pixel path and JPEG transcode (both produce DCT8 AC
 coefficients through the same `TokenizeCoefficients` shape in the
-reference), so both `Encoder.swift` AC drivers and `ACGroupEncoder.encode`/
-`.encodeJPEG` need the split and the `order` parameter threaded through.
+reference), so both `Encoder.swift` AC drivers and `ACGroupEncoder` need
+the split and the `order` parameter threaded through. Landed as
+`ACGroupEncoder.computeGroup` (compute only, was `encode`) +
+`.tokenizeGroup` (tokenize only, new) for the pixel path;
+`.encodeJPEG` keeps its single pass unchanged (a JPEG's coefficients are
+already fully parsed, so only a new read-only `countZerosJPEG` sweep is
+needed ahead of it, not a compute/tokenize split).
+
+**Found a real bug via the debug `djxl` build**: first attempt decoded to
+valid-looking-but-wrong pixels on real-photo JPEG fixtures specifically —
+the exact same failure shape as the ANS bug earlier this session, and
+diagnosed the same way. Debug `djxl` gave a named failure this time,
+though: `lib/jxl/dec_context_map.cc:87: JXL_FAILURE: Invalid context map`,
+inside `DecodeCoeffOrders`. Every other caller of `EntropyCodeWriter.write`
+in this codebase (`ContextTree.write`, `writeDCGlobal`, `writeACGlobal`)
+writes an explicit `no lz77` bit immediately before calling it — that bit
+covers `BuildAndEncodeHistograms`'s own `Bundle::Write(codes->lz77, ...)`
+call in the reference, which sits *inside* the histogram-building routine
+`EntropyCodeWriter.write` corresponds to, but isn't written by
+`EntropyCodeWriter.write` itself — every caller writes it separately by
+convention. `CoeffOrder.write` was the one caller that forgot to, which
+desynced the context-map reader for the small permutation-token histogram
+specifically (the main AC/DC histograms all have existing callers that
+already got this right). One-line fix.
+
+**Verified**: full suite green (37 tests/6 suites) — including every
+previously-failing case (all `hopper_*` JPEG-photo fixtures across the
+full distance range, and the multi-group subsampled JPEG recompression
+test). Independently re-verified against the real-photo corpus: all 6
+images still decode cleanly via debug `djxl`, and — as expected for a pure
+entropy-layer change — mean absolute pixel error against source is
+*identical* to the pre-reordering (ANS-only) measurement for every image,
+confirming reordering changes bits, not decoded values. Size impact on
+top of ANS is small either direction (bliznaca −0.3%, flower −0.4%, macan
+−0.3%, riaphoto −0.1%, gradient unchanged, hopper *+0.9%* — the 200×200
+image, where the permutation's own transmission cost outweighs the
+entropy saving) — real libjxl has no cost/benefit check here either, it
+customizes whenever the size floor is met, so this small regression on
+tiny images is the reference's own behaviour, not a defect in the port.
 
 ## Phase C — pixel-path alignment to the named command
 

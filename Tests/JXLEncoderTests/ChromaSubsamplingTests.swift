@@ -164,13 +164,17 @@ struct SubsampledEncodingTests {
 					* subsampling.blocksDown(
 						channel: channel, fullHeightInBlocks: blocks))
 		}
-		var writer = SectionWriter(mode: .direct(.staticAC))
-		ACGroupEncoder.encode(
+		let coefficients = ACGroupEncoder.computeGroup(
 			planes: planes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: subsampling,
 			quantField: [UInt8](repeating: 5, count: blocks * blocks),
 			scale: 0.112_075_805_664_062_5, scaleDC: 1.0, xQuantMatrixScale: 2,
-			quantDC: &quantDC, writer: &writer)
+			quantDC: &quantDC)
+		var writer = SectionWriter(mode: .direct(.staticAC))
+		ACGroupEncoder.tokenizeGroup(
+			coefficients: coefficients, widthInBlocks: blocks, heightInBlocks: blocks,
+			subsampling: subsampling, order: CoeffOrder.Result.identity.orders,
+			writer: &writer)
 		return (writer.bitsWritten, quantDC)
 	}
 
@@ -202,13 +206,12 @@ struct SubsampledEncodingTests {
 					* cs.blocksDown(
 						channel: channel, fullHeightInBlocks: blocks))
 		}
-		var writer = SectionWriter(mode: .direct(.staticAC))
-		ACGroupEncoder.encode(
+		_ = ACGroupEncoder.computeGroup(
 			planes: planes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: cs,
 			quantField: [UInt8](repeating: 5, count: blocks * blocks),
 			scale: 0.112_075_805_664_062_5, scaleDC: 1.0, xQuantMatrixScale: 2,
-			quantDC: &quantDC, writer: &writer)
+			quantDC: &quantDC)
 
 		for channel in 0..<3 {
 			let unwritten = quantDC[channel].filter { $0 == sentinel }.count
@@ -246,18 +249,25 @@ struct SubsampledEncodingTests {
 		let quantField = [UInt8](repeating: 5, count: blocks * blocks)
 
 		var dcA = [[Int16]](repeating: [Int16](repeating: 0, count: 64), count: 3)
-		var writerA = SectionWriter(mode: .direct(.staticAC))
-		ACGroupEncoder.encode(
+		let coefficientsA = ACGroupEncoder.computeGroup(
 			xyb: stripe, widthInBlocks: blocks, heightInBlocks: blocks,
 			quantField: quantField, scale: 0.112_075_805_664_062_5, scaleDC: 1.0,
-			xQuantMatrixScale: 2, quantDC: &dcA, writer: &writerA)
+			xQuantMatrixScale: 2, quantDC: &dcA)
+		var writerA = SectionWriter(mode: .direct(.staticAC))
+		ACGroupEncoder.tokenizeGroup(
+			coefficients: coefficientsA, widthInBlocks: blocks, heightInBlocks: blocks,
+			subsampling: .none, order: CoeffOrder.Result.identity.orders,
+			writer: &writerA)
 
 		var dcB = [[Int16]](repeating: [Int16](repeating: 0, count: 64), count: 3)
-		var writerB = SectionWriter(mode: .direct(.staticAC))
-		ACGroupEncoder.encode(
+		let coefficientsB = ACGroupEncoder.computeGroup(
 			planes: stripe.channelPlanes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: .none, quantField: quantField, scale: 0.112_075_805_664_062_5,
-			scaleDC: 1.0, xQuantMatrixScale: 2, quantDC: &dcB,
+			scaleDC: 1.0, xQuantMatrixScale: 2, quantDC: &dcB)
+		var writerB = SectionWriter(mode: .direct(.staticAC))
+		ACGroupEncoder.tokenizeGroup(
+			coefficients: coefficientsB, widthInBlocks: blocks, heightInBlocks: blocks,
+			subsampling: .none, order: CoeffOrder.Result.identity.orders,
 			writer: &writerB)
 
 		#expect(writerA.bitsWritten == writerB.bitsWritten)

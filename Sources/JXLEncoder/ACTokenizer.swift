@@ -58,6 +58,7 @@ public enum ACTokenizer {
 		quantized: ArraySlice<Int32>,
 		channel: Int,
 		blockX: Int,
+		order: [Int],
 		nonZeroRow: inout [UInt8],
 		nonZeroRowAbove: [UInt8]?,
 		writer: inout SectionWriter
@@ -83,7 +84,7 @@ public enum ACTokenizer {
 		var previous = nonZeros > DCT.blockSize / 16 ? 0 : 1
 		var k = 1
 		while k < DCT.blockSize && nonZeros != 0 {
-			let coefficient = quantized[base + coeffOrder[k]]
+			let coefficient = quantized[base + order[k]]
 			let context =
 				histogramOffset
 				+ ACContext.zeroDensityContext(
@@ -109,6 +110,7 @@ public enum ACTokenizer {
 		blockCategory: Int,
 		numCategories: Int,
 		blockX: Int,
+		order: [Int],
 		nonZeroRow: inout [UInt8],
 		nonZeroRowAbove: [UInt8]?,
 		writer: inout SectionWriter
@@ -132,7 +134,7 @@ public enum ACTokenizer {
 		var previous = nonZeros > DCT.blockSize / 16 ? 0 : 1
 		var k = 1
 		while k < DCT.blockSize && nonZeros != 0 {
-			let coefficient = quantized[base + coeffOrder[k]]
+			let coefficient = quantized[base + order[k]]
 			let context =
 				histogramOffset
 				+ ACContext.zeroDensityContext(
