@@ -9,9 +9,14 @@
 //
 
 public enum ACGroupEncoder {
-	/// With chroma-from-luma dropped, X keeps its own coefficients while B is
-	/// decorrelated against the reconstructed Y. These are the `x_factor` and
-	/// `b_factor` the reference substitutes when CfL is compiled out.
+	/// `-e 4` never computes a non-default color-correlation map (both
+	/// `CfLHeuristics` gates are stricter than `kCheetah` — see
+	/// `FrameAssembly.writeColorCorrelationDC`), so these are full libjxl's
+	/// own default `YtoXRatio(0)`/`YtoBRatio(0)`, not values this port
+	/// invented in place of a dropped feature: X keeps its own coefficients
+	/// (`base_correlation_x_ = 0`), B is decorrelated against the
+	/// reconstructed Y at the reference's default ratio
+	/// (`base_correlation_b_ = kYToBRatio = 1`).
 	static let xFactor: Float = 0
 	static let bFactor: Float = 1
 
@@ -19,9 +24,10 @@ public enum ACGroupEncoder {
 	static let inverseDCQuant: [Float] = [4096.0, 512.0, 256.0]
 	static let dcQuant: [Float] = [1.0 / 4096.0, 1.0 / 512.0, 1.0 / 256.0]
 
-	/// B's DC is decorrelated against Y's DC even with chroma-from-luma off:
-	/// `kInvDCQuant[2] * kDCQuant[1]` is 0.5.
-	static let dcCflFactor: [Float] = [0, 0, inverseDCQuant[2] * dcQuant[1]]
+	/// B's DC is decorrelated against Y's DC at the same default correlation
+	/// `bFactor` applies to AC: `AddVarDCTDC`'s scale terms cancel down to
+	/// `kInvDCQuant[2] * kDCQuant[1] * bFactor`, which is `0.5` here.
+	static let dcCflFactor: [Float] = [0, 0, inverseDCQuant[2] * dcQuant[1] * bFactor]
 
 	/// A channel's flat index into a per-channel, block-major array — both
 	/// `computeGroup`'s coefficient storage and `tokenizeGroup`'s read of it
@@ -273,10 +279,17 @@ extension ACGroupEncoder {
 	/// Encodes one group from a JPEG's own quantized coefficients.
 	///
 	/// The pixel path's middle is all absent here: no forward DCT, no
-	/// quantization, and no decorrelation of X and B against Y. The JPEG already
-	/// quantized these values and a transcode must not touch them — libjxl
-	/// applies chroma-from-luma only behind `force_cfl_jpeg_recompression`, which
-	/// is off by default and out of scope here.
+	/// quantization, and no decorrelation of X and B against Y. The JPEG
+	/// already quantized these values and a transcode must not touch them.
+	///
+	/// `force_cfl_jpeg_recompression` actually defaults to **true** in full
+	/// libjxl (`enc_params.h`) and applies fixed-point chroma-from-luma to
+	/// 4:4:4 three-component transcodes with no speed-tier gate — so this is
+	/// a real, currently-unported gap on that specific input shape (4:2:0
+	/// and grayscale sources are unaffected), not an out-of-scope default.
+	/// Coefficient-exactness would survive porting it (the decoder's inverse
+	/// is bit-identical integer arithmetic), but it needs its own work: see
+	/// docs/gap-closure-plan.md, "CfL-default alignment check," §5.2.
 	///
 	/// The block walk is the same as the pixel path's, including how a subsampled
 	/// channel codes only where its own grid aligns.

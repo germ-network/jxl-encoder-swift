@@ -23,8 +23,16 @@ public struct DCGroupData: Sendable {
 	/// chroma is subsampled.
 	public let planeWidths: [Int]
 	public let planeHeights: [Int]
-	/// Chroma-from-luma maps, one entry per 64-pixel colour tile. Dropped from
-	/// this port's scope, so they stay zero, but they are still transmitted.
+	/// Chroma-from-luma maps, one entry per 64-pixel colour tile. This port
+	/// always leaves them zero on both paths, but only the pixel path is
+	/// actually correct to do so — that's `-e 4`'s own default there
+	/// (`CfLHeuristics` never runs at this speed tier), not a port
+	/// simplification, so it isn't a dropped feature to revisit.
+	///
+	/// The JPEG-transcode path is where zero is wrong: full libjxl computes
+	/// non-zero maps by default on 4:4:4 sources
+	/// (`force_cfl_jpeg_recompression`) — unported, tracked separately
+	/// (docs/gap-closure-plan.md, "CfL-default alignment check," §5.2).
 	public var ytoxMap: [Int8]
 	public var ytobMap: [Int8]
 	public let cmapWidth: Int

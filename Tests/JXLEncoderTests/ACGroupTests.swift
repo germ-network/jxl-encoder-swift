@@ -105,9 +105,12 @@ struct ACGroupTests {
 		}
 	}
 
-	/// B's DC carries half of Y's DC subtracted, even though chroma-from-luma is
-	/// otherwise disabled.
-	@Test("B DC is decorrelated against Y DC")
+	/// 0.5 isn't a chosen constant — `AddVarDCTDC`'s scale terms cancel down to
+	/// `DCQuant(1) * InvDCQuant(2)`, which is exactly this value, applied at
+	/// the default color correlation `-e 4` always uses. See
+	/// `ColorCorrelationTests.factorsMatchDefaultCorrelation` for the full
+	/// derivation this pins the same way.
+	@Test("B DC carries the default color correlation's factor")
 	func bDCDecorrelation() {
 		#expect(ACGroupEncoder.dcCflFactor == [0, 0, 0.5])
 	}
