@@ -28,7 +28,8 @@ public enum ACGroupEncoder {
 	/// — given that channel's own subsampled block position. Shared so the
 	/// two functions' block walks can't independently drift on how they
 	/// address the same storage.
-	static func flatBlockIndex(channel: Int, sx: [Int], sy: [Int], channelWidths: [Int]) -> Int {
+	static func flatBlockIndex(channel: Int, sx: [Int], sy: [Int], channelWidths: [Int]) -> Int
+	{
 		sy[channel] * channelWidths[channel] + sx[channel]
 	}
 
@@ -131,7 +132,9 @@ public enum ACGroupEncoder {
 					subsampling.subsampledY(channel: $0, blockY: by)
 				}
 				func index(_ channel: Int) -> Int {
-					flatBlockIndex(channel: channel, sx: sx, sy: sy, channelWidths: channelWidths)
+					flatBlockIndex(
+						channel: channel, sx: sx, sy: sy,
+						channelWidths: channelWidths)
 				}
 
 				// Y first: its reconstruction is what X and B decorrelate against.
@@ -143,7 +146,8 @@ public enum ACGroupEncoder {
 					coefficients: yCoefficients[...], quant: quant, scale: scale
 				)
 				let yBase = index(1) * DCT.blockSize
-				coefficients[1].replaceSubrange(yBase..<yBase + DCT.blockSize, with: yQuantized)
+				coefficients[1].replaceSubrange(
+					yBase..<yBase + DCT.blockSize, with: yQuantized)
 
 				// For DCT8 the DC is simply the lowest-frequency coefficient.
 				// `std::round` here rounds ties away from zero, unlike the
@@ -169,8 +173,9 @@ public enum ACGroupEncoder {
 						originY: sy[channel] * DCT.blockDim)
 					let factor = channel == 0 ? xFactor : bFactor
 					for k in 0..<DCT.blockSize {
-						blockCoefficients[k] = blockCoefficients[k].addingProduct(
-							-factor, yReconstructed[k])
+						blockCoefficients[k] = blockCoefficients[k]
+							.addingProduct(
+								-factor, yReconstructed[k])
 					}
 					let quantized = Quantizer.quantizeBlockAC(
 						coefficients: blockCoefficients[...],
@@ -183,7 +188,8 @@ public enum ACGroupEncoder {
 							? xMatrixMultiplier : 1.0)
 					let channelBase = index(channel) * DCT.blockSize
 					coefficients[channel].replaceSubrange(
-						channelBase..<channelBase + DCT.blockSize, with: quantized)
+						channelBase..<channelBase + DCT.blockSize,
+						with: quantized)
 
 					// Taken from the decorrelated coefficients, then B has Y's
 					// DC subtracted on top.
@@ -247,10 +253,12 @@ public enum ACGroupEncoder {
 					else { continue }
 					codedThisRow[channel] = true
 					let index = flatBlockIndex(
-						channel: channel, sx: sx, sy: sy, channelWidths: channelWidths)
+						channel: channel, sx: sx, sy: sy,
+						channelWidths: channelWidths)
 					let base = index * DCT.blockSize
 					ACTokenizer.writeBlock(
-						quantized: coefficients[channel][base..<base + DCT.blockSize],
+						quantized: coefficients[channel][
+							base..<base + DCT.blockSize],
 						channel: channel,
 						blockX: sx[channel],
 						order: order[channel],
@@ -380,7 +388,8 @@ extension ACGroupEncoder {
 						ACTokenizer.writeBlockAdaptive(
 							quantized: quantized[channel][...],
 							blockCategory: blockContextMap.category(
-								channel: channel, dcBucket: dcBucket),
+								channel: channel, dcBucket: dcBucket
+							),
 							numCategories: blockContextMap.numContexts,
 							blockX: subsampledX,
 							order: order[channel],
@@ -442,7 +451,9 @@ extension ACGroupEncoder {
 					else { continue }
 
 					counts[channel].add(
-						transcode.block(channel: channel, x: sourceX, y: sourceY)[...])
+						transcode.block(
+							channel: channel, x: sourceX, y: sourceY)[
+								...])
 				}
 			}
 		}

@@ -318,7 +318,8 @@ public enum Encoder {
 		// worth releasing as tokenization consumes them.
 		while !computes.isEmpty {
 			let compute = computes.removeLast()
-			outputs.append(tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode))
+			outputs.append(
+				tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode))
 		}
 		assemble(outputs: outputs, dim: dim, sections: &sections)
 
@@ -327,7 +328,8 @@ public enum Encoder {
 			dcCode = SectionOptimizer.optimize(
 				sections: &sections, range: dcRange, baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
 		}
 
 		// The globals carry the codes, so they can only be written once the
@@ -436,7 +438,8 @@ extension Encoder {
 		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
 			for compute in computes {
 				group.addTask {
-					tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode)
+					tokenizeACGroup(
+						compute, order: coeffOrder.orders, mode: acMode)
 				}
 			}
 			var collected: [ACGroupOutput] = []
@@ -455,7 +458,8 @@ extension Encoder {
 				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
 				baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
 		}
 
 		var dcGlobal = BitWriter()
@@ -539,7 +543,8 @@ extension Encoder {
 					contextMap: [UInt8](
 						repeating: 0,
 						count: blockContextMap.numContexts
-							* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+							* (ACContext.nonZeroBuckets
+								+ ACContext.zeroDensityCount)),
 					prefixCodes: [])
 			} else {
 				.staticAC
@@ -582,7 +587,8 @@ extension Encoder {
 				repeating: CoeffOrder.ZeroCounts(), count: 3)
 			for gy in 0..<dim.heightInGroups {
 				for gx in 0..<dim.widthInGroups {
-					let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
+					let rect = dim.pixelRect(
+						ix: gx, iy: gy, dim: Geometry.groupDim)
 					let groupDim = ImageDim(
 						width: rect.width, height: rect.height,
 						blockAlignment: alignment)
@@ -684,7 +690,8 @@ extension Encoder {
 				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
 				baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
 		}
 
 		var dcGlobal = BitWriter()

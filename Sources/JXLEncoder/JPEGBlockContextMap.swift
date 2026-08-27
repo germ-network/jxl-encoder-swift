@@ -53,7 +53,8 @@ public enum JPEGBlockContextMap {
 		/// already resolved to `dcBucket`.
 		func category(channel: Int, dcBucket: Int) -> Int {
 			let base =
-				JPEGBlockContextMap.slot(forChannel: channel) * JPEGBlockContextMap.numOrders
+				JPEGBlockContextMap.slot(forChannel: channel)
+				* JPEGBlockContextMap.numOrders
 				* numDCContexts
 			return Int(contextMap[base + dcBucket])
 		}
@@ -64,13 +65,15 @@ public enum JPEGBlockContextMap {
 	/// at the top), so results are directly comparable to hand-computed
 	/// cases without a `JPEGTranscode` fixture. Pure port of the threshold
 	/// loop in `ComputeJPEGTranscodingData` (enc_frame.cc).
-	static func computeThresholds(counts: [Int], total rawTotal: Int, qtSum rawQTSum: Int) -> [Int]
+	static func computeThresholds(counts: [Int], total rawTotal: Int, qtSum rawQTSum: Int)
+		-> [Int]
 	{
 		// Matches `total_dc[c] = 1` for a channel with nothing coded.
 		let total = max(rawTotal, 1)
 		let numThresholds = min(
 			max(
-				FrameAssembly.ceilLog2(total) - FrameAssembly.ceilLog2(max(rawQTSum, 1)) - 7,
+				FrameAssembly.ceilLog2(total)
+					- FrameAssembly.ceilLog2(max(rawQTSum, 1)) - 7,
 				1),
 			7)
 
@@ -119,13 +122,17 @@ public enum JPEGBlockContextMap {
 		if transcode.isGrayscale {
 			for c in chromaChannels {
 				let base = slot(forChannel: c) * numOrders * numDCContexts
-				for i in 0..<numDCContexts { contextMap[base + i] = UInt8(numDCContexts) }
+				for i in 0..<numDCContexts {
+					contextMap[base + i] = UInt8(numDCContexts)
+				}
 			}
 		} else {
 			// The two chroma slots use different offsets — not interchangeable —
 			// matching `ComputeJPEGTranscodingData`'s two literal formulas.
-			let firstChromaBase = slot(forChannel: chromaChannels[0]) * numOrders * numDCContexts
-			let secondChromaBase = slot(forChannel: chromaChannels[1]) * numOrders * numDCContexts
+			let firstChromaBase =
+				slot(forChannel: chromaChannels[0]) * numOrders * numDCContexts
+			let secondChromaBase =
+				slot(forChannel: chromaChannels[1]) * numOrders * numDCContexts
 			for i in 0..<numDCContexts {
 				contextMap[firstChromaBase + i] = UInt8(numDCContexts + i / 2)
 				contextMap[secondChromaBase + i] =
@@ -134,7 +141,8 @@ public enum JPEGBlockContextMap {
 		}
 		let numContexts = Int(contextMap.max() ?? 0) + 1
 
-		return Result(thresholds: thresholds, contextMap: contextMap, numContexts: numContexts)
+		return Result(
+			thresholds: thresholds, contextMap: contextMap, numContexts: numContexts)
 	}
 
 	/// Port of `kDCThresholdDist` (entropy_coder.h): the 4-way selector code

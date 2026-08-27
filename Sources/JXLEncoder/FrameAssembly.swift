@@ -172,7 +172,8 @@ enum FrameAssembly {
 		}
 		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
 		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(code, allowContextMapANS: allowContextMapANS, writer: &writer)
+		EntropyCodeWriter.write(
+			code, allowContextMapANS: allowContextMapANS, writer: &writer)
 	}
 
 	static func writeACGlobal(
@@ -197,7 +198,8 @@ enum FrameAssembly {
 		writer.write(2, 3)  // used_orders selector: the Bits(13) branch
 		CoeffOrder.write(coeffOrder, writer: &writer)
 		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(code, allowContextMapANS: allowContextMapANS, writer: &writer)
+		EntropyCodeWriter.write(
+			code, allowContextMapANS: allowContextMapANS, writer: &writer)
 	}
 
 	static func ceilLog2(_ n: Int) -> Int {
