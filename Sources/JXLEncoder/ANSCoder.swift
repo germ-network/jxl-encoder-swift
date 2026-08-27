@@ -53,7 +53,8 @@ struct ANSAliasEntry {
 enum ANSAliasTable {
 	/// Port of `InitAliasTable` (ans_common.cc). `distribution` must already
 	/// sum to `ANSConstants.tabSize`.
-	static func build(distribution rawDistribution: [Int], logAlphaSize: Int) -> [ANSAliasEntry] {
+	static func build(distribution rawDistribution: [Int], logAlphaSize: Int) -> [ANSAliasEntry]
+	{
 		var distribution = rawDistribution
 		while let last = distribution.last, last == 0 {
 			distribution.removeLast()
@@ -101,7 +102,9 @@ enum ANSAliasTable {
 
 		while !overfull.isEmpty {
 			let overfullI = overfull.removeLast()
-			precondition(!underfull.isEmpty, "overfull without underfull — invalid distribution")
+			precondition(
+				!underfull.isEmpty,
+				"overfull without underfull — invalid distribution")
 			let underfullI = underfull.removeLast()
 			let underfullBy = entrySize - cutoffs[underfullI]
 			cutoffs[overfullI] -= underfullBy
@@ -154,8 +157,11 @@ enum ANSInfoTable {
 	/// the full token alphabet (every symbol gets an entry, even ones with
 	/// zero count), not `distribution`'s length after trailing-zero trim —
 	/// those are different sizes in the reference too.
-	static func build(distribution: [Int], alphabetSize: Int, logAlphaSize: Int) -> [ANSEncSymbolInfo] {
-		let table = ANSAliasTable.build(distribution: distribution, logAlphaSize: logAlphaSize)
+	static func build(distribution: [Int], alphabetSize: Int, logAlphaSize: Int)
+		-> [ANSEncSymbolInfo]
+	{
+		let table = ANSAliasTable.build(
+			distribution: distribution, logAlphaSize: logAlphaSize)
 		var info = [ANSEncSymbolInfo](repeating: ANSEncSymbolInfo(), count: alphabetSize)
 		for s in 0..<alphabetSize {
 			let freq = s < distribution.count ? distribution[s] : 0
@@ -166,7 +172,8 @@ enum ANSInfoTable {
 		let entrySizeMinus1 = (1 << logEntrySize) - 1
 		for i in 0..<ANSConstants.tabSize {
 			let (symbol, offset) = ANSAliasTable.lookup(
-				table, value: i, logEntrySize: logEntrySize, entrySizeMinus1: entrySizeMinus1)
+				table, value: i, logEntrySize: logEntrySize,
+				entrySizeMinus1: entrySizeMinus1)
 			info[symbol].reverseMap[offset] = UInt16(i)
 		}
 		return info

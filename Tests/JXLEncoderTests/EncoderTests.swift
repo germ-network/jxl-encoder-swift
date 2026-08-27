@@ -3,9 +3,13 @@ import Testing
 
 @testable import JXLEncoder
 
-/// The end-to-end gate: a whole encoded file compared byte for byte against
-/// `cjxl_tiny` output. This subsumes every stage test — if any of them drifted,
-/// these bytes would move.
+/// `singleGroup`/`multiGroup` used to be whole-file byte-exact gates against
+/// `cjxl_tiny` output — retired now that quant-field calibration targets
+/// `cjxl -e 4` instead of tiny (see docs/gap-closure-plan.md, "Quant
+/// calibration"): the two no longer produce the same bytes by design. What
+/// remains checkable in this Foundation-free core target is structure, not
+/// bytes; decode-correctness against real photos at many distances is
+/// covered in the Apple target (`OptimizedCodeTests`, `JPEGRecompressionTests`).
 ///
 /// The fixtures are encoded with a linear transfer function because that is what
 /// the reference hardcodes; production uses sRGB, which differs only in one
@@ -35,31 +39,30 @@ struct EncoderTests {
 		return [UInt8](try Data(contentsOf: url))
 	}
 
-	@Test("single-group file is byte-identical to cjxl_tiny")
+	@Test("single-group file is well-formed")
 	func singleGroup() throws {
 		let actual = try encodeMatchingReference(
 			linear: try StageDump(fixture: "edge_linear"))
+		#expect(actual.starts(with: [0xFF, 0x0A]))
 		let expected = try referenceFile("edge_whole")
-		#expect(actual.count == expected.count)
-		let diff = zip(actual, expected).enumerated()
-			.first { $0.element.0 != $0.element.1 }?.offset
-		#expect(diff == nil, "first differing byte at \(diff ?? -1)")
+		// No longer byte-identical (quant calibration now targets `-e 4`, not
+		// tiny), but still the same order of magnitude — a gross regression
+		// (e.g. a doubled or halved file) would still fail this.
+		#expect(actual.count > expected.count / 2 && actual.count < expected.count * 2)
 	}
 
 	/// 301x301 spans four AC groups, so the table of contents carries multiple
 	/// entries instead of taking the single-section merge path.
-	@Test("multi-group file is byte-identical to cjxl_tiny")
+	@Test("multi-group file is well-formed")
 	func multiGroup() throws {
 		let input = try StageDump(fixture: "multigroup_linear")
 		let dim = ImageDim(width: input.width, height: input.height)
 		#expect(dim.groupCount == 4)
 
 		let actual = try encodeMatchingReference(linear: input)
+		#expect(actual.starts(with: [0xFF, 0x0A]))
 		let expected = try referenceFile("multigroup_whole")
-		#expect(actual.count == expected.count)
-		let diff = zip(actual, expected).enumerated()
-			.first { $0.element.0 != $0.element.1 }?.offset
-		#expect(diff == nil, "first differing byte at \(diff ?? -1)")
+		#expect(actual.count > expected.count / 2 && actual.count < expected.count * 2)
 	}
 
 	@Test("public API produces a bare codestream from 8-bit sRGB")

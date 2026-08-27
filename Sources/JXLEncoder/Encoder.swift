@@ -84,8 +84,8 @@ public enum Encoder {
 		let quantField: [UInt8]
 	}
 
-	/// Computes one AC group's coefficients: colour transform, adaptive quant,
-	/// forward DCT and quantization — everything except tokenization.
+	/// Computes one AC group's coefficients: colour transform, forward DCT
+	/// and quantization — everything except tokenization.
 	///
 	/// This is where nearly all the per-pixel cost sits, and it reads nothing but
 	/// `linear` and the geometry — groups never see each other. Separating it
@@ -102,9 +102,11 @@ public enum Encoder {
 		let groupDim = ImageDim(
 			width: groupRect.width, height: groupRect.height)
 
-		// The quant field is computed stripe by stripe over the group.
-		var quantField = [UInt8](
-			repeating: 1,
+		// `-e 4`'s quant field is uniform — the same value for every block,
+		// not a per-tile computation. See docs/gap-closure-plan.md, "Quant
+		// calibration."
+		let quantField = [UInt8](
+			repeating: params.uniformQuant,
 			count: groupDim.widthInBlocks * groupDim.heightInBlocks)
 		var xybPlanes = [[Float]](
 			repeating: [Float](
@@ -144,38 +146,6 @@ public enum Encoder {
 							xyb.planes[c][
 								y * padded.width + x
 							]
-					}
-				}
-			}
-
-			let tilesAcross = Geometry.divCeil(
-				padded.width, Geometry.tileDim)
-			for tx in 0..<tilesAcross {
-				let tileRect = Rect(
-					x0: tx * Geometry.tileDimInBlocks, y0: 0,
-					maxWidth: Geometry.tileDimInBlocks,
-					maxHeight: Geometry.tileDimInBlocks,
-					xEnd: padded.width / Geometry.blockDim,
-					yEnd: padded.height / Geometry.blockDim)
-				let aqMap = AdaptiveQuant.computeTile(
-					stripe: xyb, rect: tileRect,
-					distance: params.distance)
-				let raw = AdaptiveQuant.rawQuantField(
-					aqMap: aqMap,
-					inverseScale: params.inverseScale)
-				for y in 0..<tileRect.height {
-					let by = ty * Geometry.tileDimInBlocks + y
-					guard by < groupDim.heightInBlocks else {
-						continue
-					}
-					for x in 0..<tileRect.width {
-						let bx = tileRect.x0 + x
-						guard bx < groupDim.widthInBlocks
-						else { continue }
-						quantField[
-							by * groupDim.widthInBlocks
-								+ bx] =
-							raw[y * tileRect.width + x]
 					}
 				}
 			}
@@ -348,7 +318,8 @@ public enum Encoder {
 		// worth releasing as tokenization consumes them.
 		while !computes.isEmpty {
 			let compute = computes.removeLast()
-			outputs.append(tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode))
+			outputs.append(
+				tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode))
 		}
 		assemble(outputs: outputs, dim: dim, sections: &sections)
 
@@ -357,7 +328,8 @@ public enum Encoder {
 			dcCode = SectionOptimizer.optimize(
 				sections: &sections, range: dcRange, baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
 		}
 
 		// The globals carry the codes, so they can only be written once the
@@ -466,7 +438,8 @@ extension Encoder {
 		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
 			for compute in computes {
 				group.addTask {
-					tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode)
+					tokenizeACGroup(
+						compute, order: coeffOrder.orders, mode: acMode)
 				}
 			}
 			var collected: [ACGroupOutput] = []
@@ -485,7 +458,8 @@ extension Encoder {
 				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
 				baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
 		}
 
 		var dcGlobal = BitWriter()
@@ -569,7 +543,8 @@ extension Encoder {
 					contextMap: [UInt8](
 						repeating: 0,
 						count: blockContextMap.numContexts
-							* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+							* (ACContext.nonZeroBuckets
+								+ ACContext.zeroDensityCount)),
 					prefixCodes: [])
 			} else {
 				.staticAC
@@ -612,7 +587,8 @@ extension Encoder {
 				repeating: CoeffOrder.ZeroCounts(), count: 3)
 			for gy in 0..<dim.heightInGroups {
 				for gx in 0..<dim.widthInGroups {
-					let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
+					let rect = dim.pixelRect(
+						ix: gx, iy: gy, dim: Geometry.groupDim)
 					let groupDim = ImageDim(
 						width: rect.width, height: rect.height,
 						blockAlignment: alignment)
@@ -714,7 +690,8 @@ extension Encoder {
 				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
 				baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
 		}
 
 		var dcGlobal = BitWriter()

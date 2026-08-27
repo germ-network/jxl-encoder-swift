@@ -68,7 +68,8 @@ enum ANSHistogramWriter {
 				storeVarLenUint8(symbol, writer: &writer)
 			}
 			if nonZeroSymbols.count == 2 {
-				writer.write(ANSConstants.logTabSize, UInt64(counts[nonZeroSymbols[0]]))
+				writer.write(
+					ANSConstants.logTabSize, UInt64(counts[nonZeroSymbols[0]]))
 			}
 			return
 		}
@@ -181,7 +182,9 @@ enum ANSHistogramNormalizer {
 			// Rare: many low-probability symbols each bumped to 1 overshoot
 			// the total. Reduce from the largest shares first, never below 1.
 			var excess = sum - ANSConstants.tabSize
-			for i in shares.indices.filter({ shares[$0] > 0 }).sorted(by: { shares[$0] > shares[$1] })
+			for i in shares.indices.filter({ shares[$0] > 0 }).sorted(by: {
+				shares[$0] > shares[$1]
+			})
 			where excess > 0 {
 				let take = min(shares[i] - 1, excess)
 				shares[i] -= take
@@ -190,7 +193,8 @@ enum ANSHistogramNormalizer {
 			precondition(excess == 0, "could not fit alphabet into tabSize")
 		} else if sum < ANSConstants.tabSize {
 			var deficit = ANSConstants.tabSize - sum
-			for r in remainders.sorted(by: { $0.remainder > $1.remainder }) where deficit > 0 {
+			for r in remainders.sorted(by: { $0.remainder > $1.remainder })
+			where deficit > 0 {
 				shares[r.index] += 1
 				deficit -= 1
 			}

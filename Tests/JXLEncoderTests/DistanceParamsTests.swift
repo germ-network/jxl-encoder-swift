@@ -2,9 +2,13 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Expected values come from compiling libjxl-tiny's `ComputeDistanceParams`
-/// arithmetic directly and printing raw bit patterns, so these pin the exact
-/// float results rather than an approximation.
+/// Expected values come from compiling full libjxl's own arithmetic directly
+/// (`InitialQuantDC`, `Quantizer::ComputeGlobalScaleAndQuant`, the uniform
+/// quant field's `q = 0.79 / distance`, and `Quantizer::ClampVal`) and
+/// printing raw bit patterns, so these pin the exact float results rather
+/// than an approximation. Retargeted from libjxl-tiny to `-e 4`'s own
+/// uniform-quant-field branch — see docs/gap-closure-plan.md, "Quant
+/// calibration."
 @Suite("DistanceParams")
 struct DistanceParamsTests {
 	struct Expected {
@@ -14,42 +18,43 @@ struct DistanceParamsTests {
 		let scaleBits: UInt32
 		let scaleDCBits: UInt32
 		let xQuantMatrixScale: UInt32
+		let uniformQuant: UInt8
 	}
 
 	static let reference: [Expected] = [
 		.init(
-			distance: 0.03, globalScale: 32768, quantDC: 75, scaleBits: 0x3F00_0000,
-			scaleDCBits: 0x4216_0000, xQuantMatrixScale: 3),
+			distance: 0.03, globalScale: 32768, quantDC: 73, scaleBits: 0x3F00_0000,
+			scaleDCBits: 0x4212_0000, xQuantMatrixScale: 3, uniformQuant: 53),
 		.init(
 			distance: 0.1, globalScale: 32768, quantDC: 22, scaleBits: 0x3F00_0000,
-			scaleDCBits: 0x4130_0000, xQuantMatrixScale: 3),
+			scaleDCBits: 0x4130_0000, xQuantMatrixScale: 3, uniformQuant: 16),
 		.init(
-			distance: 0.25, globalScale: 29360, quantDC: 10, scaleBits: 0x3EE5_6000,
-			scaleDCBits: 0x408F_5C00, xQuantMatrixScale: 3),
+			distance: 0.25, globalScale: 28728, quantDC: 10, scaleBits: 0x3EE0_7000,
+			scaleDCBits: 0x408C_4600, xQuantMatrixScale: 3, uniformQuant: 7),
 		.init(
-			distance: 0.5, globalScale: 14680, quantDC: 10, scaleBits: 0x3E65_6000,
-			scaleDCBits: 0x400F_5C00, xQuantMatrixScale: 2),
+			distance: 0.5, globalScale: 15667, quantDC: 10, scaleBits: 0x3E74_CC00,
+			scaleDCBits: 0x4018_FF80, xQuantMatrixScale: 2, uniformQuant: 7),
 		.init(
-			distance: 1.0, globalScale: 7340, quantDC: 10, scaleBits: 0x3DE5_6000,
-			scaleDCBits: 0x3F8F_5C00, xQuantMatrixScale: 2),
+			distance: 1.0, globalScale: 8813, quantDC: 10, scaleBits: 0x3E09_B400,
+			scaleDCBits: 0x3FAC_2100, xQuantMatrixScale: 2, uniformQuant: 6),
 		.init(
-			distance: 1.5, globalScale: 4893, quantDC: 10, scaleBits: 0x3D98_E800,
-			scaleDCBits: 0x3F3F_2200, xQuantMatrixScale: 3),
+			distance: 1.5, globalScale: 6294, quantDC: 10, scaleBits: 0x3DC4_B000,
+			scaleDCBits: 0x3F75_DC00, xQuantMatrixScale: 3, uniformQuant: 5),
 		.init(
-			distance: 2.0, globalScale: 3670, quantDC: 10, scaleBits: 0x3D65_6000,
-			scaleDCBits: 0x3F0F_5C00, xQuantMatrixScale: 3),
+			distance: 2.0, globalScale: 4957, quantDC: 10, scaleBits: 0x3D9A_E800,
+			scaleDCBits: 0x3F41_A200, xQuantMatrixScale: 3, uniformQuant: 5),
 		.init(
-			distance: 3.0, globalScale: 2482, quantDC: 10, scaleBits: 0x3D1B_2000,
-			scaleDCBits: 0x3EC1_E800, xQuantMatrixScale: 3),
+			distance: 3.0, globalScale: 3451, quantDC: 10, scaleBits: 0x3D57_B000,
+			scaleDCBits: 0x3F06_CE00, xQuantMatrixScale: 3, uniformQuant: 5),
 		.init(
-			distance: 5.0, globalScale: 1855, quantDC: 10, scaleBits: 0x3CE7_E000,
-			scaleDCBits: 0x3E90_EC00, xQuantMatrixScale: 3),
+			distance: 5.0, globalScale: 2070, quantDC: 11, scaleBits: 0x3D01_6000,
+			scaleDCBits: 0x3EB1_E400, xQuantMatrixScale: 3, uniformQuant: 5),
 		.init(
-			distance: 10.0, globalScale: 1048, quantDC: 12, scaleBits: 0x3C83_0000,
-			scaleDCBits: 0x3E44_8000, xQuantMatrixScale: 4),
+			distance: 10.0, globalScale: 1035, quantDC: 13, scaleBits: 0x3C81_6000,
+			scaleDCBits: 0x3E52_3C00, xQuantMatrixScale: 4, uniformQuant: 5),
 	]
 
-	@Test("matches libjxl-tiny", arguments: reference)
+	@Test("matches full libjxl's -e 4 uniform-quant-field branch", arguments: reference)
 	func matchesReference(expected: Expected) throws {
 		let params = try DistanceParams(distance: expected.distance)
 		#expect(params.globalScale == expected.globalScale)
@@ -57,6 +62,7 @@ struct DistanceParamsTests {
 		#expect(params.scale.bitPattern == expected.scaleBits)
 		#expect(params.scaleDC.bitPattern == expected.scaleDCBits)
 		#expect(params.xQuantMatrixScale == expected.xQuantMatrixScale)
+		#expect(params.uniformQuant == expected.uniformQuant)
 	}
 
 	/// The distances where the `effective_dist` clamp does not bind, so the
@@ -65,9 +71,9 @@ struct DistanceParamsTests {
 	@Test(
 		"QuantDC matches std::pow bit-for-bit where the clamp does not bind",
 		arguments: [
-			(Float(3.0), UInt32(0x3EC1_F41B)),
-			(Float(5.0), UInt32(0x3E90_F565)),
-			(Float(10.0), UInt32(0x3E43_4B07)),
+			(Float(3.0), UInt32(0x3F0A_5313)),
+			(Float(5.0), UInt32(0x3EB5_0C64)),
+			(Float(10.0), UInt32(0x3E4B_B0A8)),
 		])
 	func quantDCUsesPow(distance: Float, expectedBits: UInt32) {
 		#expect(DistanceParams.quantDC(distance: distance).bitPattern == expectedBits)

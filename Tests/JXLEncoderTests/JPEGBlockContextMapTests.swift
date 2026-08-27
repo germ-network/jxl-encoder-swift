@@ -60,14 +60,18 @@ struct JPEGBlockContextMapTests {
 		#expect(clamped.count <= 7)
 	}
 
-	@Test("channel-to-slot permutation matches BlockCtxMap::Context: luma=0, channel 0=1, channel 2=2")
+	@Test(
+		"channel-to-slot permutation matches BlockCtxMap::Context: luma=0, channel 0=1, channel 2=2"
+	)
 	func channelSlotPermutation() {
 		#expect(JPEGBlockContextMap.slot(forChannel: 1) == 0)
 		#expect(JPEGBlockContextMap.slot(forChannel: 0) == 1)
 		#expect(JPEGBlockContextMap.slot(forChannel: 2) == 2)
 	}
 
-	@Test("bucket counts strictly-exceeded thresholds, matching compressed_dc.cc's > comparison")
+	@Test(
+		"bucket counts strictly-exceeded thresholds, matching compressed_dc.cc's > comparison"
+	)
 	func bucketLookup() {
 		let result = JPEGBlockContextMap.Result(
 			thresholds: [-10, 0, 10], contextMap: [], numContexts: 0)

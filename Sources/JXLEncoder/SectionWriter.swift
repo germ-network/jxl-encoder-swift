@@ -78,7 +78,8 @@ public struct SectionWriter: Sendable {
 				switch record {
 				case .token(let context, let value):
 					writer.write(
-						token: Token(context: context, value: value), code: code)
+						token: Token(context: context, value: value),
+						code: code)
 				case .rawBits(let count, let value):
 					writer.write(count, value)
 				}
@@ -106,7 +107,8 @@ public struct SectionWriter: Sendable {
 			}
 		}
 		ANSTokenWriter.write(
-			tokens: tokens, contextMap: contextMap, infoTables: infoTables, writer: &writer)
+			tokens: tokens, contextMap: contextMap, infoTables: infoTables,
+			writer: &writer)
 	}
 
 	public func finished() -> BitWriter { writer }
