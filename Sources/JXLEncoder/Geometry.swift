@@ -5,10 +5,10 @@
 //  The tiling the reference encoder walks, from encoder/common.h and the
 //  `ImageDim` / `RectT` helpers in encoder/enc_frame.cc and encoder/image.h.
 //
-//  This is not an implementation detail that can be papered over: the adaptive
-//  quant field is computed per tile with overlapping context, so the quant
-//  values depend on how the image is divided. Anything computed whole-plane
-//  will not match the reference.
+//  `tileDim` now only chunks the stripe-by-stripe XYB conversion loop
+//  (Encoder.swift) — the adaptive quant field it originally existed to divide
+//  is gone (see docs/gap-closure-plan.md, "Quant calibration": `-e 4`'s own
+//  quant field is a single uniform value, not per-tile).
 //
 
 public enum Geometry {
@@ -18,8 +18,13 @@ public enum Geometry {
 	public static let groupDimInBlocks = groupDim / blockDim
 	public static let dcGroupDim = groupDim * blockDim
 
-	/// 64 when chroma-from-luma is enabled upstream; this port drops CfL, which
-	/// is the `#else` branch of the reference's `kTileDim`.
+	/// A loop-chunking constant only, with no reference counterpart to match:
+	/// full libjxl's own tile sizes (`kEncTileDim`/`kColorTileDim`, both 64)
+	/// are unconditional, not CfL-gated as an earlier version of this
+	/// comment claimed — the padding this size drives (`PlaneBuffer.
+	/// copyAndPad`'s edge replication) is pointwise per stripe regardless of
+	/// how many blocks tall a stripe is, so any value that stays a multiple
+	/// of `blockDim` is emission-neutral here.
 	public static let tileDim = 16
 	public static let tileDimInBlocks = tileDim / blockDim
 	public static let groupDimInTiles = groupDim / tileDim

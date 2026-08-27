@@ -681,6 +681,76 @@ is Phase A's own previously-diagnosed, separately-tracked DC-modular-
 coding gap on smooth content, not something quant-field calibration
 touches.
 
+### CfL-default alignment check: landed, plus three follow-on gaps found (2026-08-24)
+
+Traced against source, not assumed, per the standing rule (§ above). Also
+closed a version-skew risk this session had been carrying since Phase A:
+the local `libjxl-full` checkout is `196a43d`, "Bump version (to 0.13.0)"
+— fetching the actual `v0.12.0` tag and diffing shows that commit touches
+*only* CI/build/changelog files, zero lines under `lib/jxl/`. Every
+source read this whole session, including the quant-calibration
+constants, is confirmed against the real pinned reference version, not
+an assumed-compatible dev tree.
+
+**Result: the pixel path already matched, verified rather than assumed.**
+`-e 4`'s two `CfLHeuristics` gates (`speed_tier <= kSquirrel`,
+`speed_tier <= kHare`) are both stricter than `kCheetah`, so the pixel
+path never computes a non-default color-correlation map — full stop, no
+unconditional path touches it either (checked, the way `AdjustQuantField`
+turned out to be an unconditional no-op for quant calibration). What's on
+the wire is exactly the reference's own default `ColorCorrelation`, and
+the port's AC/DC factors (`xFactor=0`, `bFactor=1`, `dcCflFactor`) already
+equal it — coincidentally, not by design: they're libjxl-tiny's own
+`OPTIMIZE_CHROMA_FROM_LUMA=0` ablation literals, which happen to be
+numerically identical to full libjxl's *default* map. Landed:
+`FrameAssembly.writeColorCorrelationDC` extracted so the invariant is
+testable in isolation; three new tests pin the actual bits/factors
+(previously covered only indirectly, by "djxl decodes it"); comments
+across `ACGroupEncoder.swift`, `DCGroupEncoder.swift`, `Geometry.swift`
+corrected from "CfL dropped/off by default" to "matches e4's own
+default," since the wrong mental model, not the numbers, was the actual
+bug risk here.
+
+**Three real gaps found while tracing, filed separately (not this rung's
+scope — bundling would repeat the two-things-in-one-item problem the
+block-context-map item already had to unwind):**
+
+- **`force_cfl_jpeg_recompression` defaults to `true`** (`enc_params.h`)
+  and applies fixed-point chroma-from-luma to 4:4:4 three-component JPEG
+  transcodes with no speed-tier gate — the port's own comment claimed the
+  opposite ("off by default, out of scope"), the same class of
+  never-checked-against-source assumption the `acQuant` bug was. Measured
+  against real `cjxl -e4` (plain file-size comparison, not the fuller
+  instrumented-decoder CfL-map dump the item originally scoped — that
+  would isolate this feature's contribution cleanly; this doesn't):
+  `recomp_420` (4:2:0, unaffected — `Is444()` false) sits 6.6% over e4;
+  `recomp_444` (4:4:4, affected) sits 7.3% over. Both reference (e4)
+  sizes match this doc's earlier transcode table exactly; the port's own
+  sizes are lower than that table's because Phase B's entropy work landed
+  since — so the gap narrowed from ~9.3–9.8% to ~6.6–7.3% for reasons
+  unrelated to CfL. The ~0.7-point difference *between* the two current
+  gaps is at best a weak, confounded signal for what this specific
+  feature might be worth (4:2:0 and 4:4:4 differ in other ways too, not
+  just this) — not a measurement to size the work by. Coefficient-
+  exactness would survive porting it (the decoder's inverse is
+  bit-identical integer arithmetic per the reference source), but it's
+  real work: a per-color-tile correlation search plus fixed-point
+  application, sized at roughly `enc_frame.cc`'s
+  `FindCorrelation`/application code (~150 lines), and the first non-zero
+  input the port's cmap-plane gradient predictor will ever see.
+- **`FindBestBlockEntropyModel` runs at e4 on the pixel path** (gate:
+  `speed_tier < kFalcon`, true for kCheetah) and the port has no
+  equivalent — it still writes the fixed compact block-context map on the
+  pixel path. Confirmed structural, not hypothetical: for real photos
+  ≳256×256px the ACS-order axis of the reference's own block-context-map
+  computation goes genuinely non-default. Blocked on AC-strategy support,
+  which this DCT8-only port doesn't have — may not be closable without a
+  much larger port, only approximable.
+- **EPF sharpness is transcode-only wrong** (port writes `4` always;
+  reference's transcode path is `FillImage(0, ...)`, unconditional). Bits
+  only — EPF is off at e4 so the value never drives filtering — but a
+  one-line fix worth taking whenever the transcode path is next touched.
+
 ## Phase D — close the loop
 
 Rerun germDM-ios-refresh#661's tables against the named command. Un-drafting

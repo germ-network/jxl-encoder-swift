@@ -155,14 +155,38 @@ enum FrameAssembly {
 			EntropyCodeWriter.writeContextMap(blockContextCode, writer: &writer)
 		}
 
-		if dcQuantization != nil {
-			// The default colour correlation is `base_correlation_b = kYToBRatio`,
-			// which is 1.0: the decoder adds a whole luma block to channel 2.
-			// That is right for XYB, where B really does track Y, and wrong for
-			// Cr — accepting the default leaves every coefficient correct and the
-			// chroma reconstructed against the wrong reference.
+		try writeColorCorrelationDC(jpegCompatible: dcQuantization != nil, writer: &writer)
+		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
+		writer.write(1, 0)  // no lz77
+		EntropyCodeWriter.write(
+			code, allowContextMapANS: allowContextMapANS, writer: &writer)
+	}
+
+	/// Port of `ColorCorrelationEncodeDC` (enc_chroma_from_luma.cc). Verified
+	/// against `cjxl -e 4` at the actual pinned v0.12.0 (not just a 0.13-dev
+	/// checkout — see docs/gap-closure-plan.md, "Quant calibration"'s version-
+	/// skew note): at e4, `CfLHeuristics::ComputeTile` never runs (both its
+	/// gates — `speed_tier <= kSquirrel` and `<= kHare` — are stricter than
+	/// `kCheetah`), so the color-correlation map is exactly the default
+	/// `ColorCorrelation` the frame was constructed with — pixel path
+	/// (`XYB = true`) has `base_correlation_b_ = kYToBRatio = 1.0`, which
+	/// passes `ColorCorrelationEncodeDC`'s all-default test and writes the
+	/// single `1` bit below; a JPEG transcode's cmap (`XYB = false`,
+	/// `ComputeJPEGTranscodingData`) has `base_correlation_b_ = 0`, which
+	/// fails that test and writes the long form instead — every field in it
+	/// still the reference's own default value (`color_factor = 84`,
+	/// `base_correlation_x = 0`, `ytox_dc = ytob_dc = 0`), not a value this
+	/// port invented.
+	///
+	/// `jpegCompatible` names this port's own transcode/pixel discriminator —
+	/// it is not `ColorCorrelation::IsJPEGCompatible()` (a decoder-side check
+	/// with the opposite predicate, `base_correlation_b == 0`, whose sole use
+	/// is `dec_group.cc`'s JPEG-reconstruction-possibility guard); the two
+	/// only coincide here because this port has no third case.
+	static func writeColorCorrelationDC(jpegCompatible: Bool, writer: inout BitWriter) throws {
+		if jpegCompatible {
 			writer.write(1, 0)  // not default DC cmap
-			writer.write(2, 0)  // colour factor: the default
+			writer.write(2, 0)  // colour factor: the default (84)
 			try Float16Coder.write(0, to: &writer)  // base correlation X
 			try Float16Coder.write(0, to: &writer)  // base correlation B
 			writer.write(8, 128)  // ytox_dc = 0, offset by -128
@@ -170,10 +194,6 @@ enum FrameAssembly {
 		} else {
 			writer.write(1, 1)  // default DC cmap
 		}
-		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
-		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(
-			code, allowContextMapANS: allowContextMapANS, writer: &writer)
 	}
 
 	static func writeACGlobal(
