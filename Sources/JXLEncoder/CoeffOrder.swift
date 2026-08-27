@@ -141,10 +141,13 @@ enum CoeffOrder {
 		let lehmer = computeLehmerCode(zigzagOrder)
 		var end = DCT.blockSize
 		while end > 1 && lehmer[end - 1] == 0 { end -= 1 }
-		var result = [Token(context: UInt32(context(DCT.blockSize)), value: UInt32(end - 1))]
+		var result = [
+			Token(context: UInt32(context(DCT.blockSize)), value: UInt32(end - 1))
+		]
 		var last = 0
 		for i in 1..<end {
-			result.append(Token(context: UInt32(context(last)), value: UInt32(lehmer[i])))
+			result.append(
+				Token(context: UInt32(context(last)), value: UInt32(lehmer[i])))
 			last = lehmer[i]
 		}
 		return result

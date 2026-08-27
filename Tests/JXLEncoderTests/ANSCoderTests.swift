@@ -24,7 +24,8 @@ struct ANSCoderTests {
 			#expect(table[i].offsets1 == 1024 * i)
 		}
 
-		let info = ANSInfoTable.build(distribution: [4096], alphabetSize: 1, logAlphaSize: 2)
+		let info = ANSInfoTable.build(
+			distribution: [4096], alphabetSize: 1, logAlphaSize: 2)
 		#expect(info.count == 1)
 		#expect(info[0].freq == 4096)
 		#expect(info[0].reverseMap == (0..<4096).map { UInt16($0) })
@@ -50,7 +51,9 @@ struct ANSCoderTests {
 		let table = ANSAliasTable.build(distribution: [3072, 1024], logAlphaSize: 1)
 		#expect(table.count == 2)
 		#expect(table[0].rightValue == 0 && table[0].cutoff == 0 && table[0].offsets1 == 0)
-		#expect(table[1].rightValue == 0 && table[1].cutoff == 1024 && table[1].offsets1 == 1024)
+		#expect(
+			table[1].rightValue == 0 && table[1].cutoff == 1024
+				&& table[1].offsets1 == 1024)
 
 		let info = ANSInfoTable.build(
 			distribution: [3072, 1024], alphabetSize: 2, logAlphaSize: 1)
@@ -75,7 +78,8 @@ struct ANSCoderTests {
 		let alphabetSize = distribution.count
 		let logAlphaSize = 3  // tableSize 8 >= alphabetSize
 		let info = ANSInfoTable.build(
-			distribution: distribution, alphabetSize: alphabetSize, logAlphaSize: logAlphaSize)
+			distribution: distribution, alphabetSize: alphabetSize,
+			logAlphaSize: logAlphaSize)
 		var seen = [Bool](repeating: false, count: ANSConstants.tabSize)
 		for symbolInfo in info {
 			#expect(symbolInfo.reverseMap.count == symbolInfo.freq)
