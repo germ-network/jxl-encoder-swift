@@ -2,21 +2,27 @@
 
 `jxl-encoder-swift` is a derivative work of
 [libjxl-tiny](https://github.com/libjxl/libjxl-tiny), the JPEG XL project's
-simplified reference encoder, which is BSD-3-Clause. See [LICENSE](LICENSE),
-which carries both copyright lines.
+simplified reference encoder, and of full
+[libjxl](https://github.com/libjxl/libjxl), both BSD-3-Clause. See
+[LICENSE](LICENSE), which carries the copyright lines for both.
 
-Ownership is not partitioned by file. The encoder was ported stage by stage and
-diffed against the reference until the output matched byte for byte, so upstream
-structure runs through it line by line.
+Ownership is not partitioned by file. The encoder was ported from
+`libjxl-tiny` stage by stage, diffed against that reference until the output
+matched byte for byte; it is now retargeted to match one exact configuration
+of full `libjxl` (`cjxl -e 4`), with individual modules — most recently
+quantization calibration and chroma-from-luma — brought in line with that
+reference's own constants and behavior where they diverged from it.
 
-## What is derived from libjxl-tiny
+## What is derived from libjxl-tiny or full libjxl
 
-**Transliterated modules.** Most of `Sources/JXLEncoder/` is a direct port. Each
-file's header names the upstream file it came from:
+**Transliterated modules.** Most of `Sources/JXLEncoder/` is a direct port.
+Each file's header names the upstream file it came from — `libjxl-tiny`'s for
+most, full `libjxl`'s for modules retargeted since (`DistanceParams`'s
+quantization constants, `FrameAssembly`'s color-correlation defaults):
 
-`ACContext` · `ACGroupEncoder` · `ACTokenizer` · `AdaptiveQuant` · `BitWriter` ·
-`ContextTree` · `DCGroupEncoder` · `DCPredictor` · `DCT` · `DistanceParams` ·
-`Encoder` · `EncoderError` · `EntropyCode` · `EntropyCodeWriter` · `FastMath` ·
+`ACContext` · `ACGroupEncoder` · `ACTokenizer` · `BitWriter` · `ContextTree` ·
+`DCGroupEncoder` · `DCPredictor` · `DCT` · `DistanceParams` · `Encoder` ·
+`EncoderError` · `EntropyCode` · `EntropyCodeWriter` · `FastMath` ·
 `FrameAssembly` · `HistogramCluster` · `HuffmanTree` · `ImageHeader` ·
 `PrefixCodeWriter` · `QuantMatrices` · `Quantizer` · `QuantizeRoundtrip` ·
 `Token` · `XYB`
@@ -50,10 +56,17 @@ libjxl-tiny counterpart:
 - `SectionWriter.swift` — staged section writing, so an entropy code can be
   optimised before anything is emitted. Structurally different from the
   reference's approach.
-- `Geometry.swift`, `PlaneBuffer.swift`, `AdaptiveQuantTile.swift`,
-  `AdaptiveQuantPipeline.swift`, `ChromaSubsampling.swift` — tiling and buffer
-  handling that the reference expresses inline through Highway; reorganised here,
-  though the arithmetic they drive is ported.
+- `Geometry.swift`, `PlaneBuffer.swift`, `ChromaSubsampling.swift` — tiling and
+  buffer handling that the reference expresses inline through Highway;
+  reorganised here, though the arithmetic they drive is ported.
+- `AdaptiveQuantPipeline.swift` — now holds only the XYB color-space
+  conversion. Its per-tile adaptive quantization field (`AdaptiveQuant.swift`,
+  `AdaptiveQuantTile.swift`, both deleted) was a direct port of
+  `libjxl-tiny`'s Highway-vectorized `enc_adaptive_quantization.cc`; removed
+  because `cjxl -e 4` never runs that computation — the retargeted quantizer
+  fills a uniform field instead, matching full `libjxl`'s own behavior at this
+  speed tier rather than porting a feature the target configuration doesn't
+  use.
 - `Sources/JXLEncoderApple/` — the platform shim. No upstream counterpart.
 
 ## Third-party dependencies
