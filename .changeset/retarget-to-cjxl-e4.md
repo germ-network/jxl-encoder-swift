@@ -20,6 +20,8 @@ of byte-identity with `libjxl-tiny`.
 Measured against the actual `cjxl -e 4` binary (not `libjxl-tiny`, and not a
 higher-effort `cjxl` run): on five real photographs, pixel-path output now
 lands within 0.4–2.8% of `-e 4`'s size and within 0.7 ssimulacra2 points of
-its quality, down from a 3.5–8.0 point quality gap before this release.
-JPEG recompression lands within 6.7–7.3% of `-e 4`'s size, down from roughly
+its quality, down from a 4.9–8.2 point gap against that same `-e 4` target
+before this release (the port's older, larger-sounding 3.5–8.0 point figure
+was against `-e 7`, a different and stricter comparison, not `-e 4`). JPEG
+recompression lands within 6.7–7.3% of `-e 4`'s size, down from roughly
 18–19%.

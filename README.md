@@ -175,9 +175,10 @@ encode latency ever matters more than it does now.
 
 ## Development
 
-The correctness strategy is differential testing against `libjxl-tiny`, ported
-stage by stage: each stage must reproduce the reference encoder's intermediate
-dump before the next one starts. Building the reference tooling:
+Most stages still trace to `libjxl-tiny`: differential testing against its
+intermediate dumps, stage by stage, is how most of this port was built and
+verified, and most of that gating is still live in the test suite. Building
+the reference tooling:
 
 ```bash
 git clone --recursive https://github.com/libjxl/libjxl-tiny.git
@@ -188,8 +189,17 @@ port targets. That pinning matters: `OPTIMIZE_CHROMA_FROM_LUMA` also selects
 the tile dimension, so building the reference with its defaults produces dumps
 describing a differently tiled encoder.
 
+**Stages retargeted to full `libjxl`** — entropy coding (ANS, coefficient
+reordering, context clustering), quantization calibration, chroma-from-luma —
+are gated differently, since `libjxl-tiny` predates or diverges from what
+`cjxl -e 4` actually does there: against real corpus output from the pinned
+`cjxl`/`djxl` binaries directly (decode-exactness, size corridors, quality
+metrics), not byte-identical dumps. `docs/gap-closure-plan.md` records which
+gate applies to which stage and why.
+
 `djxl` and `ssimulacra2` (from `brew install jpeg-xl`) serve as the independent
-decoder and quality metric. Two traps when comparing against the reference:
+decoder and quality metric throughout, for both kinds of gate. Two traps when
+comparing against `libjxl-tiny` specifically:
 
 - Quality comparisons are only meaningful when both images carry the same
   transfer function. `libjxl-tiny` hardcodes linear; this encoder signals sRGB
@@ -202,19 +212,25 @@ decoder and quality metric. Two traps when comparing against the reference:
 ## Scope
 
 **This is a reimplementation, not a new encoder.** It is deliberately narrow: a
-Swift transliteration of Google's reference implementation, following its
-algorithms and its bitstream decisions, with no novel contributions to the
-format or to the coding techniques it uses. Where this port and the reference
-disagree, the reference is right and this is a bug.
+Swift transliteration of Google's reference implementation and, where that
+reference diverges from the pinned target, of full libjxl instead — following
+published algorithms and bitstream decisions either way, with no novel
+contributions to the format or to the coding techniques it uses. Where a
+stage's actual reference disagrees with this port, the reference is right and
+this is a bug — which reference that is varies by stage; see "Development"
+above and `docs/gap-closure-plan.md`.
 
-Every stage was gated byte-for-byte against `cjxl_tiny`. Contributions are
-welcome within that scope; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Stages not yet retargeted are still gated byte-for-byte against `cjxl_tiny`;
+retargeted stages are gated against the pinned `cjxl -e 4` binary instead, per
+the corridor/decode/quality criteria `docs/gap-closure-plan.md` records.
+Contributions are welcome within that scope; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-BSD-3-Clause, the same licence as the reference implementation — see
-[LICENSE](LICENSE), which carries both this project's copyright and the JPEG XL
-Project Authors', since the port is a derivative work of libjxl-tiny.
+BSD-3-Clause, the same licence as both reference implementations — see
+[LICENSE](LICENSE), which carries this project's copyright and the JPEG XL
+Project Authors', since the port is a derivative work of libjxl-tiny and, for
+the stages retargeted since, of full libjxl.
 
 [NOTICE.md](NOTICE.md) records which files are transliterated from upstream,
 which hold generated upstream tables, and which were written against published

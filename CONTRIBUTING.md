@@ -5,15 +5,20 @@ Contributions are welcomed and encouraged, within a deliberately narrow scope.
 ## Scope
 
 **This package is a reimplementation, not a new encoder.** It follows Google's
-reference implementation — [libjxl-tiny](https://github.com/libjxl/libjxl-tiny),
-and full [libjxl](https://github.com/libjxl/libjxl) for the JPEG recompression
-path — in Swift, reproducing its algorithms and its bitstream decisions. It
-makes **no novel contributions** to the JPEG XL format or to the coding
-techniques it uses.
+reference implementation — [libjxl-tiny](https://github.com/libjxl/libjxl-tiny)
+— for stages not yet retargeted, and full
+[libjxl](https://github.com/libjxl/libjxl) at one pinned configuration
+(`cjxl -e 4`) for stages that have been: entropy coding, quantization
+calibration, chroma-from-luma, and JPEG recompression's context modeling, not
+just the recompression path as a whole. Either way it reproduces published
+algorithms and bitstream decisions in Swift, making **no novel contributions**
+to the JPEG XL format or to the coding techniques it uses.
 
-Where this port and the reference disagree, the reference is right and this is a
-bug. Every stage was gated byte-for-byte against `cjxl_tiny`, which depends on
-nothing here inventing anything.
+Where this port and its actual reference for that stage disagree, the
+reference is right and this is a bug. Stages not yet retargeted are gated
+byte-for-byte against `cjxl_tiny`; retargeted stages are gated against the
+pinned `cjxl -e 4` binary (decode-exactness, size corridor, quality metrics —
+see `docs/gap-closure-plan.md`). Either way nothing here invents anything.
 
 So the contributions that fit are:
 

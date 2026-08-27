@@ -782,15 +782,17 @@ so this isn't a re-confirmation of a prior number — it's the first one taken.
 `gradient` (the synthetic smooth-content fixture, excluded above because it
 was never part of the original comparison) remains the one real outlier:
 16,165 B against `-e 4`'s 8,214 B, a ~2x gap unrelated to this phase's
-measurement — it's Phase A's separately-tracked DC-modular-coding weakness on
-skewed distributions (this document, "Phase B" section), not something either
-quant calibration or CfL alignment touches.
+measurement — it's the DC-modular-coding weakness on skewed distributions
+this document's "What the measurements overturned" section and Phase A
+result A3 already track, not something either quant calibration or CfL
+alignment touches.
 
 Reference columns are plain `cjxl -e 4` / `-e 7`, no forced flags — confirmed
-byte-identical to this document's earlier Phase C table, which used
-`--gaborish=0 --epf=1`: that combination is a pure no-op at this speed tier,
-since gaborish is already off by default at or below `kHare` and `-e 4` is
-`kCheetah`.
+byte-identical to this document's earlier `--gaborish=0 --epf=1` table
+("The named target — rung 1" section): that combination is a pure no-op at
+this speed tier. Gaborish turns on by default at `kHare` and slower; `-e 4`
+is `kCheetah`, strictly faster than `kHare`, so gaborish is already off there
+with no flag needed.
 
 **JPEG recompression, lossless both sides:**
 
@@ -800,11 +802,11 @@ since gaborish is already off by default at or below `kHare` and `-e 4` is
 | 4:4:4, q85 | 609,787 B | 568,375 B (+7.3%) | 568,369 B |
 
 The reference plateau is `e3 = e4 = e5 = e6`; `e7` differs by 4–6 bytes and
-is not part of it (an earlier draft of this section said e3=e4=e7 — wrong,
-corrected here). `-j 1` output is container-wrapped and carries reconstruction
-data (`jbrd`) this port's bare codestream does not — 536 bytes for these two
-files specifically; real-world JPEGs carrying EXIF/ICC metadata add more via
-a `brob` box, so this isn't a fixed per-file constant to generalize from.
+is not part of it. `-j 1` output is container-wrapped and carries
+reconstruction data (`jbrd`) this port's bare codestream does not — 536 bytes
+for these two files specifically; real-world JPEGs carrying EXIF/ICC metadata
+add more via a `brob` box, so this isn't a fixed per-file constant to
+generalize from.
 
 The measured configuration throughout is `main`. The retargeting work this
 phase closes the loop on (Phases A–C) ships as this repository's next
@@ -859,13 +861,21 @@ are retired stage by stage as each stage is retargeted, not wholesale.
 
 ## Scope-document changes — landed in Phase D, not Phase B as originally planned
 
-README and NOTICE.md named libjxl-tiny alone; both now name full libjxl at
-the pinned configuration as the reference too, with tiny acknowledged as the
-port's origin. This item was slated to land with Phase B but didn't — the
-NOTICE.md staleness only became a concrete problem in Phase D, when it turned
-out to still list `AdaptiveQuant`/`AdaptiveQuantTile` as ported modules after
-Phase C had deleted both files. CONTRIBUTING already named full libjxl for
-the recompression path and needed no change. Upstream license text is
+README, NOTICE.md, and CONTRIBUTING.md all named libjxl-tiny as the sole
+reference, or scoped full libjxl's involvement to only the JPEG recompression
+path; all three needed correction, not just the naming. This item was slated
+to land with Phase B but didn't — it only became a concrete problem in Phase
+D, when NOTICE.md turned out to still list `AdaptiveQuant`/`AdaptiveQuantTile`
+as ported modules after Phase C had deleted both files, and eight further
+modules from Phase B/C's entropy and quantization work (`ANSCoder` and
+friends, `CoeffOrder`, `DistanceParams`'s retargeted constants) turned out to
+have no attribution entry naming full libjxl as their source at all.
+README's Development/Scope/License sections and CONTRIBUTING's Scope section
+asserted flatly that every stage is gated byte-for-byte against `cjxl_tiny` —
+true for stages not yet retargeted, false for entropy coding, quantization
+calibration, and chroma-from-luma, which gate against the pinned `cjxl -e 4`
+binary instead. All four documents now state which gate applies to which
+kind of stage, rather than one blanket claim. Upstream license text is
 byte-identical between the two repos (verified by diff, 2026-08-08); LICENSE
 is unchanged. The "no novel contributions" statement survives — implementing
 a subset of a named upstream configuration invents nothing.

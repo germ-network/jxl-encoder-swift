@@ -3,8 +3,10 @@
 `jxl-encoder-swift` is a derivative work of
 [libjxl-tiny](https://github.com/libjxl/libjxl-tiny), the JPEG XL project's
 simplified reference encoder, and of full
-[libjxl](https://github.com/libjxl/libjxl), both BSD-3-Clause. See
-[LICENSE](LICENSE), which carries the copyright lines for both.
+[libjxl](https://github.com/libjxl/libjxl), both BSD-3-Clause and both from
+the JPEG XL Project. See [LICENSE](LICENSE), which carries this project's
+copyright line and the JPEG XL Project Authors' — one line covering both
+upstreams, since both are the same project's work.
 
 Ownership is not partitioned by file. The encoder was ported from
 `libjxl-tiny` stage by stage, diffed against that reference until the output
@@ -16,9 +18,12 @@ reference's own constants and behavior where they diverged from it.
 ## What is derived from libjxl-tiny or full libjxl
 
 **Transliterated modules.** Most of `Sources/JXLEncoder/` is a direct port.
-Each file's header names the upstream file it came from — `libjxl-tiny`'s for
-most, full `libjxl`'s for modules retargeted since (`DistanceParams`'s
-quantization constants, `FrameAssembly`'s color-correlation defaults):
+Each file's header names the upstream file it came from.
+
+From `libjxl-tiny`, unchanged or only constant-level retargeting since
+(`DistanceParams`'s quantization constants and `FrameAssembly`'s
+color-correlation defaults now come from full `libjxl` instead — see below —
+but the modules themselves are still tiny's structure):
 
 `ACContext` · `ACGroupEncoder` · `ACTokenizer` · `BitWriter` · `ContextTree` ·
 `DCGroupEncoder` · `DCPredictor` · `DCT` · `DistanceParams` · `Encoder` ·
@@ -26,6 +31,21 @@ quantization constants, `FrameAssembly`'s color-correlation defaults):
 `FrameAssembly` · `HistogramCluster` · `HuffmanTree` · `ImageHeader` ·
 `PrefixCodeWriter` · `QuantMatrices` · `Quantizer` · `QuantizeRoundtrip` ·
 `Token` · `XYB`
+
+From full `libjxl` directly, with no `libjxl-tiny` counterpart at all —
+`libjxl-tiny` has neither ANS (prefix codes only), coefficient reordering, nor
+a JPEG-recompression path, so these were never tiny ports needing a retarget;
+they were written against full `libjxl`'s source from the start:
+
+`ANSCoder` (`ans_common.cc`, `enc_ans.h`/`.cc`) · `ANSHistogramWriter`
+(`enc_ans.cc`'s `ANSEncodingHistogram::Encode`) · `ANSTokenWriter`
+(`enc_ans.cc`'s `WriteTokens` ANS branch) · `CoeffOrder`
+(`enc_coeff_order.cc`/`coeff_order.cc`) · `Float16Coder`
+(`enc_fields.cc`'s `F16Coder::Write`) · `JPEGBlockContextMap`
+(`enc_frame.cc`'s `ComputeJPEGTranscodingData`, `ac_context.h`'s
+`BlockCtxMap::Context`, `enc_context_map.cc`) · `JPEGTranscode` (mirrors
+`enc_frame.cc`'s `ComputeJPEGTranscodingData` ingestion) · `QuantMatrixWriter`
+(`DequantMatricesEncode`/`EncodeQuantTable`)
 
 **Generated tables.** These hold upstream constants, extracted by compiler-driven
 generators in `Reference/tools/` rather than transcribed by hand:
@@ -68,6 +88,8 @@ libjxl-tiny counterpart:
   speed tier rather than porting a feature the target configuration doesn't
   use.
 - `Sources/JXLEncoderApple/` — the platform shim. No upstream counterpart.
+- `EntropyDiagnostics.swift` — a coder-loss measurement hook for this
+  project's own gap-closure work, not part of any encoder's bitstream.
 
 ## Third-party dependencies
 
