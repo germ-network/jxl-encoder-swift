@@ -158,7 +158,8 @@ enum FrameAssembly {
 		try writeColorCorrelationDC(jpegCompatible: dcQuantization != nil, writer: &writer)
 		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
 		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(code, allowContextMapANS: allowContextMapANS, writer: &writer)
+		EntropyCodeWriter.write(
+			code, allowContextMapANS: allowContextMapANS, writer: &writer)
 	}
 
 	/// Port of `ColorCorrelationEncodeDC` (enc_chroma_from_luma.cc). Verified

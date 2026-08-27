@@ -57,7 +57,8 @@ struct ColorCorrelationTests {
 	func factorsMatchDefaultCorrelation() {
 		// AC: `enc_group.cc`'s `x_factor`/`b_factor` at the default map.
 		#expect(ACGroupEncoder.xFactor == 0)  // YtoXRatio(0) = base_correlation_x_ = 0
-		#expect(ACGroupEncoder.bFactor == 1)  // YtoBRatio(0) = base_correlation_b_ = kYToBRatio = 1
+		// YtoBRatio(0) = base_correlation_b_ = kYToBRatio = 1
+		#expect(ACGroupEncoder.bFactor == 1)
 
 		// DC: `AddVarDCTDC`'s `y_factor · inv_factor` cancels every scale
 		// term down to `DCQuant(1) · InvDCQuant(2)`, times `bFactor` above.
