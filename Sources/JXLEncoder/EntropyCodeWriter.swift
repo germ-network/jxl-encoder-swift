@@ -14,7 +14,9 @@ enum EntropyCodeWriter {
 	/// `allowANS` only ever applies to the context-map sub-encoding this
 	/// writes, never to `code`'s own main token stream (`code.ansInfoTables`
 	/// decides that independently, below) — see `writeContextMapEntries`.
-	static func writeContextMap(_ code: EntropyCode, allowANS: Bool = false, writer: inout BitWriter) {
+	static func writeContextMap(
+		_ code: EntropyCode, allowANS: Bool = false, writer: inout BitWriter
+	) {
 		guard code.transmittedContextCount != 0 else { return }
 
 		// A re-clustered code composes with the map it was built from, so the
@@ -71,7 +73,8 @@ enum EntropyCodeWriter {
 				count: 1, logAlphaSize: ANSConstants.logAlphaSize, writer: &writer)
 			ANSHistogramWriter.write(counts: counts, writer: &writer)
 			ANSTokenWriter.write(
-				tokens: tokens, contextMap: [0], infoTables: [infoTable], writer: &writer)
+				tokens: tokens, contextMap: [0], infoTables: [infoTable],
+				writer: &writer)
 			return
 		}
 
@@ -84,7 +87,9 @@ enum EntropyCodeWriter {
 		}
 	}
 
-	static func write(_ code: EntropyCode, allowContextMapANS: Bool = false, writer: inout BitWriter) {
+	static func write(
+		_ code: EntropyCode, allowContextMapANS: Bool = false, writer: inout BitWriter
+	) {
 		writeContextMap(code, allowANS: allowContextMapANS, writer: &writer)
 		if let ansInfoTables = code.ansInfoTables {
 			writer.write(1, 0)  // use_prefix_code = false

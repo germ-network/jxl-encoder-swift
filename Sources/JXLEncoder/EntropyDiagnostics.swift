@@ -51,7 +51,8 @@ package enum EntropyDiagnostics {
 			if !code.isDegenerate {
 				for symbol in 0..<histogram.counts.count {
 					prefixBits +=
-						Int(histogram.counts[symbol]) * Int(code.depths[symbol])
+						Int(histogram.counts[symbol])
+						* Int(code.depths[symbol])
 				}
 			}
 			boundBits += entropyBits(histogram)
