@@ -125,7 +125,8 @@ public enum PlaneBuffer {
 				let destRow = y * paddedWidth
 				for x in 0..<rect.width {
 					planes[c][destRow + x] =
-						SRGBTransfer.linearize(source[(sourceRow + x) * channels + c])
+						SRGBTransfer.linearize(
+							source[(sourceRow + x) * channels + c])
 				}
 				let last = planes[c][destRow + rect.width - 1]
 				for x in rect.width..<paddedWidth {
