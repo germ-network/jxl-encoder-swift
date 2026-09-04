@@ -44,17 +44,20 @@ public struct ImageBuffer: Sendable {
 }
 
 public enum Encoder {
-	/// Converts 8-bit sRGB samples to the linear light the transform expects.
-	static func linearize(_ image: ImageBuffer) -> [Float] {
-		let count = image.width * image.height
-		var linear = [Float](repeating: 0, count: count * 3)
-		for i in 0..<count {
-			for c in 0..<3 {
-				linear[i * 3 + c] = SRGBTransfer.linearize(
-					image.samples[i * image.channels + c])
-			}
+	/// A stripe source that linearizes 8-bit samples one rect at a time, so the
+	/// whole-image linear plane is never materialised. Captures only the
+	/// image's samples, stride and width — all value types — so it is safe to
+	/// share across the concurrent path's group tasks.
+	static func linearizingStripeSource(
+		_ image: ImageBuffer
+	) -> @Sendable (Rect) -> PaddedStripe {
+		let samples = image.samples
+		let channels = image.channels
+		let width = image.width
+		return { rect in
+			PlaneBuffer.copyAndPadLinearizing(
+				source: samples, sourceWidth: width, channels: channels, rect: rect)
 		}
-		return linear
 	}
 
 	/// One AC group's output: its own section, plus the per-block state the DC
@@ -88,10 +91,16 @@ public enum Encoder {
 	/// and quantization — everything except tokenization.
 	///
 	/// This is where nearly all the per-pixel cost sits, and it reads nothing but
-	/// `linear` and the geometry — groups never see each other. Separating it
+	/// `stripeAt` and the geometry — groups never see each other. Separating it
 	/// from assembly is what lets them run concurrently.
+	///
+	/// `stripeAt` yields one padded, linear stripe for a pixel rect. Production
+	/// supplies a closure that linearizes 8-bit samples on the fly
+	/// (`copyAndPadLinearizing`), so the whole-image linear plane never exists;
+	/// the stage-dump tests supply one that reads pre-linearized floats. Either
+	/// way it is called once per stripe with disjoint rects, so it must be pure.
 	static func computeACGroup(
-		linear: [Float],
+		stripeAt: @Sendable (Rect) -> PaddedStripe,
 		dim: ImageDim,
 		groupX imageGX: Int,
 		groupY imageGY: Int,
@@ -124,9 +133,7 @@ public enum Encoder {
 				maxWidth: Geometry.groupDim,
 				maxHeight: Geometry.tileDim,
 				xEnd: dim.width, yEnd: dim.height)
-			let padded = PlaneBuffer.copyAndPad(
-				source: linear, sourceWidth: dim.width,
-				rect: stripeRect)
+			let padded = stripeAt(stripeRect)
 			let xyb = AdaptiveQuantPipeline.toXYB(padded)
 
 			// Keep the group's XYB so the AC pass sees the same values.
@@ -271,7 +278,9 @@ public enum Encoder {
 	}
 
 	static func encodeFrame(
-		linear: [Float], width: Int, height: Int, params: DistanceParams,
+		stripeAt: @Sendable (Rect) -> PaddedStripe,
+		width: Int, height: Int,
+		params: DistanceParams,
 		optimizeCodes: Bool = true,
 		writer: inout BitWriter
 	) throws {
@@ -299,7 +308,7 @@ public enum Encoder {
 		for index in 0..<dim.groupCount {
 			computes.append(
 				computeACGroup(
-					linear: linear, dim: dim,
+					stripeAt: stripeAt, dim: dim,
 					groupX: index % dim.widthInGroups,
 					groupY: index / dim.widthInGroups,
 					params: params))
@@ -365,14 +374,14 @@ public enum Encoder {
 		optimizeCodes: Bool = true
 	) throws -> [UInt8] {
 		let params = try DistanceParams(distance: distance)
-		let linear = linearize(image)
 
 		var writer = BitWriter()
 		try ImageHeader.write(
 			width: image.width, height: image.height,
 			transferFunction: transferFunction, to: &writer)
 		try encodeFrame(
-			linear: linear, width: image.width, height: image.height,
+			stripeAt: linearizingStripeSource(image),
+			width: image.width, height: image.height,
 			params: params, optimizeCodes: optimizeCodes, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
@@ -383,7 +392,7 @@ extension Encoder {
 	/// Encodes with the AC groups computed concurrently.
 	///
 	/// Produces byte-identical output to `encode`: groups read only the shared
-	/// linear image and their own geometry, and the assembly step keys off each
+	/// 8-bit samples and their own geometry, and the assembly step keys off each
 	/// group's coordinates rather than the order results arrive in. What changes
 	/// is only how long it takes.
 	///
@@ -396,7 +405,7 @@ extension Encoder {
 		optimizeCodes: Bool = true
 	) async throws -> [UInt8] {
 		let params = try DistanceParams(distance: distance)
-		let linear = linearize(image)
+		let stripeAt = linearizingStripeSource(image)
 		let dim = ImageDim(width: image.width, height: image.height)
 
 		var writer = BitWriter()
@@ -419,7 +428,7 @@ extension Encoder {
 			for index in 0..<dim.groupCount {
 				group.addTask {
 					computeACGroup(
-						linear: linear, dim: dim,
+						stripeAt: stripeAt, dim: dim,
 						groupX: index % dim.widthInGroups,
 						groupY: index / dim.widthInGroups,
 						params: params)

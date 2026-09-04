@@ -22,10 +22,18 @@ struct EncoderTests {
 		try ImageHeader.write(
 			width: linear.width, height: linear.height,
 			transferFunction: .linear, to: &writer)
+		//the fixture is already-linear float data, so feed it straight through
+		//the float stripe reader, bypassing the production 8-bit linearize step
+		let interleaved = linear.interleaved
+		let width = linear.width
+		let stripeAt: @Sendable (Rect) -> PaddedStripe = { rect in
+			PlaneBuffer.copyAndPad(
+				source: interleaved, sourceWidth: width, rect: rect)
+		}
 		//these fixtures were produced with static entropy tables, so they gate
 		//the unoptimised path
 		try Encoder.encodeFrame(
-			linear: linear.interleaved, width: linear.width, height: linear.height,
+			stripeAt: stripeAt, width: linear.width, height: linear.height,
 			params: params, optimizeCodes: false, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()

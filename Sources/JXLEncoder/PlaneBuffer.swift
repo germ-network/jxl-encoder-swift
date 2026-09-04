@@ -96,4 +96,51 @@ public enum PlaneBuffer {
 
 		return PaddedStripe(width: paddedWidth, height: paddedHeight, planes: planes)
 	}
+
+	/// As `copyAndPad`, but linearizes 8-bit sRGB samples on the way in, so the
+	/// whole-image linear plane never has to be materialised — the encoder holds
+	/// only one stripe's worth of floats at a time.
+	///
+	/// Byte-identical to linearizing the whole image first and calling
+	/// `copyAndPad`: `SRGBTransfer.linearize` is a pure lookup, and padding
+	/// replicates values that are already linearized, so the order does not
+	/// matter. `channels` is the source read-stride only (input may be RGB or
+	/// RGBA); exactly three planes are always produced, matching the pixel path.
+	public static func copyAndPadLinearizing(
+		source: [UInt8],
+		sourceWidth: Int,
+		channels: Int = 3,
+		rect: Rect
+	) -> PaddedStripe {
+		let paddedWidth = Geometry.roundUp(rect.width, to: Geometry.blockDim)
+		let paddedHeight = Geometry.roundUp(rect.height, to: Geometry.blockDim)
+
+		var planes = [[Float]](
+			repeating: [Float](repeating: 0, count: paddedWidth * paddedHeight),
+			count: 3)
+
+		for c in 0..<3 {
+			for y in 0..<rect.height {
+				let sourceRow = (rect.y0 + y) * sourceWidth + rect.x0
+				let destRow = y * paddedWidth
+				for x in 0..<rect.width {
+					planes[c][destRow + x] =
+						SRGBTransfer.linearize(source[(sourceRow + x) * channels + c])
+				}
+				let last = planes[c][destRow + rect.width - 1]
+				for x in rect.width..<paddedWidth {
+					planes[c][destRow + x] = last
+				}
+			}
+			let lastRow = (rect.height - 1) * paddedWidth
+			for y in rect.height..<paddedHeight {
+				let destRow = y * paddedWidth
+				for x in 0..<paddedWidth {
+					planes[c][destRow + x] = planes[c][lastRow + x]
+				}
+			}
+		}
+
+		return PaddedStripe(width: paddedWidth, height: paddedHeight, planes: planes)
+	}
 }
