@@ -1,5 +1,24 @@
 # @germ-network/jxl-encoder-swift
 
+## 0.2.1
+
+### Patch Changes
+
+- [#11](https://github.com/germ-network/jxl-encoder-swift/pull/11) [`1cbd2fa`](https://github.com/germ-network/jxl-encoder-swift/commit/1cbd2fa9fba28cf0ac7cf780fdcd5b71d0f33dc8) Thanks [@germ-mark](https://github.com/germ-mark)! - Bake EXIF orientation on the JPEG recompression path.
+
+  `encode(data:)` re-coded a JPEG from its coefficients when no `maxPixelSize` was
+  given, a path that never read EXIF orientation — so a rotated source encoded
+  unrotated at full size while its thumbnail (decoded through the
+  transform-applying pixel path) baked upright. The two disagreed. The
+  coefficient-domain fast path now declines a non-identity EXIF orientation and
+  falls through to the pixel path, which bakes it, honouring the contract: EXIF
+  orientation baked into pixels, no orientation metadata in the output.
+
+  Behaviour change: a large (>~14 MP) JPEG carrying a non-identity orientation now
+  takes the pixel path at full size and is subject to `maxSourceBytes`, so it can
+  be refused where it previously recompressed regardless of size. Upright JPEGs
+  are unaffected and still recompress.
+
 ## 0.2.0
 
 ### Minor Changes
