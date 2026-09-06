@@ -195,7 +195,9 @@
 			// photograph too large for the pixel path can still go through here.
 			//
 			// Only at full size: the transcode reproduces the source's own
-			// resolution, so a thumbnail has to be decoded and re-encoded.
+			// resolution, so a thumbnail has to be decoded and re-encoded. And
+			// only for an upright source — `recompressedJPEG` declines a
+			// non-identity EXIF orientation so the pixel path bakes it below.
 			if maxPixelSize == nil, let recompressed = recompressedJPEG(data) {
 				return recompressed
 			}
@@ -277,6 +279,13 @@
 			guard data.count >= 2, data[data.startIndex] == 0xFF,
 				data[data.startIndex + 1] == 0xD8
 			else { return nil }  // not a JPEG; skip the parse entirely
+			// A non-identity EXIF orientation cannot survive this path: the
+			// transcode copies coefficients verbatim and emits identity-orientation
+			// JXL, so a rotated source would decode unrotated while its thumbnail —
+			// taken through the transform-applying pixel path — bakes upright.
+			// Decline it so the caller falls through and bakes the orientation,
+			// keeping the contract: baked into pixels, no orientation metadata out.
+			guard hasIdentityOrientation(data) else { return nil }
 			do {
 				let image = try JPEGParser.parse([UInt8](data))
 				let transcode = try JPEGTranscode(image)
@@ -284,6 +293,23 @@
 			} catch {
 				return nil
 			}
+		}
+
+		/// True when the source declares no rotation or reflection — EXIF
+		/// orientation absent, or 1. Read from the container metadata, so it does
+		/// not decode. Reads the same orientation the pixel path bakes through
+		/// `kCGImageSourceCreateThumbnailWithTransform`, so gate and bake agree.
+		///
+		/// A source ImageIO cannot open is treated as identity: the pixel-path
+		/// fallback could not open it either, so recompression is its only chance
+		/// to encode it at all, and declining would only lose that.
+		static func hasIdentityOrientation(_ data: Data) -> Bool {
+			guard let source = CGImageSourceCreateWithData(data as CFData, nil),
+				let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
+					as? [CFString: Any],
+				let orientation = properties[kCGImagePropertyOrientation] as? Int
+			else { return true }
+			return orientation == 1
 		}
 
 		/// Reads the declared dimensions from the container's metadata, which

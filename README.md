@@ -26,8 +26,8 @@ sizes.
 ```swift
 import JXLEncoderApple
 
-// Any ImageIO-decodable input; `maxPixelSize` caps the longest edge for
-// thumbnails and applies the EXIF orientation.
+// Any ImageIO-decodable input. EXIF orientation is baked into the pixels on
+// every path; `maxPixelSize` caps the longest edge for thumbnails.
 let jxl = try JXLEncoderApple.encode(data: jpegData, distance: 1.0)
 let thumb = try JXLEncoderApple.encode(
 	data: jpegData, distance: 1.0, maxPixelSize: 200)
