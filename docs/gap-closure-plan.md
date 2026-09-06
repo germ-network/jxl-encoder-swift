@@ -751,10 +751,68 @@ block-context-map item already had to unwind):**
   only — EPF is off at e4 so the value never drives filtering — but a
   one-line fix worth taking whenever the transcode path is next touched.
 
-## Phase D — close the loop
+## Phase D — close the loop (2026-08-27)
 
-Rerun germDM-ios-refresh#661's tables against the named command. Un-drafting
-#661 is decided on those numbers.
+The downstream app-integration decision this whole retargeting effort (issue
+#2) exists to inform was parked on two tables, measured before Phase A
+against `cjxl` at its own default effort (7), not the pinned `-e 4`. Both are
+re-measured here against the named command, on the real `cjxl -e 4`/`-e 7`
+binaries (v0.12.0), not `libjxl-tiny`. `-e 7` is kept as a second column for
+continuity with the older numbers and because it's the configuration the
+integration decision would actually be trading away — `-e 4` remains the
+project's own target and the corridor gate.
+
+**Pixel path, `distance = 1.0`, five real photographs:**
+
+| photo | ours | `-e 4` | `-e 7` | ours vs. `-e 4` |
+|---|---|---|---|---|
+| hopper | 10,418 B / 89.72 | 10,307 B / 89.82 | 10,002 B / 90.63 | +1.08% / −0.10 |
+| flower | 498,677 B / 87.42 | 496,748 B / 87.68 | 486,257 B / 88.86 | +0.39% / −0.26 |
+| macan | 46,033 B / 84.49 | 44,913 B / 85.17 | 41,862 B / 83.50 | +2.49% / −0.68 |
+| riaphoto | 27,985 B / 88.62 | 27,234 B / 89.19 | 24,125 B / 90.32 | +2.76% / −0.57 |
+| bliznaca | 41,859 B / 87.74 | 40,888 B / 88.21 | 40,711 B / 88.76 | +2.37% / −0.48 |
+
+(bytes / ssimulacra2.) Every photo lands within 0.4–2.8% of `-e 4`'s size and
+within 0.7 ssimulacra2 points of its quality — on macan, ours actually beats
+`-e 7` (84.49 vs. 83.50), which the reference columns are not even monotonic
+in effort on. This is the first ssimulacra2 measurement of the encoder since
+Phase C; Phase C's own gate was mean absolute pixel error, not this metric,
+so this isn't a re-confirmation of a prior number — it's the first one taken.
+
+`gradient` (the synthetic smooth-content fixture, excluded above because it
+was never part of the original comparison) remains the one real outlier:
+16,165 B against `-e 4`'s 8,214 B, a ~2x gap unrelated to this phase's
+measurement — it's the DC-modular-coding weakness on skewed distributions
+this document's "What the measurements overturned" section and Phase A
+result A3 already track, not something either quant calibration or CfL
+alignment touches.
+
+Reference columns are plain `cjxl -e 4` / `-e 7`, no forced flags — confirmed
+byte-identical to this document's earlier `--gaborish=0 --epf=1` table
+("The named target — rung 1" section): that combination is a pure no-op at
+this speed tier. Gaborish turns on by default at `kHare` and slower; `-e 4`
+is `kCheetah`, strictly faster than `kHare`, so gaborish is already off there
+with no flag needed.
+
+**JPEG recompression, lossless both sides:**
+
+| source | ours | `-e 4` | `-e 7` |
+|---|---|---|---|
+| 4:2:0, q85 | 486,422 B | 456,104 B (+6.7%) | 456,100 B |
+| 4:4:4, q85 | 609,787 B | 568,375 B (+7.3%) | 568,369 B |
+
+The reference plateau is `e3 = e4 = e5 = e6`; `e7` differs by 4–6 bytes and
+is not part of it. `-j 1` output is container-wrapped and carries
+reconstruction data (`jbrd`) this port's bare codestream does not — 536 bytes
+for these two files specifically; real-world JPEGs carrying EXIF/ICC metadata
+add more via a `brob` box, so this isn't a fixed per-file constant to
+generalize from.
+
+The measured configuration throughout is `main`. The retargeting work this
+phase closes the loop on (Phases A–C) ships as this repository's next
+release; the app-integration decision itself, and its own release-sequencing
+constraints on the consuming side, are tracked and decided outside this
+repository.
 
 ## API surface
 
@@ -801,15 +859,26 @@ state; the end state is the named command, and stages land in an order
 that keeps every intermediate decodable and gated. Byte-exact-vs-tiny gates
 are retired stage by stage as each stage is retargeted, not wholesale.
 
-## Scope-document changes (land with Phase B)
+## Scope-document changes — landed in Phase D, not Phase B as originally planned
 
-README scope and NOTICE.md currently name libjxl-tiny alone; both change to
-name full libjxl at the pinned configuration as the reference, with tiny
-acknowledged as the port's origin. CONTRIBUTING already names full libjxl
-for the recompression path. Upstream license text is byte-identical between
-the two repos (verified by diff, 2026-08-08); LICENSE is unchanged. The
-"no novel contributions" statement survives — implementing a subset of a
-named upstream configuration invents nothing.
+README, NOTICE.md, and CONTRIBUTING.md all named libjxl-tiny as the sole
+reference, or scoped full libjxl's involvement to only the JPEG recompression
+path; all three needed correction, not just the naming. This item was slated
+to land with Phase B but didn't — it only became a concrete problem in Phase
+D, when NOTICE.md turned out to still list `AdaptiveQuant`/`AdaptiveQuantTile`
+as ported modules after Phase C had deleted both files, and eight further
+modules from Phase B/C's entropy and quantization work (`ANSCoder` and
+friends, `CoeffOrder`, `DistanceParams`'s retargeted constants) turned out to
+have no attribution entry naming full libjxl as their source at all.
+README's Development/Scope/License sections and CONTRIBUTING's Scope section
+asserted flatly that every stage is gated byte-for-byte against `cjxl_tiny` —
+true for stages not yet retargeted, false for entropy coding, quantization
+calibration, and chroma-from-luma, which gate against the pinned `cjxl -e 4`
+binary instead. All four documents now state which gate applies to which
+kind of stage, rather than one blanket claim. Upstream license text is
+byte-identical between the two repos (verified by diff, 2026-08-08); LICENSE
+is unchanged. The "no novel contributions" statement survives — implementing
+a subset of a named upstream configuration invents nothing.
 
 ## Non-goals (for this rung)
 

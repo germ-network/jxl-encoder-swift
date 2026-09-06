@@ -7,10 +7,12 @@ Apple platforms decode JPEG XL natively (iOS 17+, macOS 14+) but ship no
 encoder — `public.jpeg-xl` is absent from `CGImageDestinationCopyTypeIdentifiers()`
 as of macOS 27 and iOS 26. This package fills that gap.
 
-The encoder is a port of Google's simplified reference encoder
-[libjxl-tiny](https://github.com/libjxl/libjxl-tiny): lossy VarDCT, XYB color,
-8×8 blocks, prefix-code entropy coding. It targets photographic content at
-display and thumbnail sizes.
+The encoder began as a port of Google's simplified reference encoder
+[libjxl-tiny](https://github.com/libjxl/libjxl-tiny) and is now retargeted to
+match one exact named configuration of full
+[libjxl](https://github.com/libjxl/libjxl): `cjxl -e 4` — lossy VarDCT, XYB
+color, 8×8 blocks. It targets photographic content at display and thumbnail
+sizes.
 
 ## Targets
 
@@ -78,16 +80,19 @@ let bytes = try Encoder.encode(image, distance: 1.0)
 
 ## Status
 
-Working. With static entropy tables the output is **byte-identical to
-`cjxl_tiny`** across the corpus, single- and multi-group; with per-image
-optimized prefix codes the encoding decisions are unchanged and only the
-entropy layer differs. 186 tests, CI on macOS, Mac Catalyst, iOS Simulator and
+Working. Gated against the actual `cjxl -e 4` binary, not just against
+`libjxl-tiny`: decode-exactness, corridor-bounded size, and quality metrics
+across a real-photo corpus, not byte-identity — `-e 4` and this port make
+different, independently-arrived-at coding choices in places (ANS vs. prefix
+selection per section, ordering) that land on the same output size without
+matching bit for bit. 200 tests, CI on macOS, Mac Catalyst, iOS Simulator and
 Linux.
 
-Implemented: lossy VarDCT (8×8), XYB color, adaptive quantization, DC modular
-sub-encoder, static and per-image prefix codes, chroma subsampling, alpha
-flattening, and baseline JPEG recompression. A bare `FF 0A` codestream decodes
-through ImageIO on macOS and iOS — no ISOBMFF container needed.
+Implemented: lossy VarDCT (8×8), XYB color, uniform quantization matching
+`-e 4`'s own (non-adaptive) field, ANS and prefix entropy coding chosen per
+section, DC modular sub-encoder, chroma subsampling, alpha flattening, and
+baseline JPEG recompression. A bare `FF 0A` codestream decodes through ImageIO
+on macOS and iOS — no ISOBMFF container needed.
 
 **JPEG input is recompressed rather than re-encoded.** A JPEG's own quantized
 coefficients are re-coded directly — no inverse transform, so no generation of
@@ -107,25 +112,36 @@ Alpha is flattened onto a background, never preserved.
 
 ### Measured
 
-Against `libjxl-tiny` at the same configuration, encoding decisions are
-identical — byte-identical files with static tables, and the same ssimulacra2
-to the last digit at every distance. Chroma-from-luma and variable block sizes,
-both dropped here, save 5–8% at fixed distance but ~0–4% at matched quality on
-photographs.
+Against the real `cjxl -e 4` binary (v0.12.0, no forced flags — the pinned
+gate, not a comparison rigged in either direction), at `distance = 1.0` on
+five real photographs:
 
-Against full `libjxl` on a 600×600 photograph, at matched quality
-(ssimulacra2 ≈ 82.5):
+| photo | this package | `cjxl -e 4` | `cjxl -e 7` |
+|---|---|---|---|
+| hopper | 10 418 B / 89.72 | 10 307 B / 89.82 | 10 002 B / 90.63 |
+| flower | 498 677 B / 87.42 | 496 748 B / 87.68 | 486 257 B / 88.86 |
+| macan | 46 033 B / 84.49 | 44 913 B / 85.17 | 41 862 B / 83.50 |
+| riaphoto | 27 985 B / 88.62 | 27 234 B / 89.19 | 24 125 B / 90.32 |
+| bliznaca | 41 859 B / 87.74 | 40 888 B / 88.21 | 40 711 B / 88.76 |
 
-| encoder | bytes |
-|---|---|
-| this package | 42 197 |
-| `cjxl -e1` | 37 443 |
-| `cjxl -e7` | 30 811 |
+(bytes / ssimulacra2). This package sits 0.4–2.8% larger than `-e 4` and
+within 0.7 ssimulacra2 points of it on every photo — closer to `-e 4` than
+`-e 4` is to `-e 7` on macan, where this package's quality actually exceeds
+`-e 7`'s. `-e 7` is shown for context, not as the target: it runs full
+libjxl's rate-distortion search, adaptive quantization, and variable block
+sizes, none of which `-e 4` itself uses.
 
-Roughly 11% of that is structural — ANS, variable block sizes and rate
-allocation are present even at libjxl's cheapest effort — and the rest is
-search effort. Gaborish and EPF are not the cause; disabling them in libjxl
-costs under one ssimulacra2 point.
+Smooth synthetic content remains the weak case (see Known limits) — a
+1024×1024 gradient comes in at 16 165 B against `-e 4`'s 8 214 B, a gap this
+package's DC modular coder, not its quantization or entropy layer, is
+responsible for.
+
+JPEG recompression (lossless both sides, `flower.jpg` at matched quality):
+
+| source | this package | `cjxl -e 4 -j 1` |
+|---|---|---|
+| 4:2:0 | 486 422 B | 456 104 B (+6.7%) |
+| 4:4:4 | 609 787 B | 568 375 B (+7.3%) |
 
 On Apple silicon the encoder runs at ~10 MP/s single-threaded and adds ~336 KB
 to a stripped iOS binary. `encodeConcurrently` splits the AC groups across a
@@ -159,9 +175,10 @@ encode latency ever matters more than it does now.
 
 ## Development
 
-The correctness strategy is differential testing against `libjxl-tiny`, ported
-stage by stage: each stage must reproduce the reference encoder's intermediate
-dump before the next one starts. Building the reference tooling:
+Most stages still trace to `libjxl-tiny`: differential testing against its
+intermediate dumps, stage by stage, is how most of this port was built and
+verified, and most of that gating is still live in the test suite. Building
+the reference tooling:
 
 ```bash
 git clone --recursive https://github.com/libjxl/libjxl-tiny.git
@@ -172,8 +189,17 @@ port targets. That pinning matters: `OPTIMIZE_CHROMA_FROM_LUMA` also selects
 the tile dimension, so building the reference with its defaults produces dumps
 describing a differently tiled encoder.
 
+**Stages retargeted to full `libjxl`** — entropy coding (ANS, coefficient
+reordering, context clustering), quantization calibration, chroma-from-luma —
+are gated differently, since `libjxl-tiny` predates or diverges from what
+`cjxl -e 4` actually does there: against real corpus output from the pinned
+`cjxl`/`djxl` binaries directly (decode-exactness, size corridors, quality
+metrics), not byte-identical dumps. `docs/gap-closure-plan.md` records which
+gate applies to which stage and why.
+
 `djxl` and `ssimulacra2` (from `brew install jpeg-xl`) serve as the independent
-decoder and quality metric. Two traps when comparing against the reference:
+decoder and quality metric throughout, for both kinds of gate. Two traps when
+comparing against `libjxl-tiny` specifically:
 
 - Quality comparisons are only meaningful when both images carry the same
   transfer function. `libjxl-tiny` hardcodes linear; this encoder signals sRGB
@@ -186,19 +212,25 @@ decoder and quality metric. Two traps when comparing against the reference:
 ## Scope
 
 **This is a reimplementation, not a new encoder.** It is deliberately narrow: a
-Swift transliteration of Google's reference implementation, following its
-algorithms and its bitstream decisions, with no novel contributions to the
-format or to the coding techniques it uses. Where this port and the reference
-disagree, the reference is right and this is a bug.
+Swift transliteration of Google's reference implementation and, where that
+reference diverges from the pinned target, of full libjxl instead — following
+published algorithms and bitstream decisions either way, with no novel
+contributions to the format or to the coding techniques it uses. Where a
+stage's actual reference disagrees with this port, the reference is right and
+this is a bug — which reference that is varies by stage; see "Development"
+above and `docs/gap-closure-plan.md`.
 
-Every stage was gated byte-for-byte against `cjxl_tiny`. Contributions are
-welcome within that scope; see [CONTRIBUTING.md](CONTRIBUTING.md).
+Stages not yet retargeted are still gated byte-for-byte against `cjxl_tiny`;
+retargeted stages are gated against the pinned `cjxl -e 4` binary instead, per
+the corridor/decode/quality criteria `docs/gap-closure-plan.md` records.
+Contributions are welcome within that scope; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
-BSD-3-Clause, the same licence as the reference implementation — see
-[LICENSE](LICENSE), which carries both this project's copyright and the JPEG XL
-Project Authors', since the port is a derivative work of libjxl-tiny.
+BSD-3-Clause, the same licence as both reference implementations — see
+[LICENSE](LICENSE), which carries this project's copyright and the JPEG XL
+Project Authors', since the port is a derivative work of libjxl-tiny and, for
+the stages retargeted since, of full libjxl.
 
 [NOTICE.md](NOTICE.md) records which files are transliterated from upstream,
 which hold generated upstream tables, and which were written against published
