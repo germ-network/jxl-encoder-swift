@@ -4,7 +4,7 @@ import Testing
 
 /// Running the AC groups concurrently must not change what comes out.
 ///
-/// Groups read only the shared linear image and their own geometry, and the
+/// Groups read only the shared 8-bit samples and their own geometry, and the
 /// assembly step keys off each group's coordinates rather than the order
 /// results arrive in — so the output is byte-identical, and that is the whole
 /// contract. Anything less would mean the groups were not as independent as the

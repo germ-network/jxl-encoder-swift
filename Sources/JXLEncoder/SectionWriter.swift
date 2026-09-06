@@ -18,7 +18,11 @@ enum StagedRecord: Sendable {
 	/// code's context map happens when the optimized code is built, so the
 	/// full context space stays measurable until then.
 	case token(context: UInt32, value: UInt32)
-	case rawBits(count: Int, value: UInt64)
+	/// `value` is declared before `count` on purpose: the 8-byte-aligned
+	/// `UInt64` must come first for the case to pack into a 16-byte stride
+	/// (`count` first leaves it at 24, the same as an `Int` count — a no-op).
+	/// `count` is a bit width, always ≤ 64 here, so `UInt8` is ample.
+	case rawBits(value: UInt64, count: UInt8)
 }
 
 public struct SectionWriter: Sendable {
@@ -63,7 +67,7 @@ public struct SectionWriter: Sendable {
 		case .direct:
 			writer.write(count, value)
 		case .staging:
-			staged.append(.rawBits(count: count, value: value))
+			staged.append(.rawBits(value: value, count: UInt8(count)))
 		}
 	}
 
@@ -80,8 +84,8 @@ public struct SectionWriter: Sendable {
 					writer.write(
 						token: Token(context: context, value: value),
 						code: code)
-				case .rawBits(let count, let value):
-					writer.write(count, value)
+				case .rawBits(let value, let count):
+					writer.write(Int(count), value)
 				}
 			}
 		}

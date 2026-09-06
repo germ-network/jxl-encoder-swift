@@ -71,11 +71,16 @@
 
 		/// Peak bytes an encode holds per *decoded* pixel.
 		///
-		/// Nineteen are accounted for — four for the drawing context, three for
-		/// the extracted samples, twelve for the linear plane — and measured peak
-		/// RSS runs well above that, the rest being ImageIO's own decode.
-		/// Measured at full size: 110 MB at 2 MP, 503 MB at 12 MP, 772 MB at
-		/// 24 MP, 1388 MB at 48 MP.
+		/// This is a measured over-estimate, not a tight sum: it sits above the
+		/// peak RSS of every full-size encode measured (which is dominated by
+		/// ImageIO's own decode, not the core's working set), carrying margin so
+		/// the guard errs toward refusing rather than under-budgeting. The core's
+		/// own per-pixel footprint is now much smaller than this figure — the
+		/// whole-image linear plane it used to hold (12 B/px) is gone, linearized
+		/// per stripe instead — so 40 is conservative by a wider margin than
+		/// before and could be re-tuned against fresh measurements as separate
+		/// work; left as-is here since lowering it is a behavior change (it admits
+		/// larger encodes) that wants its own measured decision.
 		static let bytesPerDecodedPixel = 40
 
 		/// Working set an encode holds regardless of size, which a per-pixel

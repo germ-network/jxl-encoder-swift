@@ -22,10 +22,18 @@ struct EncoderTests {
 		try ImageHeader.write(
 			width: linear.width, height: linear.height,
 			transferFunction: .linear, to: &writer)
+		//the fixture is already-linear float data, so feed it straight through
+		//the float stripe reader, bypassing the production 8-bit linearize step
+		let interleaved = linear.interleaved
+		let width = linear.width
+		let stripeAt: @Sendable (Rect) -> PaddedStripe = { rect in
+			PlaneBuffer.copyAndPad(
+				source: interleaved, sourceWidth: width, rect: rect)
+		}
 		//these fixtures were produced with static entropy tables, so they gate
 		//the unoptimised path
 		try Encoder.encodeFrame(
-			linear: linear.interleaved, width: linear.width, height: linear.height,
+			stripeAt: stripeAt, width: linear.width, height: linear.height,
 			params: params, optimizeCodes: false, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
@@ -109,8 +117,9 @@ struct EncoderTests {
 		}
 	}
 
-	/// Channel counts other than 3 and 4 would misalign every pixel read; 1 and
-	/// 2 used to pass validation and trap inside `linearize` instead.
+	/// Channel counts other than 3 and 4 would misalign every pixel read, so
+	/// `ImageBuffer.init` rejects them up front rather than letting a bad stride
+	/// reach the sample reads.
 	@Test("rejects unsupported channel counts", arguments: [0, 1, 2, 5])
 	func rejectsChannels(channels: Int) {
 		let samples = [UInt8](repeating: 128, count: 16 * 16 * max(channels, 1))
