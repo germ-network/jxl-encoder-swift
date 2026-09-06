@@ -256,6 +256,187 @@
 				try JXLEncoderApple.encode(data: source, maxSourceBytes: 1)
 			}
 		}
+
+		// MARK: - EXIF orientation
+
+		/// A 200x120 landscape image with a red block in the visual top-left
+		/// corner, written as a baseline JPEG tagged with `orientation`.
+		///
+		/// The tag is asserted to round-trip. Writing it is fragile: a
+		/// properties dict that coerces the Int orientation to a Double
+		/// alongside the Double quality is silently dropped by ImageIO, which
+		/// would leave an upright fixture and false-green every test that means
+		/// to feed an oriented one. `[CFString: Any]` keeps the Int an Int.
+		static func orientedJPEG(orientation: Int) throws -> Data {
+			let width = 200
+			let height = 120
+			let colorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+			let context = CGContext(
+				data: nil, width: width, height: height, bitsPerComponent: 8,
+				bytesPerRow: 0, space: colorSpace,
+				bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+			context.setFillColor(CGColor(red: 1, green: 1, blue: 1, alpha: 1))
+			context.fill(CGRect(x: 0, y: 0, width: width, height: height))
+			context.setFillColor(CGColor(red: 1, green: 0, blue: 0, alpha: 1))
+			// A corner block, not a full-width bar: asymmetric under every
+			// orientation, so a wrong rotation or a mirror shows up in the pixels
+			// (via the transform-applied reference), not only in the dimensions.
+			// CoreGraphics origin is bottom-left, so high y is the visual top —
+			// this is the top-left corner.
+			context.fill(CGRect(x: 0, y: height - 20, width: 20, height: 20))
+			let image = context.makeImage()!
+
+			let dest = NSMutableData()
+			let destination = CGImageDestinationCreateWithData(
+				dest, UTType.jpeg.identifier as CFString, 1, nil)!
+			let properties: [CFString: Any] = [
+				kCGImagePropertyOrientation: orientation,
+				kCGImageDestinationLossyCompressionQuality: 0.9,
+			]
+			CGImageDestinationAddImage(
+				destination, image, properties as CFDictionary)
+			CGImageDestinationFinalize(destination)
+			let data = dest as Data
+
+			try #require(
+				Self.orientationTag(data) == orientation,
+				"fixture lost its orientation tag")
+			return data
+		}
+
+		/// The EXIF orientation ImageIO reports for `data`, or nil if none — the
+		/// same value the gate reads and the pixel path bakes.
+		static func orientationTag(_ data: Data) -> Int? {
+			CGImageSourceCreateWithData(data as CFData, nil)
+				.flatMap {
+					CGImageSourceCopyPropertiesAtIndex($0, 0, nil)
+						as? [CFString: Any]
+				}
+				.flatMap { $0[kCGImagePropertyOrientation] as? Int }
+		}
+
+		/// Full-size decode with the EXIF transform applied — the upright pixels
+		/// the pixel path feeds the encoder, and so the reference the baked
+		/// output should match.
+		static func transformedSamples(
+			_ data: Data
+		) -> (width: Int, height: Int, rgb: [UInt8])? {
+			guard
+				let source = CGImageSourceCreateWithData(data as CFData, nil),
+				let image = CGImageSourceCreateThumbnailAtIndex(
+					source, 0,
+					[
+						kCGImageSourceCreateThumbnailFromImageAlways: true,
+						kCGImageSourceCreateThumbnailWithTransform: true,
+					] as CFDictionary)
+			else { return nil }
+			let w = image.width
+			let h = image.height
+			var rgba = [UInt8](repeating: 0, count: w * h * 4)
+			rgba.withUnsafeMutableBytes { buffer in
+				let context = CGContext(
+					data: buffer.baseAddress, width: w, height: h,
+					bitsPerComponent: 8, bytesPerRow: w * 4,
+					space: CGColorSpace(name: CGColorSpace.sRGB)!,
+					bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
+				context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
+			}
+			var rgb = [UInt8](repeating: 0, count: w * h * 3)
+			for i in 0..<(w * h) {
+				rgb[i * 3] = rgba[i * 4]
+				rgb[i * 3 + 1] = rgba[i * 4 + 1]
+				rgb[i * 3 + 2] = rgba[i * 4 + 2]
+			}
+			return (w, h, rgb)
+		}
+
+		/// The fast path must decline every non-identity orientation — flips and
+		/// rotations alike — because it copies coefficients verbatim and cannot
+		/// bake the transform. The anchor: this returns non-nil against pre-fix
+		/// code, where the transcode ran regardless of orientation.
+		@Test(
+			"a non-identity EXIF orientation declines the transcode",
+			arguments: [2, 3, 4, 5, 6, 7, 8])
+		func orientationDeclinesTranscode(orientation: Int) throws {
+			let source = try Self.orientedJPEG(orientation: orientation)
+			#expect(JXLEncoderApple.recompressedJPEG(source) == nil)
+		}
+
+		/// The gate must not over-reach: an upright source still recompresses.
+		@Test("an upright source still recompresses")
+		func uprightStillRecompresses() throws {
+			let identity = try Self.orientedJPEG(orientation: 1)
+			#expect(JXLEncoderApple.recompressedJPEG(identity) != nil)
+		}
+
+		/// End to end: a full-size encode of an orientation-6 JPEG bakes the 90°
+		/// rotation, so it decodes portrait — dimensions swapped from the raw
+		/// 200x120 grid — and matches the transform-applied source. Pre-fix it
+		/// took the transcode and decoded landscape, orientation dropped.
+		@Test("a full-size encode bakes EXIF orientation")
+		func fullSizeBakesOrientation() throws {
+			let source = try Self.orientedJPEG(orientation: 6)
+			let encoded = try JXLEncoderApple.encode(data: source)
+			let ours = try #require(Self.samples(encoded))
+			let reference = try #require(Self.transformedSamples(source))
+			#expect(
+				ours.height > ours.width,
+				"expected portrait, got \(ours.width)x\(ours.height)")
+			try #require(ours.width == reference.width)
+			try #require(ours.height == reference.height)
+			let total = zip(ours.rgb, reference.rgb).reduce(0.0) {
+				$0 + abs(Double($1.0) - Double($1.1))
+			}
+			let error = total / Double(ours.rgb.count)
+			#expect(error < 6, "mean absolute error \(error)")
+			// The other half of the contract: orientation is baked into the
+			// pixels, so the output declares none of its own.
+			let outputOrientation = Self.orientationTag(encoded)
+			#expect(outputOrientation == nil || outputOrientation == 1)
+		}
+
+		/// The flip side of `ignoresDecodeBudget`: an oriented JPEG now takes the
+		/// pixel path, so it *is* bound by the decode budget — a tight one refuses
+		/// it where the transcode would have ignored the budget entirely. Pins the
+		/// behaviour change this fix introduces.
+		@Test("an oriented JPEG is subject to the decode budget")
+		func orientedSubjectToBudget() throws {
+			let source = try Self.orientedJPEG(orientation: 6)
+			#expect(throws: JXLEncoderAppleError.self) {
+				try JXLEncoderApple.encode(data: source, maxSourceBytes: 1)
+			}
+		}
+
+		/// The issue's user-facing invariant: a full image and its own thumbnail
+		/// must not disagree on orientation. Both take the pixel path, so both
+		/// decode portrait. Pre-fix the full image alone came out landscape.
+		@Test("full image and thumbnail agree on orientation")
+		func fullAndThumbnailAgree() throws {
+			let source = try Self.orientedJPEG(orientation: 6)
+			let full = try #require(
+				Self.samples(try JXLEncoderApple.encode(data: source)))
+			let thumb = try #require(
+				Self.samples(
+					try JXLEncoderApple.encode(data: source, maxPixelSize: 64)))
+			#expect(full.height > full.width)
+			#expect(thumb.height > thumb.width)
+		}
+
+		/// The concurrent entry point shares the gate, so it too declines the
+		/// transcode and bakes the orientation. Asserting it decodes portrait —
+		/// not merely that it equals the serial path, which held pre-fix too when
+		/// both recompressed identity output — is what pins the baking here.
+		@Test("concurrent entry point bakes orientation too")
+		func concurrentBakesOrientation() async throws {
+			let source = try Self.orientedJPEG(orientation: 6)
+			let concurrent = try await JXLEncoderApple.encodeConcurrently(
+				data: source)
+			let decoded = try #require(Self.samples(concurrent))
+			#expect(
+				decoded.height > decoded.width,
+				"expected portrait, got \(decoded.width)x\(decoded.height)")
+			#expect(concurrent == (try JXLEncoderApple.encode(data: source)))
+		}
 	}
 
 #endif  // canImport(ImageIO)
