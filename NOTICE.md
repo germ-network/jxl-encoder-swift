@@ -68,6 +68,12 @@ libjxl-tiny counterpart:
 
 - `JPEGParser.swift`, `JPEGHuffman.swift` — baseline JPEG parsing, written to
   ISO/IEC 10918-1 Annex F. libjxl-tiny has no JPEG input path.
+- `JPEGOrientation.swift` — reads the EXIF orientation tag, written to the
+  TIFF 6.0 and Exif (CIPA DC-008) specifications. It feeds no encoder
+  decision; platform shims use it to gate recompression.
+- `JPEGRecompression.swift` — `JXLSignature`, the two signatures ISO/IEC
+  18181-2 defines, and `Encoder.recompressJPEG`, a convenience entry point
+  that composes the ported `JPEGParser` → `JPEGTranscode` → `encodeJPEG` path.
 - `ReciprocalEstimate.swift` — reproduces Arm's `FPRecipEstimate` as specified in
   the Arm Architecture Reference Manual, to match what the reference gets from
   the hardware instruction. Its header cites libjxl-tiny to explain why the file

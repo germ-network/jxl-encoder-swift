@@ -3,6 +3,7 @@
 	import CoreGraphics
 	import Foundation
 	import ImageIO
+	import JXLEncoder
 	import Testing
 	import UniformTypeIdentifiers
 
@@ -300,6 +301,63 @@
 				try JXLEncoderApple.encode(
 					data: png as Data, maxSourceBytes: required - 1)
 			}
+		}
+
+		/// A 300x200 gradient JPEG declaring `orientation` in its metadata.
+		static func orientedJPEG(_ orientation: Int) throws -> Data {
+			let jpeg = NSMutableData()
+			let destination = try #require(
+				CGImageDestinationCreateWithData(
+					jpeg, UTType.jpeg.identifier as CFString, 1, nil))
+			CGImageDestinationAddImage(
+				destination, Self.gradient(width: 300, height: 200),
+				[kCGImagePropertyOrientation: orientation] as CFDictionary)
+			#expect(CGImageDestinationFinalize(destination))
+			return jpeg as Data
+		}
+
+		@Test("decode bakes orientation and honours the cap")
+		func publicDecode() throws {
+			let upright = try JXLEncoderApple.decode(data: Self.orientedJPEG(1))
+			#expect(upright.width == 300 && upright.height == 200)
+			#expect(upright.samples.count == 300 * 200 * 3)
+
+			// 6 is a quarter turn, which swaps the dimensions.
+			let rotated = try JXLEncoderApple.decode(data: Self.orientedJPEG(6))
+			#expect(rotated.width == 200 && rotated.height == 300)
+
+			let capped = try JXLEncoderApple.decode(
+				data: Self.orientedJPEG(1), maxPixelSize: 150)
+			#expect(capped.width == 150 && capped.height == 100)
+		}
+
+		@Test("the orientation gate reads what ImageIO reads")
+		func orientationGate() throws {
+			#expect(JXLEncoderApple.hasIdentityOrientation(try Self.orientedJPEG(1)))
+			#expect(!JXLEncoderApple.hasIdentityOrientation(try Self.orientedJPEG(6)))
+		}
+
+		@Test("imageBuffer matches the samples encode(image:) takes")
+		func publicImageBuffer() throws {
+			let image = Self.gradient(width: 40, height: 30)
+			let buffer = try JXLEncoderApple.imageBuffer(from: image)
+			#expect(buffer.width == 40 && buffer.height == 30 && buffer.channels == 3)
+			#expect(
+				buffer.samples
+					== (try JXLEncoderApple.sRGBSamples(
+						from: image,
+						alphaPolicy: .flatten(
+							background: JXLEncoderApple
+								.defaultBackground))))
+		}
+
+		@Test("encode(data:) is decode followed by the core encode")
+		func encodeIsDecodeThenEncode() throws {
+			let jpeg = try Self.orientedJPEG(6)
+			let viaDecode = Data(
+				try Encoder.encode(
+					JXLEncoderApple.decode(data: jpeg), distance: 1.0))
+			#expect(try JXLEncoderApple.encode(data: jpeg) == viaDecode)
 		}
 	}
 

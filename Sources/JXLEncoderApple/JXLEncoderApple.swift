@@ -62,11 +62,37 @@
 			distance: Float = 1.0,
 			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground)
 		) throws -> Data {
+			return Data(
+				try Encoder.encode(
+					try imageBuffer(from: image, alphaPolicy: alphaPolicy),
+					distance: distance))
+		}
+
+		/// A `CGImage` as the core's 8-bit sRGB buffer, compositing away any alpha
+		/// per `alphaPolicy`.
+		public static func imageBuffer(
+			from image: CGImage,
+			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground)
+		) throws -> ImageBuffer {
 			let samples = try sRGBSamples(from: image, alphaPolicy: alphaPolicy)
-			let buffer = try ImageBuffer(
+			return try ImageBuffer(
 				width: image.width, height: image.height, samples: samples,
 				channels: 3)
-			return Data(try Encoder.encode(buffer, distance: distance))
+		}
+
+		/// Decodes anything ImageIO reads to the core's 8-bit sRGB buffer, with EXIF
+		/// orientation baked in, downscaled during decode to `maxPixelSize` on the
+		/// longest edge, and under the same `maxSourceBytes` guard as `encode(data:)`.
+		public static func decode(
+			data: Data,
+			maxPixelSize: Int? = nil,
+			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground),
+			maxSourceBytes: Int = defaultMaxSourceBytes
+		) throws -> ImageBuffer {
+			let image = try decodedImage(
+				data: data, maxPixelSize: maxPixelSize,
+				maxSourceBytes: maxSourceBytes)
+			return try imageBuffer(from: image, alphaPolicy: alphaPolicy)
 		}
 
 		/// Peak bytes an encode holds per *decoded* pixel.
@@ -259,40 +285,25 @@
 			let image = try decodedImage(
 				data: data, maxPixelSize: maxPixelSize,
 				maxSourceBytes: maxSourceBytes)
-			let samples = try sRGBSamples(from: image, alphaPolicy: alphaPolicy)
-			let buffer = try ImageBuffer(
-				width: image.width, height: image.height, samples: samples,
-				channels: 3)
 			return Data(
-				try await Encoder.encodeConcurrently(buffer, distance: distance))
+				try await Encoder.encodeConcurrently(
+					try imageBuffer(from: image, alphaPolicy: alphaPolicy),
+					distance: distance))
 		}
 
-		/// Re-codes a JPEG from its own quantized coefficients, or returns nil if
-		/// this one cannot take that path.
-		///
-		/// Recompression is an optimisation, never a requirement: anything the
-		/// parser or the layout declines — progressive, arithmetic-coded, CMYK,
-		/// 4:1:1, a frame JPEG XL cannot express — falls back to decoding and
-		/// re-encoding the pixels, which handles everything ImageIO does. So the
-		/// failure is swallowed deliberately rather than surfaced.
+		/// `Encoder.recompressJPEG` for upright JPEGs only, since its output
+		/// declares no orientation. Declines a rotation in either the EXIF bytes or
+		/// what ImageIO reports, so the gate agrees with the orientation the pixel
+		/// path bakes through `kCGImageSourceCreateThumbnailWithTransform`.
 		static func recompressedJPEG(_ data: Data) -> Data? {
 			guard data.count >= 2, data[data.startIndex] == 0xFF,
 				data[data.startIndex + 1] == 0xD8
 			else { return nil }  // not a JPEG; skip the parse entirely
-			// A non-identity EXIF orientation cannot survive this path: the
-			// transcode copies coefficients verbatim and emits identity-orientation
-			// JXL, so a rotated source would decode unrotated while its thumbnail —
-			// taken through the transform-applying pixel path — bakes upright.
-			// Decline it so the caller falls through and bakes the orientation,
-			// keeping the contract: baked into pixels, no orientation metadata out.
-			guard hasIdentityOrientation(data) else { return nil }
-			do {
-				let image = try JPEGParser.parse([UInt8](data))
-				let transcode = try JPEGTranscode(image)
-				return Data(try Encoder.encodeJPEG(transcode))
-			} catch {
-				return nil
-			}
+			let bytes = [UInt8](data)
+			guard (JPEGParser.exifOrientation(bytes) ?? 1) == 1,
+				hasIdentityOrientation(data)
+			else { return nil }
+			return Encoder.recompressJPEG(bytes).map { Data($0) }
 		}
 
 		/// True when the source declares no rotation or reflection — EXIF
@@ -303,7 +314,7 @@
 		/// A source ImageIO cannot open is treated as identity: the pixel-path
 		/// fallback could not open it either, so recompression is its only chance
 		/// to encode it at all, and declining would only lose that.
-		static func hasIdentityOrientation(_ data: Data) -> Bool {
+		public static func hasIdentityOrientation(_ data: Data) -> Bool {
 			guard let source = CGImageSourceCreateWithData(data as CFData, nil),
 				let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil)
 					as? [CFString: Any],
