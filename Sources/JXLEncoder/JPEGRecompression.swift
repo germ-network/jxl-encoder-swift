@@ -2,8 +2,8 @@
 //  JPEGRecompression.swift
 //  JXLEncoder
 //
-//  The portable half of the input policy platform shims share: recognise JPEG
-//  XL that needs no work, and take a JPEG down the coefficient path when it can.
+//  Portable entry points for platform shims: recognise JPEG XL that needs no
+//  work, and take a JPEG down the coefficient path when it can.
 //
 
 /// Recognises JPEG XL by its signature: the bare codestream or the ISOBMFF
@@ -23,20 +23,16 @@ extension Encoder {
 	/// Re-codes a JPEG from its own quantized coefficients, or returns nil if
 	/// this one cannot take that path.
 	///
-	/// Recompression is an optimisation, never a requirement: a non-JPEG, a
-	/// layout the parser declines (progressive, arithmetic-coded, CMYK, …), or a
-	/// non-identity EXIF orientation all return nil so the caller decodes and
-	/// re-encodes the pixels instead. Orientation is declined because the
-	/// coefficients cross over verbatim and the output declares none, so a
-	/// rotated source would decode unrotated.
+	/// A non-JPEG, or a layout the parser declines (progressive,
+	/// arithmetic-coded, CMYK, …), returns nil so the caller can decode and
+	/// re-encode the pixels instead. The output declares no orientation, so a
+	/// caller that must keep a rotated source upright checks
+	/// `JPEGParser.exifOrientation` first.
 	public static func recompressJPEG(
 		_ data: [UInt8],
 		maxCoefficientBytes: Int = JPEGParser.defaultMaxCoefficientBytes
 	) -> [UInt8]? {
 		guard data.count >= 2, data[0] == 0xFF, data[1] == 0xD8 else { return nil }
-		if let orientation = JPEGParser.exifOrientation(data), orientation != 1 {
-			return nil
-		}
 		do {
 			let image = try JPEGParser.parse(
 				data, maxCoefficientBytes: maxCoefficientBytes)

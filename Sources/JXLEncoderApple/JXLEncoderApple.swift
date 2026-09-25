@@ -291,15 +291,19 @@
 					distance: distance))
 		}
 
-		/// `Encoder.recompressJPEG`, additionally declining whatever orientation
-		/// ImageIO reports, so the gate agrees with the orientation the pixel path
-		/// bakes through `kCGImageSourceCreateThumbnailWithTransform`.
+		/// `Encoder.recompressJPEG` for upright JPEGs only, since its output
+		/// declares no orientation. Declines a rotation in either the EXIF bytes or
+		/// what ImageIO reports, so the gate agrees with the orientation the pixel
+		/// path bakes through `kCGImageSourceCreateThumbnailWithTransform`.
 		static func recompressedJPEG(_ data: Data) -> Data? {
 			guard data.count >= 2, data[data.startIndex] == 0xFF,
 				data[data.startIndex + 1] == 0xD8
 			else { return nil }  // not a JPEG; skip the parse entirely
-			guard hasIdentityOrientation(data) else { return nil }
-			return Encoder.recompressJPEG([UInt8](data)).map { Data($0) }
+			let bytes = [UInt8](data)
+			guard (JPEGParser.exifOrientation(bytes) ?? 1) == 1,
+				hasIdentityOrientation(data)
+			else { return nil }
+			return Encoder.recompressJPEG(bytes).map { Data($0) }
 		}
 
 		/// True when the source declares no rotation or reflection — EXIF

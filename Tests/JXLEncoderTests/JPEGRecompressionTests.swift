@@ -2,8 +2,8 @@ import Testing
 
 @testable import JXLEncoder
 
-/// The portable input policy: EXIF orientation read without a decoder, the
-/// recompression gate built on it, and JPEG XL signature detection.
+/// EXIF orientation read without a decoder, the portable recompression entry
+/// point, and JPEG XL signature detection.
 @Suite("Portable JPEG recompression")
 struct PortableJPEGRecompressionTests {
 	/// An APP1 EXIF segment whose IFD0 holds only an orientation entry.
@@ -73,9 +73,13 @@ struct PortableJPEGRecompressionTests {
 		#expect(upright == plain)
 	}
 
-	@Test("a rotated JPEG is declined", arguments: 2...8)
-	func rotatedDeclined(orientation: Int) throws {
-		#expect(Encoder.recompressJPEG(try Self.jpeg(orientation: orientation)) == nil)
+	/// Orientation is the caller's to gate: the coefficients cross over as they
+	/// are, and the output declares none.
+	@Test("orientation does not change the recompressed output", arguments: 2...8)
+	func orientationIgnored(orientation: Int) throws {
+		let rotated = try #require(
+			Encoder.recompressJPEG(try Self.jpeg(orientation: orientation)))
+		#expect(rotated == Encoder.recompressJPEG(try Self.jpeg(orientation: nil)))
 	}
 
 	@Test("non-JPEG and unsupported JPEG are declined")
