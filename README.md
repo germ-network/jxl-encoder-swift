@@ -1,5 +1,9 @@
 # jxl-encoder-swift
 
+[![Apple](https://github.com/germ-network/jxl-encoder-swift/actions/workflows/ci-apple.yml/badge.svg)](https://github.com/germ-network/jxl-encoder-swift/actions/workflows/ci-apple.yml)
+[![Linux](https://github.com/germ-network/jxl-encoder-swift/actions/workflows/ci-linux.yml/badge.svg)](https://github.com/germ-network/jxl-encoder-swift/actions/workflows/ci-linux.yml)
+[![Android](https://github.com/germ-network/jxl-encoder-swift/actions/workflows/ci-android.yml/badge.svg)](https://github.com/germ-network/jxl-encoder-swift/actions/workflows/ci-android.yml)
+
 A narrow JPEG XL **encoder** in pure Swift, with no `Unsafe*` constructs and no
 C or C++ dependencies.
 
@@ -18,7 +22,7 @@ sizes.
 
 | Target | Contents |
 |---|---|
-| `JXLEncoder` | Portable core. **Swift stdlib only** — no Foundation, no platform frameworks. Linux CI enforces this so an Android shim can consume it unchanged. |
+| `JXLEncoder` | Portable core. **Swift stdlib only** — no Foundation, no platform frameworks. Linux and Android CI build and test the core. |
 | `JXLEncoderApple` | Platform shim. The only target that touches Foundation / CoreGraphics / ImageIO: decodes arbitrary input, handles thumbnails and alpha policy, returns `Data`. |
 
 ## Usage
@@ -85,8 +89,8 @@ Working. Gated against the actual `cjxl -e 4` binary, not just against
 across a real-photo corpus, not byte-identity — `-e 4` and this port make
 different, independently-arrived-at coding choices in places (ANS vs. prefix
 selection per section, ordering) that land on the same output size without
-matching bit for bit. 200 tests, CI on macOS, Mac Catalyst, iOS Simulator and
-Linux.
+matching bit for bit. 200 tests, CI on macOS, Mac Catalyst, iOS Simulator,
+Linux, and Android.
 
 Implemented: lossy VarDCT (8×8), XYB color, uniform quantization matching
 `-e 4`'s own (non-adaptive) field, ANS and prefix entropy coding chosen per

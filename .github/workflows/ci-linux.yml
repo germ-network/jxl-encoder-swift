@@ -1,4 +1,4 @@
-name: CI
+name: Linux
 
 on:
   push:
@@ -17,25 +17,11 @@ concurrency:
   group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
   cancel-in-progress: true
 
-jobs:
-  test:
-    name: Test MacOS
-    runs-on: macOS-26
-    timeout-minutes: 30
-    env:
-      DEVELOPER_DIR: /Applications/Xcode_26.2.app
-    strategy:
-      matrix:
-        destination:
-          - "platform=macOS"
-          - "platform=macOS,variant=Mac Catalyst"
-          - "platform=iOS Simulator,name=iPhone 17e"
-          - "platform=iOS Simulator,name=iPhone Air"
-    steps:
-      - uses: actions/checkout@v5
-      - name: Test platform ${{ matrix.destination }}
-        run: set -o pipefail && xcodebuild -skipMacroValidation -scheme jxl-encoder-swift-Package -destination "${{ matrix.destination }}" test | xcbeautify
+# These jobs only need to read the repository.
+permissions:
+  contents: read
 
+jobs:
   # Portability guard: JXLEncoder must build and test with no Foundation and no
   # Apple frameworks, so an Android shim can consume it unchanged. A stray
   # `import Foundation` in the core fails here and nowhere else.

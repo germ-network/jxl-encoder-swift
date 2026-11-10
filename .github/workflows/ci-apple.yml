@@ -1,0 +1,41 @@
+name: Apple
+
+on:
+  push:
+    # branches:
+    #   - main
+    paths-ignore:
+      - 'README.md'
+      - 'CODE_OF_CONDUCT.md'
+      - '.editorconfig'
+      - '.spi.yml'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# These jobs only need to read the repository.
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test MacOS
+    runs-on: macOS-26
+    timeout-minutes: 30
+    env:
+      DEVELOPER_DIR: /Applications/Xcode_26.2.app
+    strategy:
+      matrix:
+        destination:
+          - "platform=macOS"
+          - "platform=macOS,variant=Mac Catalyst"
+          - "platform=iOS Simulator,name=iPhone 17e"
+          - "platform=iOS Simulator,name=iPhone Air"
+    steps:
+      - uses: actions/checkout@v5
+      - name: Test platform ${{ matrix.destination }}
+        run: set -o pipefail && xcodebuild -skipMacroValidation -scheme jxl-encoder-swift-Package -destination "${{ matrix.destination }}" test | xcbeautify
