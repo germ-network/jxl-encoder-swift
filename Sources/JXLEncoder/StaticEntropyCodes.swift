@@ -13,6 +13,10 @@
 //  but the decoded pixels are byte-identical either way, so this is purely an
 //  entropy-layer tradeoff and a safe starting point.
 //
+//  Generator: Reference/legacy-tiny/tools/gencodes.cc
+//  Upstream: libjxl-tiny (unpinned)
+//  Config: OPTIMIZE_CODE=0
+//
 
 /// Canonical prefix code over the 64-symbol token alphabet. A depth of zero
 /// means the symbol is unused.

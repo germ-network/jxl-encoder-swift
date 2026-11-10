@@ -9,6 +9,10 @@
 //  The table is exact for 8-bit input and keeps the core free of libm, which
 //  the Swift standard library does not provide.
 //
+//  Generator: unrecorded
+//  Upstream: IEC 61966-2-1
+//  Config: -
+//
 
 enum SRGBTransfer {
 	static func linearize(_ value: UInt8) -> Float {

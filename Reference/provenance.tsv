@@ -49,3 +49,7 @@ Tests/JXLEncoderAppleTests/Fixtures/reject_arithmetic.jpg	fixture	cc490d8971117a
 Tests/JXLEncoderTests/EntropyTests.swift	inline	-	inherited-tiny	Reference/legacy-tiny/tools/gentokens.cc	gentokens	unrecorded	libjxl-tiny (unpinned)	OPTIMIZE_CODE=0	EntropyTests.swift
 Tests/JXLEncoderTests/ImageHeaderTests.swift	inline	-	inherited-tiny	cjxl_tiny	cjxl_tiny	unrecorded	libjxl-tiny (unpinned)	OPTIMIZE_CODE=0 OPTIMIZE_CHROMA_FROM_LUMA=0 OPTIMIZE_BLOCK_SIZES=0	ImageHeaderTests.swift
 Tests/JXLEncoderTests/DistanceParamsTests.swift	inline	-	full-libjxl	full libjxl arithmetic	unrecorded	unrecorded	libjxl a7a9c787341cf703dede03c2009fa460cae5e5df	-	DistanceParamsTests.swift
+Sources/JXLEncoder/StaticEntropyCodes.swift	table	-	inherited-tiny	Reference/legacy-tiny/tools/gencodes.cc	gencodes	unrecorded	libjxl-tiny (unpinned)	OPTIMIZE_CODE=0	-
+Sources/JXLEncoder/ContextTree.swift	table	-	inherited-tiny	unrecorded	unrecorded	unrecorded	libjxl-tiny (unpinned)	OPTIMIZE_CODE=0	-
+Sources/JXLEncoder/QuantMatrices.swift	table	-	inherited-tiny	unrecorded	unrecorded	unrecorded	libjxl-tiny (unpinned)	OPTIMIZE_CODE=0	-
+Sources/JXLEncoder/SRGBTransfer.swift	table	-	hand-supplied	unrecorded	unrecorded	unrecorded	IEC 61966-2-1	-	-
