@@ -61,7 +61,7 @@ struct DecisionInventoryTests {
 
 	// MARK: The checker enforces the schema
 
-	@Test("a well-formed row has no violations", .disabled("not implemented"))
+	@Test("a well-formed row has no violations")
 	func acceptsWellFormedRow() {
 		#expect(Self.check([Self.row()]).isEmpty)
 		#expect(
@@ -69,7 +69,7 @@ struct DecisionInventoryTests {
 				.isEmpty)
 	}
 
-	@Test("both headers must list the schema's columns in order", .disabled("not implemented"))
+	@Test("both headers must list the schema's columns in order")
 	func rejectsWrongHeader() {
 		let swapped = Self.header.replacingOccurrences(
 			of: "id\tswift_file", with: "swift_file\tid")
@@ -79,8 +79,7 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
-		"every line has the schema's field count, no empty field and no CR",
-		.disabled("not implemented"))
+		"every line has the schema's field count, no empty field and no CR")
 	func rejectsMalformedLines() {
 		let fields = Self.row().split(separator: "\t", omittingEmptySubsequences: false)
 		let short = fields.dropLast().joined(separator: "\t")
@@ -99,7 +98,15 @@ struct DecisionInventoryTests {
 		}
 	}
 
-	@Test("ids match ^[A-Z]{2,4}-[0-9]{2,3}$", .disabled("not implemented"))
+	@Test("only one blank trailing line is allowed")
+	func rejectsExtraTrailingBlankLines() {
+		let inventory = DecisionInventory(
+			inventoryTSV: Self.header + "\n" + Self.row() + "\n\n",
+			exemptTSV: Self.exemptHeader + "\n")
+		#expect(inventory.parseViolations.map(\.rule).contains(.shape))
+	}
+
+	@Test("ids match ^[A-Z]{2,4}-[0-9]{2,3}$")
 	func rejectsMalformedIds() {
 		for bad in [
 			"an-01", "AN-1", "AN-1234", "A-01", "ABCDE-01", "AN-01x", "xAN-01", "AN01",
@@ -109,20 +116,19 @@ struct DecisionInventoryTests {
 		#expect(Self.check([Self.row(["id": "AN-123"])]).isEmpty)
 	}
 
-	@Test("ids are unique", .disabled("not implemented"))
+	@Test("ids are unique")
 	func rejectsDuplicateIds() {
 		#expect(Self.rules([Self.row(), Self.row()]).contains(.duplicateId))
 	}
 
-	@Test("an id's prefix is the one assigned to its swift_file", .disabled("not implemented"))
+	@Test("an id's prefix is the one assigned to its swift_file")
 	func rejectsIdPrefixOfAnotherFile() {
 		#expect(Self.rules(["id": "HC-01"]).contains(.idPrefix))
 		#expect(Self.rules(["id": "ZZ-01"]).contains(.idPrefix))
 	}
 
 	@Test(
-		"path, classification and verification take only listed values",
-		.disabled("not implemented"))
+		"path, classification and verification take only listed values")
 	func rejectsUnknownValues() {
 		for field in ["path", "classification", "verification"] {
 			#expect(Self.rules([field: "maybe"]).contains(.unknownValue), "\(field)")
@@ -132,8 +138,7 @@ struct DecisionInventoryTests {
 	static let noUpstream = ["upstream": "-", "upstream_function": "-", "config": "-"]
 
 	@Test(
-		"upstream is the pinned full libjxl revision, or - only for original rows",
-		.disabled("not implemented"))
+		"upstream is the pinned full libjxl revision, or - only for original rows")
 	func rejectsUnpinnedUpstream() {
 		#expect(Self.rules(["upstream": "libjxl@main"]).contains(.upstreamPin))
 		#expect(Self.rules(["upstream": "libjxl-tiny@unpinned"]).contains(.upstreamPin))
@@ -148,8 +153,7 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
-		"upstream_function and config are - exactly when upstream is",
-		.disabled("not implemented"))
+		"upstream_function and config are - exactly when upstream is")
 	func rejectsInconsistentUpstreamFields() {
 		#expect(Self.rules(["upstream_function": "-"]).contains(.upstreamConsistency))
 		#expect(Self.rules(["config": "-"]).contains(.upstreamConsistency))
@@ -163,7 +167,7 @@ struct DecisionInventoryTests {
 		#expect(Self.rules(dangling).contains(.upstreamConsistency))
 	}
 
-	@Test("every row traces to Swift and upstream locations", .disabled("not implemented"))
+	@Test("every row traces to Swift and upstream locations")
 	func rejectsMissingProvenance() {
 		let cases: [[String: String]] = [
 			["swift_symbol": "-"],
@@ -175,6 +179,9 @@ struct DecisionInventoryTests {
 			["evidence": "lib/jxl/enc_ans.h Sources/JXLEncoder/ANSCoder.swift:12"],
 			["upstream_function": "PutSymbol"],
 			["upstream_function": "lib/jxl/enc_ans.h"],
+			["upstream_function": "src/enc_ans.h:PutSymbol"],
+			["evidence": "lib/jxl/enc_ans.h:40 Sources/JXLEncoder/ANSCoder.swift:x"],
+			["evidence": "lib/jxl/enc_ans.h:x Sources/JXLEncoder/ANSCoder.swift:12"],
 		]
 		for overrides in cases {
 			#expect(Self.rules(overrides).contains(.provenance), "\(overrides)")
@@ -197,8 +204,7 @@ struct DecisionInventoryTests {
 	]
 
 	@Test(
-		"(absent) rows are original and name the missing upstream function",
-		.disabled("not implemented"))
+		"(absent) rows are original and name the missing upstream function")
 	func checksAbsentDecisions() {
 		#expect(Self.check([Self.row(Self.absent)]).isEmpty)
 		#expect(
@@ -215,10 +221,17 @@ struct DecisionInventoryTests {
 		#expect(Self.rules(unanchored).contains(.absentDecision))
 	}
 
-	@Test("inherited-tiny rows name their libjxl-tiny source", .disabled("not implemented"))
+	@Test("inherited-tiny rows name their libjxl-tiny source")
 	func rejectsInheritedTinyWithoutTinySource() {
 		let tiny = ["classification": "inherited-tiny", "replacement": "GER-3386"]
 		#expect(Self.rules(tiny).contains(.tinySource))
+		let bare = Self.merged(
+			tiny,
+			[
+				"evidence":
+					"tiny:x lib/jxl/enc_ans.cc:120 Sources/JXLEncoder/ANSCoder.swift:12"
+			])
+		#expect(Self.rules(bare).contains(.tinySource))
 		let named = Self.merged(
 			tiny,
 			[
@@ -229,8 +242,7 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
-		"adapted rows carry their equivalence argument in notes",
-		.disabled("not implemented"))
+		"adapted rows carry their equivalence argument in notes")
 	func rejectsAdaptedWithoutEquivalenceArgument() {
 		#expect(Self.rules(["classification": "adapted"]).contains(.equivalenceArgument))
 		let argued = [
@@ -263,7 +275,7 @@ struct DecisionInventoryTests {
 
 	@Test(
 		"every deviation and every unproven claim names a replacement issue",
-		.disabled("not implemented"), arguments: settledCases)
+		arguments: settledCases)
 	func requiresReplacementUnlessSettled(_ settledCase: SettledCase) {
 		#expect(
 			DecisionInventory.isSettled(
@@ -285,8 +297,7 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
-		"unproven faithful and adapted claims name GER-3392 as their verifier",
-		.disabled("not implemented"))
+		"unproven faithful and adapted claims name GER-3392 as their verifier")
 	func requiresVerifierForUnprovenClaims() {
 		for classification in ["faithful", "adapted"] {
 			for verification in ["cited", "assumed"] {
@@ -304,7 +315,7 @@ struct DecisionInventoryTests {
 		}
 	}
 
-	@Test("deviations name an area issue, not only the verifier", .disabled("not implemented"))
+	@Test("deviations name an area issue, not only the verifier")
 	func requiresAreaIssueForDeviations() {
 		for classification in ["inherited-tiny", "original"] {
 			var fields = [
@@ -321,8 +332,7 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
-		"replacement is - or a comma list of agreed replacement issues",
-		.disabled("not implemented"))
+		"replacement is - or a comma list of agreed replacement issues")
 	func rejectsUnknownReplacementIssues() {
 		let deviation = ["classification": "original"]
 		for bad in [
@@ -336,7 +346,7 @@ struct DecisionInventoryTests {
 		#expect(Self.check([Self.row(list)]).isEmpty)
 	}
 
-	@Test("swift_file is an existing .swift file under Sources/", .disabled("not implemented"))
+	@Test("swift_file is an existing .swift file under Sources/")
 	func rejectsBadSwiftFile() {
 		for bad in [
 			"Package.swift", "Reference/tools/gencodes.cc",
@@ -361,7 +371,7 @@ struct DecisionInventoryTests {
 		#expect(violations.contains { $0.rule == .swiftFile && $0.file == .exempt })
 	}
 
-	@Test("a file is listed once: inventoried or exempt", .disabled("not implemented"))
+	@Test("a file is listed once: inventoried or exempt")
 	func rejectsFileBothCoveredAndExempt() {
 		let twice = Array(repeating: "Sources/jxlbench/main.swift\ttooling", count: 2)
 		#expect(Self.rules([Self.row()], exempt: twice).contains(.duplicateId))
@@ -369,7 +379,7 @@ struct DecisionInventoryTests {
 		#expect(Self.rules([Self.row()], exempt: exempt).contains(.coveredAndExempt))
 	}
 
-	@Test("coverage counts rows and exemptions", .disabled("not implemented"))
+	@Test("coverage counts rows and exemptions")
 	func reportsUncoveredFiles() {
 		let inventory = DecisionInventory(
 			inventoryTSV: Self.header + "\n" + Self.row() + "\n",
@@ -388,8 +398,7 @@ struct DecisionInventoryTests {
 		/// Fails loudly where CI runs, so the checkout-gated tests below can't
 		/// skip silently there.
 		@Test(
-			"the package checkout is reachable through #filePath",
-			.disabled("not implemented"))
+			"the package checkout is reachable through #filePath")
 		func checkoutIsReachable() {
 			#expect(PackageCheckout.isAvailable)
 			#expect(PackageCheckout.fileExists("Package.swift"))
@@ -406,7 +415,7 @@ struct DecisionInventoryTests {
 
 	@Test(
 		"the committed inventory satisfies every rule",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func committedInventorySatisfiesRules() throws {
 		let inventory = try Self.committed()
 		let violations =
@@ -419,7 +428,7 @@ struct DecisionInventoryTests {
 
 	@Test(
 		"exemptions are exactly the agreed decision-free files",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func exemptionsAreTheAgreedSet() throws {
 		let exempted = try Self.committed().exemptions.map(\.swiftFile)
 		#expect(exempted.count == Set(exempted).count)
@@ -428,7 +437,7 @@ struct DecisionInventoryTests {
 
 	@Test(
 		"every non-exempt source file has an id prefix, listed in the schema doc",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func idPrefixesCoverEveryInventoriedFile() throws {
 		let inventoried = try PackageCheckout.swiftSources().subtracting(
 			DecisionInventory.agreedExemptions)
@@ -452,7 +461,7 @@ struct DecisionInventoryTests {
 
 	@Test(
 		"every source file belongs to exactly one audit group",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func everySourceFileHasOneGroup() throws {
 		let grouped = SourceGroup.allCases.flatMap(\.files)
 		#expect(grouped.count == Set(grouped).count)

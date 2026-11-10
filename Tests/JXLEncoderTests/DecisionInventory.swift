@@ -190,24 +190,312 @@ struct DecisionInventory {
 	let parseViolations: [Violation]
 
 	init(inventoryTSV: String, exemptTSV: String) {
-		fatalError("not implemented")
+		var violations: [Violation] = []
+		let inventoryLines = Self.fieldLines(
+			inventoryTSV, columns: Self.columns, file: .inventory, into: &violations)
+		let exemptLines = Self.fieldLines(
+			exemptTSV, columns: Self.exemptColumns, file: .exempt, into: &violations)
+		rows = inventoryLines.map { line, f in
+			Row(
+				line: line, id: f[0], swiftFile: f[1], swiftSymbol: f[2],
+				decision: f[3],
+				path: f[4], upstream: f[5], upstreamFunction: f[6], config: f[7],
+				classification: f[8], verification: f[9], evidence: f[10],
+				replacement: f[11], notes: f[12])
+		}
+		exemptions = exemptLines.map { line, f in
+			Exemption(line: line, swiftFile: f[0], reason: f[1])
+		}
+		parseViolations = violations
+	}
+
+	/// Data lines of `text` as (1-based line, fields). A mismatched header
+	/// stops the file; a malformed line is reported and skipped. `\r\n` is a
+	/// single `Character` in Swift, so line splitting and the carriage-return
+	/// test work on `String` separators and unicode scalars.
+	private static func fieldLines(
+		_ text: String, columns: [String], file: InventoryFile,
+		into violations: inout [Violation]
+	) -> [(Int, [String])] {
+		var lines = text.components(separatedBy: "\n")
+		if lines.last == "" { lines.removeLast() }
+		guard let header = lines.first,
+			header.components(separatedBy: "\t") == columns
+		else {
+			violations.append(
+				Violation(
+					rule: .header, file: file, line: 1,
+					message: "header must be \(columns.joined(separator: "\t"))"
+				))
+			return []
+		}
+		var result: [(Int, [String])] = []
+		for (index, line) in lines.enumerated().dropFirst() {
+			let number = index + 1
+			let fields = line.components(separatedBy: "\t")
+			let problem: String?
+			if line.unicodeScalars.contains("\r") {
+				problem = "carriage return"
+			} else if fields.count != columns.count {
+				problem = "\(fields.count) fields, expected \(columns.count)"
+			} else if fields.contains("") {
+				problem = "empty field"
+			} else {
+				problem = nil
+			}
+			if let problem {
+				violations.append(
+					Violation(
+						rule: .shape, file: file, line: number,
+						message: problem))
+			} else {
+				result.append((number, fields))
+			}
+		}
+		return result
 	}
 
 	/// Whether a row needs no replacement issue: `faithful` or `adapted`, with
 	/// `diffed` verification.
 	static func isSettled(classification: Classification, verification: Verification) -> Bool {
-		fatalError("not implemented")
+		switch (classification, verification) {
+		case (.faithful, .diffed), (.adapted, .diffed): return true
+		default: return false
+		}
 	}
 
 	/// Every rule violation except coverage, which `uncovered(_:)` reports
 	/// per source group. `fileExists` takes a path from the package root.
 	func violations(fileExists: (String) -> Bool) -> [Violation] {
-		fatalError("not implemented")
+		var found: [Violation] = []
+		func add(_ rule: Rule, _ row: Row, _ message: String) {
+			found.append(
+				Violation(
+					rule: rule, file: .inventory, line: row.line,
+					message: message))
+		}
+
+		var seenIds = Set<String>()
+		for row in rows {
+			if !Self.isValidId(row.id) {
+				add(.idFormat, row, "id \(row.id)")
+			} else if let prefix = row.id.components(separatedBy: "-").first,
+				Self.idPrefixes[prefix] != row.swiftFile
+			{
+				add(
+					.idPrefix, row,
+					"prefix \(prefix) is not assigned to \(row.swiftFile)")
+			}
+			if !seenIds.insert(row.id).inserted {
+				add(.duplicateId, row, "id \(row.id) repeated")
+			}
+
+			let classification = Classification(rawValue: row.classification)
+			let verification = Verification(rawValue: row.verification)
+			if EncodePath(rawValue: row.path) == nil {
+				add(.unknownValue, row, "path \(row.path)")
+			}
+			if classification == nil {
+				add(.unknownValue, row, "classification \(row.classification)")
+			}
+			if verification == nil {
+				add(.unknownValue, row, "verification \(row.verification)")
+			}
+
+			let pinned = row.upstream == Self.pinnedUpstream
+			if !pinned && row.upstream != "-" {
+				add(.upstreamPin, row, "upstream \(row.upstream)")
+			}
+			if row.upstream == "-"
+				&& row.classification != Classification.original.rawValue
+			{
+				add(.upstreamPin, row, "only original rows may have no upstream")
+			}
+			let noUpstream = row.upstream == "-"
+			if (row.upstreamFunction == "-") != noUpstream
+				|| (row.config == "-") != noUpstream
+			{
+				add(
+					.upstreamConsistency, row,
+					"upstream_function and config must be - exactly when upstream is"
+				)
+			}
+
+			checkProvenance(row, pinned: pinned, add: add)
+
+			if row.swiftSymbol == Self.absentSymbol
+				&& (row.classification != Classification.original.rawValue
+					|| !pinned)
+			{
+				add(
+					.absentDecision, row,
+					"(absent) rows are original with a pinned upstream")
+			}
+			if classification == .inheritedTiny
+				&& !Self.evidenceTokens(row).contains(where: {
+					let parts = $0.components(separatedBy: ":")
+					return parts.count >= 3 && parts[0] == "tiny"
+						&& !parts[1].isEmpty
+						&& !parts[2].isEmpty
+				})
+			{
+				add(
+					.tinySource, row,
+					"inherited-tiny needs a tiny:<file>:<function> source")
+			}
+			if classification == .adapted && row.notes == "-" {
+				add(
+					.equivalenceArgument, row,
+					"adapted rows argue equivalence in notes")
+			}
+
+			let issues = row.replacement.components(separatedBy: ",")
+			let named = row.replacement == "-" ? [] : issues
+			if !named.isEmpty && !named.allSatisfy(Self.replacementIssues.contains) {
+				add(.replacementIssue, row, "replacement \(row.replacement)")
+			}
+			if let classification, let verification,
+				let message = Self.replacementShortfall(
+					classification, verification, named: Set(named))
+			{
+				add(.replacementRequired, row, message)
+			}
+
+			checkSwiftFile(row.swiftFile, fileExists: fileExists) { message in
+				add(.swiftFile, row, message)
+			}
+		}
+
+		var seenExempt = Set<String>()
+		let covered = Set(rows.map(\.swiftFile))
+		for exemption in exemptions {
+			func addExempt(_ rule: Rule, _ message: String) {
+				found.append(
+					Violation(
+						rule: rule, file: .exempt, line: exemption.line,
+						message: message))
+			}
+			if !seenExempt.insert(exemption.swiftFile).inserted {
+				addExempt(.duplicateId, "\(exemption.swiftFile) exempted twice")
+			}
+			if covered.contains(exemption.swiftFile) {
+				addExempt(.coveredAndExempt, "\(exemption.swiftFile) also has rows")
+			}
+			checkSwiftFile(exemption.swiftFile, fileExists: fileExists) {
+				addExempt(.swiftFile, $0)
+			}
+		}
+		return found
+	}
+
+	static let absentSymbol = "(absent)"
+
+	private static func isValidId(_ id: String) -> Bool {
+		let parts = id.components(separatedBy: "-")
+		guard parts.count == 2 else { return false }
+		let letters = parts[0].unicodeScalars
+		let digits = parts[1].unicodeScalars
+		return (2...4).contains(letters.count)
+			&& letters.allSatisfy { ("A"..."Z").contains($0) }
+			&& (2...3).contains(digits.count)
+			&& digits.allSatisfy { ("0"..."9").contains($0) }
+	}
+
+	private static func evidenceTokens(_ row: Row) -> [String] {
+		row.evidence.components(separatedBy: " ").filter { !$0.isEmpty }
+	}
+
+	/// Whether `spec` is `<line>` or `<first>-<last>`.
+	private static func isLineSpec(_ spec: some StringProtocol) -> Bool {
+		let numbers = spec.components(separatedBy: "-")
+		return (1...2).contains(numbers.count)
+			&& numbers.allSatisfy {
+				!$0.isEmpty
+					&& $0.unicodeScalars.allSatisfy { ("0"..."9").contains($0) }
+			}
+	}
+
+	/// Whether `token` is `<prefix><line spec>`.
+	private static func hasLine(_ token: String, prefix: String) -> Bool {
+		token.hasPrefix(prefix) && isLineSpec(token.dropFirst(prefix.count))
+	}
+
+	/// Whether `token` is `lib/<path>:<line spec>` or `tools/<path>:<line spec>`.
+	private static func isUpstreamLocation(_ token: String) -> Bool {
+		guard token.hasPrefix("lib/") || token.hasPrefix("tools/"),
+			let colon = token.lastIndex(of: ":")
+		else { return false }
+		return isLineSpec(token[token.index(after: colon)...])
+	}
+
+	private func checkProvenance(
+		_ row: Row, pinned: Bool, add: (Rule, Row, String) -> Void
+	) {
+		for (name, value) in [
+			("swift_symbol", row.swiftSymbol), ("decision", row.decision),
+			("evidence", row.evidence),
+		] where value == "-" {
+			add(.provenance, row, "\(name) is -")
+		}
+		let tokens = Self.evidenceTokens(row)
+		if row.swiftSymbol != Self.absentSymbol
+			&& !tokens.contains(where: { Self.hasLine($0, prefix: row.swiftFile + ":") }
+			)
+		{
+			add(.provenance, row, "evidence lacks \(row.swiftFile):<line>")
+		}
+		if pinned
+			&& !tokens.contains(where: Self.isUpstreamLocation)
+		{
+			add(.provenance, row, "evidence lacks a lib/…:<line> or tools/…:<line>")
+		}
+		if row.upstreamFunction != "-" {
+			let parts = row.upstreamFunction.split(
+				separator: ":", maxSplits: 1, omittingEmptySubsequences: false)
+			let wellFormed =
+				parts.count == 2 && !parts[1].isEmpty
+				&& (parts[0].hasPrefix("lib/") || parts[0].hasPrefix("tools/"))
+				&& !parts[0].hasSuffix("/")
+			if !wellFormed {
+				add(
+					.provenance, row,
+					"upstream_function must be (lib|tools)/<path>:<Function>")
+			}
+		}
+	}
+
+	private func checkSwiftFile(
+		_ file: String, fileExists: (String) -> Bool, report: (String) -> Void
+	) {
+		if !file.hasPrefix("Sources/") || !file.hasSuffix(".swift") {
+			report("\(file) is not a .swift file under Sources/")
+		} else if !fileExists(file) {
+			report("\(file) does not exist")
+		}
+	}
+
+	private static func replacementShortfall(
+		_ classification: Classification, _ verification: Verification, named: Set<String>
+	) -> String? {
+		let verifier = "GER-3392"
+		if isSettled(classification: classification, verification: verification) {
+			return nil
+		}
+		switch classification {
+		case .faithful, .adapted:
+			return named.contains(verifier)
+				? nil
+				: "unproven \(classification.rawValue) claim must name \(verifier)"
+		case .inheritedTiny, .original:
+			return named.subtracting([verifier]).isEmpty
+				? "\(classification.rawValue) rows must name an area issue" : nil
+		}
 	}
 
 	/// The files among `sourceFiles` that have neither a row nor an exemption.
 	func uncovered(_ sourceFiles: [String]) -> [String] {
-		fatalError("not implemented")
+		let covered = Set(rows.map(\.swiftFile)).union(exemptions.map(\.swiftFile))
+		return sourceFiles.filter { !covered.contains($0) }
 	}
 }
 
@@ -220,21 +508,31 @@ enum PackageCheckout {
 		.deletingLastPathComponent()
 
 	static var isAvailable: Bool {
-		false
+		fileExists("Package.swift")
 	}
 
 	static func read(_ relativePath: String) throws -> String {
-		fatalError("not implemented")
+		try String(
+			contentsOf: root.appendingPathComponent(relativePath), encoding: .utf8)
 	}
 
 	static func fileExists(_ relativePath: String) -> Bool {
-		fatalError("not implemented")
+		FileManager.default.fileExists(
+			atPath: root.appendingPathComponent(relativePath).path)
 	}
 
 	/// Every `.swift` file under `Sources/`, as paths from the package root
 	/// (`FileManager.enumerator(atPath:)` yields relative paths on Darwin and Linux).
 	static func swiftSources() throws -> Set<String> {
-		fatalError("not implemented")
+		let sources = root.appendingPathComponent("Sources").path
+		guard let walker = FileManager.default.enumerator(atPath: sources) else {
+			throw CocoaError(.fileReadNoSuchFile)
+		}
+		var found = Set<String>()
+		for case let path as String in walker where path.hasSuffix(".swift") {
+			found.insert("Sources/" + path)
+		}
+		return found
 	}
 }
 
