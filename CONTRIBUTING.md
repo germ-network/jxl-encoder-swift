@@ -15,10 +15,11 @@ algorithms and bitstream decisions in Swift, making **no novel contributions**
 to the JPEG XL format or to the coding techniques it uses.
 
 Where this port and its actual reference for that stage disagree, the
-reference is right and this is a bug. Stages not yet retargeted are gated
-byte-for-byte against `cjxl_tiny`; retargeted stages are gated against the
-pinned `cjxl -e 4` binary (decode-exactness, size corridor, quality metrics —
-see `docs/gap-closure-plan.md`). Either way nothing here invents anything.
+reference is right and this is a bug. Retargeted stages are gated against the
+pinned libjxl `cjxl -e 4` binary (decode-exactness, size corridor, quality
+metrics — see `docs/gap-closure-plan.md`), while fixtures inherited from
+libjxl-tiny are preserved as frozen reference goldens (see `Reference/provenance.tsv`
+and `Reference/legacy-tiny/`). Either way nothing here invents anything.
 
 So the contributions that fit are:
 

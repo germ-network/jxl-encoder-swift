@@ -1,38 +1,126 @@
-# Building libjxl for the JPEG transcode
+# Pinned Reference Build (libjxl v0.12.0)
 
-libjxl-tiny has no JPEG path, so the transcode stage has no reference to diff
-against there. Full libjxl supplies two things instead: `cjxl --lossless_jpeg=1`
-as a reference encoder, and — more useful — a **debug decoder that names the
-check a malformed stream fails**.
+This directory defines and builds the reproducible reference libjxl binaries
+and fixtures for JXLEncoder.
 
-Release builds compile the messages out. `StatusMessage` only prints under
-`JXL_IS_DEBUG_BUILD`, so a `Debug` configuration is what makes the difference
-between "Failed to decode image" and `quant_weights.cc:431: JXL_FAILURE:
-Invalid mode`.
+## Overview
+
+JXLEncoder gates its JPEG XL bitstreams, entropy coding, and JPEG transcode
+against the upstream libjxl reference implementation pinned at:
+- **Repository**: `https://github.com/libjxl/libjxl.git`
+- **Tag**: `v0.12.0`
+- **Commit**: `a7a9c787341cf703dede03c2009fa460cae5e5df`
+
+The complete pin definition, including exact submodule revisions, CMake flags,
+and external tool dependencies, is recorded in [`Reference/libjxl.pin`](libjxl.pin).
+
+---
+
+## Prerequisites
+
+- **CMake**: version 3.16 or later.
+- **C++ Compiler**: Apple Clang or GCC with C++17 support.
+- **Git**: version 2.20 or later.
+- **Disk Space**: approximately 3 GB free for the build tree (`df -h`).
+- **Required Libraries**:
+  - `libjpeg-turbo`: version `3.2.0` (matching `JPEG_TURBO_VERSION` in `libjxl.pin`).
+  - `little-cms2` (`lcms2`)
+  - `libpng`
+
+  On macOS via Homebrew:
+  ```bash
+  brew install jpeg-turbo little-cms2 libpng
+  ```
+
+---
+
+## Fetch, Pin-Check, and Build
+
+### 1. Fetching the Pinned Source
+
+Fetch the pinned libjxl checkout and required submodules (`highway`, `brotli`, `skcms`, `testdata`):
 
 ```bash
-git clone --depth 1 https://github.com/libjxl/libjxl.git ~/tmp/automation/libjxl-full
-cd ~/tmp/automation/libjxl-full
-for m in third_party/highway third_party/brotli third_party/skcms; do
-	git submodule update --init --depth 1 $m
-done
-cmake -S . -B build-dbg -DCMAKE_BUILD_TYPE=Debug -DBUILD_TESTING=OFF \
-	-DJPEGXL_ENABLE_BENCHMARK=OFF -DJPEGXL_ENABLE_EXAMPLES=OFF \
-	-DJPEGXL_ENABLE_DOXYGEN=OFF -DJPEGXL_ENABLE_MANPAGES=OFF \
-	-DJPEGXL_ENABLE_JNI=OFF -DJPEGXL_ENABLE_TCMALLOC=OFF \
-	-DJPEGXL_ENABLE_PLUGINS=OFF -DJPEGXL_FORCE_SYSTEM_LCMS2=ON \
-	-DJPEGXL_ENABLE_SJPEG=OFF -DJPEGXL_BUNDLE_LIBPNG=OFF
-cmake --build build-dbg --target djxl -j8
+Reference/fetch-libjxl.sh [TARGET_DIR]
 ```
 
-Then read the failure off a rejected file:
+Default target directory is `$LIBJXL_DIR` if set, or `$HOME/tmp/automation/libjxl-v0.12.0`.
+The script fetches the exact detached commit and submodules, then automatically runs
+`Reference/pin-check.sh` on the checkout.
+
+### 2. Checking Pin Drift
+
+To verify an existing checkout against `Reference/libjxl.pin`:
 
 ```bash
-build-dbg/tools/djxl ours.jxl /tmp/out.png 2>&1 | grep FAILURE
+Reference/pin-check.sh [DIR]
 ```
 
-A dump tool for libjxl's own `EncodeQuantTable` was tried first and abandoned:
-it segfaults when called without a `ModularFrameEncoder`, and the debug decoder
-answered the question before it was worth fixing. Instrumenting that decoder to
-print what it reconstructs — quant tables, DC, AC coefficients — is the
-technique that actually worked.
+If the libjxl HEAD commit, submodule commits, or working tree state
+diverge from the pin record, the script fails loudly with `PIN DRIFT` and
+exits with code 1.
+
+The pin and its manifest references are also verified by Swift Testing suites:
+- `PinRecordTests`: verifies pin file syntax, submodule SHAs, and sha256 digests.
+- `FixtureProvenanceTests`: verifies that all committed fixtures and tests match
+  the pinned commit or legacy records.
+
+### 3. Building Reference Binaries
+
+To build the reference tools:
+
+```bash
+Reference/build.sh [DIR]
+```
+
+This builds three binaries and generates the revision report into `Reference/build/`:
+- **`cjxl`** (Release): the reference encoder used for gap-closure and corridor tests (`cjxl -e 4`).
+- **`djxl`** (Release): the release reference decoder.
+- **`djxl-dbg`** (Debug): the debug reference decoder with assertion logging enabled.
+- **`REVISION.txt`**: records the git commit, tag, date, compiler version, and build flags.
+
+---
+
+## Debug `djxl-dbg` Purpose
+
+Release builds of libjxl compile out detailed error diagnostics. The debug
+decoder `djxl-dbg` built by `Reference/build.sh` is compiled with
+`-DCMAKE_BUILD_TYPE=Debug` so that internal `StatusMessage` logging is enabled.
+
+When debugging decoder rejections against JXLEncoder bitstreams, `djxl-dbg`
+prints the exact file, line number, and check that failed:
+
+```bash
+Reference/build/djxl-dbg output.jxl /tmp/out.png 2>&1 | grep FAILURE
+# e.g., quant_weights.cc:431: JXL_FAILURE: Invalid mode
+```
+
+---
+
+## Configuration Knobs and Tool Provenance
+
+### `OPTIMIZE_CODE` is Tiny-Only
+
+The `OPTIMIZE_CODE` preprocessor macro (`0` or `1`) is specific to legacy
+libjxl-tiny (`Reference/legacy-tiny/`). Full libjxl does not expose this macro;
+its analogue is encoder effort (`cjxl -e 4`). Per-gate configuration settings
+and historical macros are cataloged in [`Reference/provenance.tsv`](provenance.tsv).
+
+### `genrecip` is Host-arm64
+
+`Reference/make_recip_fixture.sh` builds and runs `Reference/tools/genrecip.cc`
+to produce `Tests/JXLEncoderTests/Fixtures/recip_estimate.bin`.
+
+Because `genrecip.cc` captures the hardware `vrecpeq_f32` NEON reciprocal estimate
+instruction, the script requires an `arm64` host (`arm64` or `aarch64`).
+
+### JPEG Fixtures Require Pinned libjpeg-turbo 3.2.0
+
+`Reference/make_jpeg_fixtures.sh` regenerates JPEG parser test fixtures and
+coefficient dumps (`.coef`).
+
+To guarantee byte-identical reproduction:
+- `cjpeg -version` must report `3.2.0`.
+- `$JPEG_PREFIX/include/jconfig.h` must define `LIBJPEG_TURBO_VERSION` as `3.2.0`.
+
+Any version mismatch causes `make_jpeg_fixtures.sh` to abort.

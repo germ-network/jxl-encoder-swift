@@ -175,19 +175,22 @@ encode latency ever matters more than it does now.
 
 ## Development
 
-Most stages still trace to `libjxl-tiny`: differential testing against its
-intermediate dumps, stage by stage, is how most of this port was built and
-verified, and most of that gating is still live in the test suite. Building
-the reference tooling:
+The reference implementation is pinned to full `libjxl` at `v0.12.0` (`a7a9c787`),
+with its build recipes, pin checks, and configuration described in
+[`Reference/BUILD-libjxl.md`](Reference/BUILD-libjxl.md). To fetch and build the
+pinned binaries:
 
 ```bash
-git clone --recursive https://github.com/libjxl/libjxl-tiny.git
+Reference/fetch-libjxl.sh
+Reference/build.sh
 ```
 
-Then `Reference/build.sh`, which pins the reference to the configuration this
-port targets. That pinning matters: `OPTIMIZE_CHROMA_FROM_LUMA` also selects
-the tile dimension, so building the reference with its defaults produces dumps
-describing a differently tiled encoder.
+This builds the reference encoder `cjxl` (Release, evaluated at `-e 4`), `djxl` (Release), and debug decoder `djxl-dbg` into `Reference/build/`.
+
+Historical stages inherited from `libjxl-tiny` remain gated against committed
+fixtures documented in [`Reference/provenance.tsv`](Reference/provenance.tsv).
+Their unpinned legacy tools and patch recipes are preserved under
+[`Reference/legacy-tiny/`](Reference/legacy-tiny/).
 
 **Stages retargeted to full `libjxl`** — entropy coding (ANS, coefficient
 reordering, context clustering), quantization calibration, chroma-from-luma —
@@ -220,9 +223,10 @@ stage's actual reference disagrees with this port, the reference is right and
 this is a bug — which reference that is varies by stage; see "Development"
 above and `docs/gap-closure-plan.md`.
 
-Stages not yet retargeted are still gated byte-for-byte against `cjxl_tiny`;
-retargeted stages are gated against the pinned `cjxl -e 4` binary instead, per
-the corridor/decode/quality criteria `docs/gap-closure-plan.md` records.
+Retargeted stages are gated against the pinned libjxl `cjxl -e 4` binary per
+the corridor/decode/quality criteria in `docs/gap-closure-plan.md`. Inherited
+fixtures that predate the pin are frozen reference goldens documented in
+`Reference/provenance.tsv` and built with `Reference/legacy-tiny/build-tiny.sh`.
 Contributions are welcome within that scope; see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
