@@ -3,7 +3,7 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Reference bytes from `Reference/tools/gentree.cc`, which calls libjxl-tiny's
+/// Reference bytes from `Reference/legacy-tiny/tools/gentree.cc`, which calls libjxl-tiny's
 /// own `WriteContextTree` and `WriteEntropyCode`. These exercise histogram
 /// clustering, context-map coding and prefix-code serialization together.
 @Suite("Context tree and entropy code")

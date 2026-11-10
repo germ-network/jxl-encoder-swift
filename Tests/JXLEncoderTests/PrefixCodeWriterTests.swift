@@ -3,7 +3,7 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Expected bytes come from `Reference/tools/genprefix.cc`, which calls
+/// Expected bytes come from `Reference/legacy-tiny/tools/genprefix.cc`, which calls
 /// libjxl-tiny's own `CreateHuffmanTree`, `WritePrefixCode` and
 /// `WritePrefixCodes` through test hooks.
 @Suite("Prefix code writer")

@@ -48,7 +48,7 @@ they were written against full `libjxl`'s source from the start:
 (`DequantMatricesEncode`/`EncodeQuantTable`)
 
 **Generated tables.** These hold upstream constants, extracted by compiler-driven
-generators in `Reference/tools/` rather than transcribed by hand:
+generators in `Reference/legacy-tiny/tools/` rather than transcribed by hand:
 `StaticEntropyCodes.swift` (context maps and prefix codes),
 `ContextTree.swift` (the modular context tree's static tokens),
 `QuantMatrices.swift` (DCT8 quantization weights).
@@ -56,9 +56,9 @@ generators in `Reference/tools/` rather than transcribed by hand:
 **Test fixtures.** `Tests/*/Fixtures/` holds intermediate dumps and whole-file
 output produced by the reference encoder, used as golden data.
 
-**`Reference/patches/0001-test-hooks.patch`** is a diff against libjxl-tiny and
+**`Reference/legacy-tiny/patches/0001-test-hooks.patch`** is a diff against libjxl-tiny and
 therefore contains fragments of upstream source. libjxl-tiny itself is *not*
-vendored here — `Reference/build.sh` clones it — so no upstream C++ is otherwise
+vendored here — `Reference/legacy-tiny/build-tiny.sh` builds against it — so no upstream C++ is otherwise
 redistributed in this repository.
 
 ## What is not

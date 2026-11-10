@@ -2,7 +2,7 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Expected values are printed by `Reference/tools/gentokens.cc`, which links
+/// Expected values are printed by `Reference/legacy-tiny/tools/gentokens.cc`, which links
 /// libjxl-tiny and calls its own `UintCoder`, `PackSigned`, context functions
 /// and `WriteToken`. These pin the port against the reference implementation
 /// rather than against a reading of the spec.
