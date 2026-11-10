@@ -98,6 +98,14 @@ struct ProvenanceRow: Equatable {
 	let consumers: [String]
 }
 
+enum ProvenanceError: Error, Equatable {
+	case invalidColumnCount(line: String, count: Int)
+	case malformedRow(String)
+	case invalidKind(String)
+	case invalidOrigin(String)
+	case invalidDigest(String)
+}
+
 struct ProvenanceManifest {
 	let rows: [ProvenanceRow]
 
@@ -105,7 +113,107 @@ struct ProvenanceManifest {
 	/// a digest on the wrong kind of row) rather than skipping it, so a typo
 	/// can't hide a fixture. Lines starting with `#` are comments.
 	init(text: String) throws {
-		fatalError("unimplemented")
+		var parsedRows: [ProvenanceRow] = []
+		for line in text.split(separator: "\n", omittingEmptySubsequences: false) {
+			let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+			if trimmed.isEmpty || trimmed.hasPrefix("#") {
+				continue
+			}
+			let columns = line.split(separator: "\t", omittingEmptySubsequences: false)
+				.map(String.init)
+			guard columns.count == 10 else {
+				throw ProvenanceError.invalidColumnCount(
+					line: String(line), count: columns.count)
+			}
+			let path = columns[0].trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !path.isEmpty else {
+				throw ProvenanceError.malformedRow("Empty path")
+			}
+			guard
+				let kind = ProvenanceKind(
+					rawValue: columns[1].trimmingCharacters(
+						in: .whitespacesAndNewlines))
+			else {
+				throw ProvenanceError.invalidKind(columns[1])
+			}
+			let shaRaw = columns[2].trimmingCharacters(in: .whitespacesAndNewlines)
+			let sha: String?
+			if kind == .fixture {
+				guard
+					shaRaw.count == 64
+						&& shaRaw.allSatisfy({
+							$0.isHexDigit && !$0.isUppercase
+						})
+				else {
+					throw ProvenanceError.invalidDigest(
+						"Fixture must have 64-char lowercase hex sha256: \(shaRaw)"
+					)
+				}
+				sha = shaRaw
+			} else {
+				guard shaRaw == "-" else {
+					throw ProvenanceError.invalidDigest(
+						"Non-fixture must have '-' for sha256: \(shaRaw)")
+				}
+				sha = nil
+			}
+			guard
+				let origin = ProvenanceOrigin(
+					rawValue: columns[3].trimmingCharacters(
+						in: .whitespacesAndNewlines))
+			else {
+				throw ProvenanceError.invalidOrigin(columns[3])
+			}
+			let generator = columns[4].trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !generator.isEmpty else {
+				throw ProvenanceError.malformedRow("Empty generator")
+			}
+			let invocation = columns[5].trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !invocation.isEmpty else {
+				throw ProvenanceError.malformedRow("Empty invocation")
+			}
+			let input = columns[6].trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !input.isEmpty else {
+				throw ProvenanceError.malformedRow("Empty input")
+			}
+			let upstream = columns[7].trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !upstream.isEmpty else {
+				throw ProvenanceError.malformedRow("Empty upstream")
+			}
+			let config = columns[8].trimmingCharacters(in: .whitespacesAndNewlines)
+			guard !config.isEmpty else {
+				throw ProvenanceError.malformedRow("Empty config")
+			}
+			let consumersRaw = columns[9].trimmingCharacters(
+				in: .whitespacesAndNewlines)
+			guard !consumersRaw.isEmpty else {
+				throw ProvenanceError.malformedRow("Empty consumers")
+			}
+			let consumers: [String]
+			if consumersRaw == "-" {
+				consumers = []
+			} else {
+				consumers = consumersRaw.split(separator: ",").map {
+					$0.trimmingCharacters(in: .whitespacesAndNewlines)
+				}
+			}
+
+			parsedRows.append(
+				ProvenanceRow(
+					path: path,
+					kind: kind,
+					sha256: sha,
+					origin: origin,
+					generator: generator,
+					invocation: invocation,
+					input: input,
+					upstream: upstream,
+					config: config,
+					consumers: consumers
+				)
+			)
+		}
+		self.rows = parsedRows
 	}
 
 	init(contentsOf url: URL) throws {
