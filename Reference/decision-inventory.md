@@ -44,7 +44,7 @@ non-empty, and `-` means "none" where a column allows it.
 | 9 | `classification` | One of the four classes below. |
 | 10 | `verification` | `diffed`, `cited` or `assumed` (below). |
 | 11 | `evidence` | Space-separated locations backing the classification (a line may be a range, `:12-20`): the row's own `<swift_file>:<line>` at the audited commit (omitted only for `(absent)`), and, when `upstream` is pinned, at least one `lib/…:<line>` or `tools/…:<line>` at the pin. `inherited-tiny` rows also name the libjxl-tiny source as `tiny:<file>:<function>` (tiny is unpinned). Never `-`. Output size, bits per pixel or successful decoding are never evidence. |
-| 12 | `replacement` | Comma-separated (no spaces) Linear issue ids that replace or verify this decision, or `-`. Only issues in the checker's `replacementIssues` list are accepted: GER-3386, GER-3387, GER-3388, GER-3389, GER-3392, plus any issue filed for this audit and added to that list. |
+| 12 | `replacement` | Comma-separated (no spaces) Linear issue ids that replace or verify this decision, or `-`. Only issues in the checker's `replacementIssues` list are accepted: GER-3386, GER-3387, GER-3388, GER-3389, GER-3392, GER-3418, GER-3419, plus any issue filed for this audit and added to that list. |
 | 13 | `notes` | Free text, or `-`. On `adapted` rows, the equivalence argument (never `-`). |
 
 ## Classification

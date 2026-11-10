@@ -123,7 +123,8 @@ struct DecisionInventory {
 	/// Issues a deviation may name as its replacement or verifier. An issue the
 	/// planner files for this audit is added here in the same change.
 	static let replacementIssues: Set<String> = [
-		"GER-3386", "GER-3387", "GER-3388", "GER-3389", "GER-3392",
+		"GER-3386", "GER-3387", "GER-3388", "GER-3389", "GER-3392", "GER-3418",
+		"GER-3419",
 	]
 
 	/// Id prefix for each inventoried source file; mirrors the table in
