@@ -3,7 +3,7 @@ import Testing
 @testable import JXLEncoder
 
 /// Byte-exact comparison against the reference's own `WriteDCGroup`, fed the
-/// same synthetic DC image and quant field that `Reference/tools/dump_stages.cc`
+/// same synthetic DC image and quant field that `Reference/legacy-tiny/tools/dump_stages.cc`
 /// builds, so the modular path is verified independently of the DCT stages.
 @Suite("DC group")
 struct DCGroupTests {

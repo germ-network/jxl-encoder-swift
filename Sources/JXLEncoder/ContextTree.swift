@@ -11,6 +11,10 @@
 //  entropy code — the tree's own token statistics, not the static coefficient
 //  tables.
 //
+//  Generator: unrecorded
+//  Upstream: libjxl-tiny (unpinned)
+//  Config: OPTIMIZE_CODE=0
+//
 
 enum ContextTree {
 	/// Contexts in the tree's own token stream.

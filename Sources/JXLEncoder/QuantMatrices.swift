@@ -6,6 +6,10 @@
 //  Only the DCT8 tables are carried over: the port is 8x8-only, so the 16x8 and
 //  8x16 tables that follow them upstream are unreachable.
 //
+//  Generator: unrecorded
+//  Upstream: libjxl-tiny (unpinned)
+//  Config: OPTIMIZE_CODE=0
+//
 
 enum QuantMatrices {
 	static let blockSize = 64

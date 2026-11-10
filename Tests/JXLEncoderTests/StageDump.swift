@@ -1,6 +1,6 @@
 import Foundation
 
-/// Reads the planar float32 dumps written by `Reference/tools/dump_stages.cc`,
+/// Reads the planar float32 dumps written by `Reference/legacy-tiny/tools/dump_stages.cc`,
 /// which capture libjxl-tiny's intermediate stages for differential testing.
 struct StageDump {
 	let width: Int

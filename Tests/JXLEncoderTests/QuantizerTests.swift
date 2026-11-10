@@ -3,7 +3,7 @@ import Testing
 @testable import JXLEncoder
 
 /// Differential tests against libjxl-tiny's `QuantizeBlockAC`, reached through
-/// the test hook in `Reference/patches`. Quant and scale are fixed here so the
+/// the test hook in `Reference/legacy-tiny/patches`. Quant and scale are fixed here so the
 /// quantizer is verified independently of the adaptive quant field.
 @Suite("Quantizer")
 struct QuantizerTests {

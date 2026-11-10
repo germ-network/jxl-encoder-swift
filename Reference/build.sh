@@ -1,70 +1,63 @@
 #!/usr/bin/env bash
-# Builds the reference encoder and the stage dump tool used for differential
-# testing. libjxl-tiny stays a pristine clone; only this script knows how to
-# link against it.
+# Builds the pinned full libjxl reference binaries (cjxl, djxl) and writes
+# the revision and configuration report.
 set -euo pipefail
 
-TINY="${TINY_DIR:-$HOME/tmp/automation/libjxl-tiny}"
-OUT="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/build"
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PIN_FILE="$HERE/libjxl.pin"
 
-if [ ! -d "$TINY" ]; then
-	echo "libjxl-tiny not found at $TINY" >&2
-	echo "  git clone --recursive https://github.com/libjxl/libjxl-tiny.git $TINY" >&2
+if [ ! -f "$PIN_FILE" ]; then
+	echo "PIN DRIFT: pin file missing: $PIN_FILE" >&2
 	exit 1
 fi
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck disable=SC1090
+source "$PIN_FILE"
 
-# Some stages we need to diff against are internal to tiny's translation units.
-# Rather than transliterate them (which would only test our own copy), a small
-# tracked patch exposes them. Applied idempotently so the checkout stays close
-# to upstream and can still be pulled.
-for patch in "$HERE"/patches/*.patch; do
-	[ -e "$patch" ] || continue
-	if git -C "$TINY" apply --reverse --check "$patch" 2>/dev/null; then
-		echo "patch already applied: $(basename "$patch")"
-	else
-		git -C "$TINY" apply "$patch"
-		echo "applied: $(basename "$patch")"
-	fi
-done
+TARGET_DIR="${1:-${LIBJXL_DIR:-$HOME/tmp/automation/libjxl-v0.12.0}}"
+OUT="$HERE/build"
 
-# The reference must be built in the configuration the port targets, or the
-# dumps describe a different encoder. Chroma-from-luma is dropped (measured at
-# ~0.5% size) and variable block sizes are dropped (~5-7%) per the scope fence.
-#
-# This is not cosmetic: OPTIMIZE_CHROMA_FROM_LUMA also selects kTileDim, 64 when
-# on and 16 when off. That changes the stripe height and the whole tiling the
-# adaptive quant field is computed over.
-#
-# OPTIMIZE_CODE selects between static prefix-code tables (0) and per-image
-# optimized Huffman trees (1). The port implements static tables first — they
-# cost ~19-24% size but produce byte-identical decoded pixels — so this defaults
-# to 0 and moves to 1 when the optimized path lands.
-OPTIMIZE_CODE="${OPTIMIZE_CODE:-0}"
-cat > "$TINY/encoder/config.h" <<CONFIG
-#ifndef ENCODER_CONFIG_H_
-#define ENCODER_CONFIG_H_
+# Fetch if missing
+if [ ! -d "$TARGET_DIR/.git" ]; then
+	echo "Target directory $TARGET_DIR not found; fetching..."
+	"$HERE/fetch-libjxl.sh" "$TARGET_DIR"
+fi
 
-#define OPTIMIZE_CODE $OPTIMIZE_CODE
-#define OPTIMIZE_CHROMA_FROM_LUMA 0
-#define OPTIMIZE_BLOCK_SIZES 0
+# Pre-build pin check
+"$HERE/pin-check.sh" "$TARGET_DIR"
 
-#endif  // ENCODER_CONFIG_H_
-CONFIG
+NCPU="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 
-cmake -S "$TINY" -B "$TINY/build" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF >/dev/null
-cmake --build "$TINY/build" --target cjxl_tiny -j"$(sysctl -n hw.ncpu 2>/dev/null || nproc)" >/dev/null
+# Release build: cjxl and djxl
+echo "Building libjxl Release (cjxl, djxl)..."
+# shellcheck disable=SC2086
+cmake -S "$TARGET_DIR" -B "$TARGET_DIR/build" $CMAKE_FLAGS_RELEASE >/dev/null
+cmake --build "$TARGET_DIR/build" --target cjxl djxl -j"$NCPU" >/dev/null
 
+# Debug build: djxl
+echo "Building libjxl Debug (djxl)..."
+# shellcheck disable=SC2086
+cmake -S "$TARGET_DIR" -B "$TARGET_DIR/build-dbg" $CMAKE_FLAGS_DEBUG >/dev/null
+cmake --build "$TARGET_DIR/build-dbg" --target djxl -j"$NCPU" >/dev/null
+
+# Copy binaries to Reference/build/
 mkdir -p "$OUT"
-clang++ -std=c++17 -O2 \
-	-I"$TINY" \
-	-I"$TINY/third_party/highway" \
-	-I"$(dirname "${BASH_SOURCE[0]}")" \
-	"$(dirname "${BASH_SOURCE[0]}")/tools/dump_stages.cc" \
-	"$TINY/build/encoder/libjxl_tiny.a" \
-	"$TINY/build/third_party/highway/libhwy.a" \
-	-o "$OUT/dump_stages"
+cp "$TARGET_DIR/build/tools/cjxl" "$OUT/cjxl"
+cp "$TARGET_DIR/build/tools/djxl" "$OUT/djxl"
+cp "$TARGET_DIR/build-dbg/tools/djxl" "$OUT/djxl-dbg"
+echo "Copied cjxl, djxl, and djxl-dbg to $OUT"
 
-cp "$TINY/build/encoder/cjxl_tiny" "$OUT/cjxl_tiny"
-echo "built: $OUT/dump_stages, $OUT/cjxl_tiny"
+# Post-build pin check
+"$HERE/pin-check.sh" "$TARGET_DIR"
+
+# Write revision report to Reference/build/REVISION.txt
+REPORT="$("$HERE/pin-check.sh" "$TARGET_DIR")"
+{
+	echo "$REPORT"
+	echo "resolved cmake libraries (Release):"
+	grep -E '^(JPEG|PNG|LCMS2)[^:]*:(FILEPATH|PATH)=' "$TARGET_DIR/build/CMakeCache.txt" 2>/dev/null | grep -v 'NOTFOUND' || true
+	echo "resolved cmake libraries (Debug):"
+	grep -E '^(JPEG|PNG|LCMS2)[^:]*:(FILEPATH|PATH)=' "$TARGET_DIR/build-dbg/CMakeCache.txt" 2>/dev/null | grep -v 'NOTFOUND' || true
+} > "$OUT/REVISION.txt"
+
+echo "Report written to $OUT/REVISION.txt"

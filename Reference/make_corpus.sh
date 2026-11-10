@@ -9,12 +9,12 @@
 set -euo pipefail
 
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-TESTDATA="${TESTDATA_DIR:-$HOME/tmp/automation/libjxl-full/testdata}"
+TESTDATA="${TESTDATA_DIR:-${LIBJXL_DIR:-$HOME/tmp/automation/libjxl-v0.12.0}/testdata}"
 OUT="$HERE/build/corpus"
 
 if [ ! -d "$TESTDATA/external/wesaturate" ]; then
 	echo "libjxl testdata not found at $TESTDATA" >&2
-	echo "  git clone --depth 1 https://github.com/libjxl/testdata $TESTDATA" >&2
+	echo "  Fetch pinned libjxl testdata with: Reference/fetch-libjxl.sh" >&2
 	echo "  (or set TESTDATA_DIR)" >&2
 	exit 1
 fi
