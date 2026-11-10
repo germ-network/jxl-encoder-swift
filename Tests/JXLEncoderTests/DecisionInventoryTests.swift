@@ -476,21 +476,21 @@ struct DecisionInventoryTests {
 
 	@Test(
 		"every entropy-coding file has a row or an agreed exemption",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func entropyGroupIsCovered() throws { try Self.expectCovered(.entropy) }
 
 	@Test(
 		"every pixel-path file has a row or an agreed exemption",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func pixelGroupIsCovered() throws { try Self.expectCovered(.pixel) }
 
 	@Test(
 		"every JPEG-path file has a row or an agreed exemption",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func jpegGroupIsCovered() throws { try Self.expectCovered(.jpeg) }
 
 	@Test(
 		"every orchestration and platform file has a row or an agreed exemption",
-		.disabled("not implemented"), .enabled(if: PackageCheckout.isAvailable))
+		.enabled(if: PackageCheckout.isAvailable))
 	func orchestrationGroupIsCovered() throws { try Self.expectCovered(.orchestration) }
 }
