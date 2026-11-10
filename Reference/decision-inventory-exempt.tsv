@@ -1,0 +1,5 @@
+swift_file	reason
+Sources/JXLEncoder/EncoderError.swift	error enum; no encoding decision
+Sources/JXLEncoder/EntropyDiagnostics.swift	diagnostic counters; not on the encode path
+Sources/jxlbench/main.swift	benchmark tool; not shipped
+Sources/jxlencode/main.swift	command-line wrapper; not shipped
