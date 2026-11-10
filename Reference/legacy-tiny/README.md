@@ -37,14 +37,16 @@ TINY_DIR=/path/to/libjxl-tiny ./build-tiny.sh
 
 ## Tools and artifacts
 
+The `stripe_*` stage names (`linear`, `dct`, `aq`) are inferred from fixture filenames.
+
 | Tool | Artifact(s) | Invocation | Input |
 |---|---|---|---|
-| `dump_stages.cc` | `edge_{linear,xyb,dct,quant,dcgroup,acgroup,dcextract}.dump` | `dump_stages <stage> <in.pfm> <out.dump>` | `make_fixtures.py` PFM |
-| `dump_stages.cc` | `stripe_{linear,dct,aq}.dump` | `dump_stages <stage> <in.pfm> <out.dump>` | unrecorded |
+| `dump_stages.cc` | `edge_{linear,xyb,dct,quant,dcgroup,acgroup,dcextract}.dump` | `dump_stages <stage> <in.pfm> <out.dump>` | unrecorded |
+| `dump_stages.cc` | `stripe_{linear,dct,aq}.dump` | `dump_stages <stage inferred from filename> <in.pfm> <out.dump>` | unrecorded |
 | `dump_stages.cc` | `multigroup_linear.dump` | `dump_stages linear <in.pfm> multigroup_linear.dump` | unrecorded (301x301 PFM) |
 | `cjxl_tiny` | `edge_whole.jxl`, `multigroup_whole.jxl` | `cjxl_tiny -d 1.0 <in.pfm> <out.jxl>` | unrecorded |
-| `gencodes.cc` | `Sources/JXLEncoder/StaticEntropyCodes.swift` | `gencodes` | none (reads `encoder/static_entropy_codes.h`) |
-| `genctx.cc` | `Tests/JXLEncoderTests/Fixtures/ac_context.bin` | `genctx ac_context.bin` | none (reads `encoder/ac_context.h`) |
-| `genprefix.cc` | `Tests/JXLEncoderTests/Fixtures/prefix_codes.txt` | `genprefix > prefix_codes.txt` | none |
-| `gentokens.cc` | Expected values inline in `Tests/JXLEncoderTests/EntropyTests.swift` | `gentokens` | none |
-| `gentree.cc` | `Tests/JXLEncoderTests/Fixtures/context_tree.txt` | `gentree > context_tree.txt` | none |
+| `gencodes.cc` | `Sources/JXLEncoder/StaticEntropyCodes.swift` | `gencodes` | unrecorded |
+| `genctx.cc` | `Tests/JXLEncoderTests/Fixtures/ac_context.bin` | `genctx ac_context.bin` | unrecorded |
+| `genprefix.cc` | `Tests/JXLEncoderTests/Fixtures/prefix_codes.txt` | `genprefix > prefix_codes.txt` | unrecorded |
+| `gentokens.cc` | Expected values inline in `Tests/JXLEncoderTests/EntropyTests.swift` | `gentokens` | unrecorded |
+| `gentree.cc` | `Tests/JXLEncoderTests/Fixtures/context_tree.txt` | `gentree > context_tree.txt` | unrecorded |
