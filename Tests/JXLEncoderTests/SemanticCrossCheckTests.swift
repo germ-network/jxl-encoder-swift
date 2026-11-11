@@ -12,6 +12,26 @@ import Testing
 /// actually carries, and that a mutated file still decodes.
 @Suite("Semantic cross-check")
 struct SemanticCrossCheckTests {
+	static func verifyMutations(in directory: URL) throws {
+		let baseline = try SemanticDump(
+			parsing: String(
+				contentsOf: directory.appendingPathComponent(
+					"multigroup.harness.sem"), encoding: .utf8))
+		for (flip, suffix) in [(true, "ctxflip"), (false, "orderswap")] {
+			let pair = try SemanticMutationTests.encodings(contextFlip: flip)
+			let mutated = try SemanticDump(
+				parsing: String(
+					contentsOf: directory.appendingPathComponent(
+						"multigroup." + suffix + ".harness.sem"),
+					encoding: .utf8))
+			let differences = mutated.differences(from: baseline)
+			#expect(
+				differences == [
+					SemanticDifference(field: pair.field, kind: pair.expected)
+				], "\(suffix): \(differences)")
+			print("decoded \(suffix): \(differences)")
+		}
+	}
 	static func writeEncodings(to directory: URL) throws {
 		try FileManager.default.createDirectory(
 			at: directory, withIntermediateDirectories: true)
@@ -77,6 +97,6 @@ struct SemanticCrossCheckTests {
 		"each mutated file's harness dump differs from the unaltered file's in exactly the mutated field",
 		.enabled(if: directory != nil))
 	func mutationsDifferInMutatedFieldOnly() throws {
-		Issue.record("unimplemented")
+		try Self.verifyMutations(in: #require(Self.directory))
 	}
 }
