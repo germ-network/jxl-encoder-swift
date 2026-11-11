@@ -11,7 +11,7 @@ struct SwiftFrameDecisions {
 	let params: DistanceParams
 	var coeffOrder: CoeffOrder.Result
 	var acCode: EntropyCode
-	/// No lane-A category reads it; the entropy categories will.
+	/// No category reads it yet; the entropy categories will.
 	var dcCode: EntropyCode
 	/// Per AC group, in group raster order: the raw quant field the group
 	/// wrote, block-major.

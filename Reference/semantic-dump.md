@@ -65,11 +65,13 @@ divergence is recorded per corpus entry **and category**
 (`SemanticCorpusEntry.knownIssues`, category → set of issues): each (entry,
 category) pair is its own test case, and only a listed pair runs under
 `withKnownIssue("GER-338x …")`, naming every issue that must land before it
-matches. The
-other categories of the same entry are compared normally, so one untranslated
-decision never hides another. A listed pair turns red the moment Swift starts
-matching, which is the cue to remove it. Stage fixtures (`*.dump`) follow the
-same rule per fixture (`StageFixtureKnownIssues`).
+matches. Other categories of the same entry are compared normally. A known
+issue covers every field of its category for that entry, so it also hides any
+other difference within that category. When one field diverges and the rest
+should stay compared, the category owner splits the category or narrows the
+field set covered by the known issue. A listed pair turns red the moment Swift
+starts matching, which is the cue to remove it. Stage fixtures (`*.dump`) follow
+the same rule per fixture (`StageFixtureKnownIssues`).
 
 A fixture compared under a known issue verifies nothing: an inventory
 `fixture` reference (`<path>#<category>` for a `.sem`) to it is a violation.
@@ -126,7 +128,7 @@ exactly to the existence of a nonnatural order.
 
 ## What the decoder does not retain
 
-Without a libjxl patch (D-10), these are not recoverable from the decoder
+Without a libjxl patch, these are not recoverable from the decoder
 state after a decode. A category that needs one re-parses the section with
 libjxl's public decoder primitives, or the lane records it as out of reach:
 

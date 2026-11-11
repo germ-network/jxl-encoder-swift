@@ -31,12 +31,20 @@ struct DecisionInventoryFixtureTests {
 			})
 		else { return .missing }
 		guard PackageCheckout.fileExists(reference.path) else { return .missing }
+		return Self.status(reference, row: row)
+	}
+
+	private static func status(
+		_ reference: DecisionInventory.FixtureReference, row: ProvenanceRow
+	) -> DecisionInventory.FixtureStatus {
 		guard row.origin == .fullLibjxl else { return .notFullLibjxl }
 		if StageFixtureKnownIssues.byFixture[reference.path] != nil { return .knownIssue }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
 			guard SemanticCase.references.contains(key) else { return .notCompared }
 			if SemanticCase.knownIssueReferences.contains(key) { return .knownIssue }
+		} else if row.consumers.isEmpty {
+			return .notCompared
 		}
 		return .verifies
 	}
@@ -77,6 +85,22 @@ struct DecisionInventoryFixtureTests {
 				["verification": "cited", "fixture": Self.path], status: status)
 			#expect(violations.contains { $0.rule == .fixtureReference })
 			#expect(violations.contains { $0.rule == .replacementRequired })
+		}
+		let path = "Tests/JXLEncoderTests/Fixtures/unconsumed.dump"
+		guard let reference = DecisionInventory.FixtureReference(path) else {
+			Issue.record("invalid stage fixture reference")
+			return
+		}
+		for consumers in [[], ["StageTests.swift"]] as [[String]] {
+			let row = ProvenanceRow(
+				path: path, kind: .fixture,
+				sha256: String(repeating: "a", count: 64),
+				origin: .fullLibjxl, generator: "generator", invocation: "generate",
+				input: "input", upstream: DecisionInventory.pinnedUpstream,
+				config: "hwy=NEON", consumers: consumers)
+			#expect(
+				Self.status(reference, row: row)
+					== (consumers.isEmpty ? .notCompared : .verifies))
 		}
 	}
 
