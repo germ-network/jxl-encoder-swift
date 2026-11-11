@@ -101,6 +101,10 @@ struct DecisionInventory {
 		case swiftFile
 		/// File both has rows and is listed as exempt.
 		case coveredAndExempt
+		/// `fixture` is neither `-` nor a comma list of well-formed references
+		/// that each `.verifies`: a `full-libjxl` fixture (and, for a `.sem`,
+		/// category) that a test compares, not under a known issue.
+		case fixtureReference
 	}
 
 	enum InventoryFile: String {
@@ -263,6 +267,51 @@ struct DecisionInventory {
 		case (.faithful, .diffed), (.adapted, .diffed): return true
 		default: return false
 		}
+	}
+
+	/// One entry of the `fixture` column: a fixture path as written in
+	/// `Reference/provenance.tsv`, and for a semantic dump (`.sem`) the
+	/// category that compares the row's decision, as `<path>#<category>`.
+	struct FixtureReference: Hashable {
+		let path: String
+		let category: String?
+
+		/// Nil unless `text` is `<path>` or `<path>#<category>` with both parts
+		/// non-empty; a `.sem` path requires the category, anything else forbids it.
+		init?(_ text: String) {
+			return nil
+		}
+	}
+
+	/// What a fixture reference can establish.
+	enum FixtureStatus: Equatable {
+		/// A `full-libjxl` fixture whose comparison runs without a known issue.
+		case verifies
+		/// A `full-libjxl` fixture compared under `withKnownIssue`.
+		case knownIssue
+		/// A `full-libjxl` fixture (or `.sem` category) that no test compares,
+		/// e.g. a category the Swift side doesn't emit.
+		case notCompared
+		/// The path's provenance row has another origin.
+		case notFullLibjxl
+		/// No fixture row for the path.
+		case missing
+	}
+
+	/// Whether a row needs no GER-3392 verifier: `faithful` or `adapted`, and
+	/// either `diffed` or citing at least one fixture that `.verifies`.
+	static func isSettled(
+		classification: Classification, verification: Verification, hasFixture: Bool
+	) -> Bool {
+		isSettled(classification: classification, verification: verification)
+	}
+
+	/// Every rule violation except coverage, with each `fixture` reference
+	/// checked through `fixtureStatus`; only `.verifies` is accepted.
+	func violations(
+		fileExists: (String) -> Bool, fixtureStatus: (FixtureReference) -> FixtureStatus
+	) -> [Violation] {
+		violations(fileExists: fileExists)
 	}
 
 	/// Every rule violation except coverage, which `uncovered(_:)` reports
