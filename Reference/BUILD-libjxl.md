@@ -134,3 +134,11 @@ patches or writes into the checkout; pin-check runs before and after building.
 `jxl-harness version` reports the pinned commit and dispatched Highway target.
 The reference target is arm64 NEON, with NEON_BF16 disabled by the harness
 CMake configuration so BF16-capable hosts use the same target.
+
+The verified harness version reports
+`libjxl=a7a9c787341cf703dede03c2009fa460cae5e5df` and `hwy=NEON`.
+Highway is present in the pin's `third_party/highway/`; its
+`hwy/ops/arm_neon-inl.h` supplies NEON's approximate reciprocal. The existing
+`recip_estimate.bin` captures the host instruction; it is not a full-libjxl
+quantization-bias fixture. Semantic and stage fixtures record their individual
+SIMD targets and reproducible inputs in `Reference/provenance.tsv`.
