@@ -314,15 +314,119 @@ struct SemanticFixtureTests {
 /// produces still decodes.
 @Suite("Semantic mutations")
 struct SemanticMutationTests {
+	static func encodings(contextFlip: Bool) throws -> (
+		baseline: SwiftSemanticEncoding.Result, actual: SwiftSemanticEncoding.Result,
+		field: String, expected: SemanticDifference.Kind
+	) {
+		let input = try StageDump(fixture: "multigroup_linear")
+		let pixels = input.interleaved
+		let width = input.width
+		let dim = ImageDim(width: input.width, height: input.height)
+		let params = try DistanceParams(distance: 1)
+		let baseline = try SwiftSemanticEncoding.encode(linear: input, distance: 1)
+		let groups = (0..<dim.groupCount).map {
+			Encoder.computeACGroup(
+				stripeAt: {
+					PlaneBuffer.copyAndPad(
+						source: pixels, sourceWidth: width, rect: $0)
+				}, dim: dim, groupX: $0 % dim.widthInGroups,
+				groupY: $0 / dim.widthInGroups, params: params)
+		}
+		var alterations = SwiftSemanticEncoding.Alterations.none
+		let field: String
+		let expected: SemanticDifference.Kind
+		if contextFlip {
+			let code = baseline.decisions.acCode
+			try #require(code.originalContextMap == nil)
+			let used = Set(
+				groups.flatMap {
+					Encoder.tokenizeACGroup(
+						$0, order: baseline.decisions.coeffOrder.orders,
+						mode: .staging(.staticAC)
+					).section.staged.compactMap { record -> Int? in
+						if case .token(let context, _) = record {
+							return Int(context)
+						}
+						return nil
+					}
+				})
+			let map = code.contextMap
+			let index = try #require(
+				map.indices.first { index in
+					!used.contains(index)
+						&& map.filter { $0 == map[index] }.count > 1
+				})
+			let destination = try #require(map.first { $0 != map[index] })
+			#expect(!used.contains(index))
+			#expect(map.filter { $0 == map[index] }.count > 1)
+			expected = .valueMismatch(
+				index: index, expected: String(map[index]),
+				actual: String(destination))
+			field = "context_map.ac"
+			alterations.acCode = { code in
+				var changed = code.contextMap
+				changed[index] = destination
+				code = EntropyCode(
+					contextMap: changed, prefixCodes: code.prefixCodes,
+					originalContextMap: code.originalContextMap,
+					ansInfoTables: code.ansInfoTables)
+			}
+		} else {
+			let order = baseline.decisions.coeffOrder
+			try #require(order.isCustom)
+			let candidates = (0..<3).compactMap { channel -> (Int, [Int])? in
+				let positions = (1..<64).filter { position in
+					groups.allSatisfy { group in
+						stride(
+							from: 0,
+							to: group.coefficients[channel].count,
+							by: 64
+						).allSatisfy {
+							group.coefficients[channel][
+								$0 + order.orders[channel][position]
+							] == 0
+						}
+					}
+				}
+				return positions.count >= 2 ? (channel, positions) : nil
+			}
+			let (channel, positions) = try #require(candidates.first)
+			let a = positions[0]
+			let b = positions[1]
+			expected = .valueMismatch(
+				index: a, expected: String(order.orders[channel][a]),
+				actual: String(order.orders[channel][b]))
+			field = "coeff_order.dct8.c\(channel)"
+			alterations.coeffOrder = { order in
+				var changed = order.orders
+				changed[channel].swapAt(a, b)
+				order = CoeffOrder.Result(orders: changed, isCustom: order.isCustom)
+			}
+		}
+		let actual = try SwiftSemanticEncoding.encode(
+			linear: input, distance: 1, altering: alterations)
+		return (baseline, actual, field, expected)
+	}
+
 	@Test("a flipped entry of a token-free AC context is reported in context_map only")
 	func flippedContextMapEntryCaught() throws {
-		Issue.record("unimplemented")
+		let pair = try Self.encodings(contextFlip: true)
+		#expect(pair.actual.codestream != pair.baseline.codestream)
+		let differences = SemanticDump(swiftDecisions: pair.actual.decisions).differences(
+			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
+		#expect(differences.map(\.field) == ["context_map.ac"])
+		#expect(differences.first?.kind == pair.expected)
 	}
 
 	@Test(
 		"two swapped always-zero coefficient-order positions are reported in coeff_order only"
 	)
 	func swappedCoeffOrderCaught() throws {
-		Issue.record("unimplemented")
+		let pair = try Self.encodings(contextFlip: false)
+		#expect(pair.actual.codestream != pair.baseline.codestream)
+		let differences = SemanticDump(swiftDecisions: pair.actual.decisions).differences(
+			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
+		#expect(differences.map(\.field) == [pair.field])
+		#expect(differences.first?.kind == pair.expected)
 	}
 }
