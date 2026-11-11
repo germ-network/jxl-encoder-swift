@@ -9,17 +9,10 @@ struct ProvenanceFreezeTests {
 	/// The inherited-tiny fixture rows still allowed. Retargeting one removes it
 	/// here; nothing is ever added.
 	static let frozenInheritedTinyFixtures: Set<String> = [
-		"Tests/JXLEncoderTests/Fixtures/edge_linear.dump",
-		"Tests/JXLEncoderTests/Fixtures/edge_xyb.dump",
-		"Tests/JXLEncoderTests/Fixtures/edge_dct.dump",
 		"Tests/JXLEncoderTests/Fixtures/edge_quant.dump",
 		"Tests/JXLEncoderTests/Fixtures/edge_dcgroup.dump",
 		"Tests/JXLEncoderTests/Fixtures/edge_acgroup.dump",
 		"Tests/JXLEncoderTests/Fixtures/edge_dcextract.dump",
-		"Tests/JXLEncoderTests/Fixtures/stripe_linear.dump",
-		"Tests/JXLEncoderTests/Fixtures/stripe_dct.dump",
-		"Tests/JXLEncoderTests/Fixtures/stripe_aq.dump",
-		"Tests/JXLEncoderTests/Fixtures/multigroup_linear.dump",
 		"Tests/JXLEncoderTests/Fixtures/edge_whole.jxl",
 		"Tests/JXLEncoderTests/Fixtures/multigroup_whole.jxl",
 		"Tests/JXLEncoderTests/Fixtures/prefix_codes.txt",

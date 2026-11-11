@@ -34,7 +34,20 @@ p.write_bytes(data[:-1])
 PYCODE
   if "$HARNESS" selftest --read "$SCRATCH/test.dump"; then return 1; fi
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip; do
+stages_reproduce_committed_fixtures() {
+  bash "$REFERENCE/make_stage_fixtures.sh" "$SCRATCH/stages"
+  python3 - "$REFERENCE/.." "$SCRATCH/stages" <<'PYCODE'
+import csv,hashlib,sys
+from pathlib import Path
+root=Path(sys.argv[1]); output=Path(sys.argv[2])
+rows=[line for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#')]
+by_name={Path(r[0]).name:r[2] for r in csv.reader(rows,delimiter='\t') if r[1]=='fixture'}
+for path in output.glob('*.dump'):
+ assert hashlib.sha256(path.read_bytes()).hexdigest()==by_name[path.name], path.name
+assert len(list(output.glob('*.dump')))==6
+PYCODE
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures; do
   "$check"
   echo "PASS $check"
 done

@@ -2,7 +2,7 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Differential tests against libjxl-tiny's `ToXYB`. The fixture covers values
+/// Differential tests against the pinned full-libjxl `ToXYB`. The fixture covers values
 /// photographs never produce — exact zero, negatives, and out-of-gamut samples
 /// above 1.0 — because those drive the branches in the fast cube root.
 ///
@@ -11,7 +11,7 @@ import Testing
 /// results, so any drift means the port's arithmetic shape has changed.
 @Suite("XYB")
 struct XYBTests {
-	@Test("matches libjxl-tiny bit-for-bit on the edge-case fixture")
+	@Test("matches full-libjxl bit-for-bit on the edge-case fixture")
 	func matchesReference() throws {
 		let input = try StageDump(fixture: "edge_linear")
 		let expected = try StageDump(fixture: "edge_xyb")
