@@ -17,6 +17,7 @@ int main(int argc, char** argv) {
   }
   std::fprintf(stderr, "usage: jxl-harness <subcommand> [args…]\n");
   for (const auto& command : commands) {
+    if (std::string(command.name) == "selftest") continue;
     std::fprintf(stderr, "  %s %s\n", command.name, command.usage);
   }
   return 2;

@@ -4,14 +4,16 @@
 #include <cstdio>
 
 #include "hwy/targets.h"
+#include "hwy/per_target.h"
 #include "registry.h"
 
 namespace harness {
 namespace {
 
 int RunVersion(const std::vector<std::string>& args) {
-  std::fprintf(stderr, "version: unimplemented\n");
-  return 1;
+  if (!args.empty()) return 2;
+  std::printf("libjxl=%s\nhwy=%s\n", LIBJXL_COMMIT, hwy::TargetName(hwy::DispatchedTarget()));
+  return 0;
 }
 
 const RegisterSubcommand kRegister({"version", "", RunVersion});

@@ -124,3 +124,13 @@ To guarantee byte-identical reproduction:
 - `$JPEG_PREFIX/include/jconfig.h` must define `LIBJPEG_TURBO_VERSION` as `3.2.0`.
 
 Any version mismatch causes `make_jpeg_fixtures.sh` to abort.
+
+## Internal reference harness
+
+Run `Reference/build-harness.sh`, then `Reference/harness/test-harness.sh`.
+The build adds the pinned checkout as a CMake subproject, links its internal
+libraries, and writes all build output to `Reference/build/harness/`. It never
+patches or writes into the checkout; pin-check runs before and after building.
+`jxl-harness version` reports the pinned commit and dispatched Highway target.
+The reference target is arm64 NEON, with NEON_BF16 disabled by the harness
+CMake configuration so BF16-capable hosts use the same target.

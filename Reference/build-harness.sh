@@ -30,7 +30,7 @@ NCPU="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 echo "Building jxl-harness against $TARGET_DIR..."
 # shellcheck disable=SC2086
 cmake -S "$HERE/harness" -B "$OUT" $CMAKE_FLAGS_RELEASE \
-	-DLIBJXL_DIR="$TARGET_DIR" >/dev/null
+	-DLIBJXL_DIR="$TARGET_DIR" -DLIBJXL_COMMIT="$LIBJXL_COMMIT" >/dev/null
 cmake --build "$OUT" --target jxl-harness -j"$NCPU" >/dev/null
 
 "$HERE/pin-check.sh" "$TARGET_DIR"

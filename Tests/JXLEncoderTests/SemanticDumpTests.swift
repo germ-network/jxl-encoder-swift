@@ -35,7 +35,20 @@ struct SemanticDumpTests {
 		"the harness writer's golden output parses to the expected dump",
 		.enabled(if: PackageCheckout.isAvailable))
 	func parsesHarnessGolden() throws {
-		Issue.record("unimplemented")
+		let text = try PackageCheckout.read("Reference/harness/golden.sem")
+		let dump = try SemanticDump(parsing: text)
+		#expect(
+			dump.fields == [
+				"coeff_order.test": .integers([0, 1, 3, 2]),
+				"frame.size": .integers([3, 2]),
+				"quant_field.test": .floats([-0.0, 1.2345678, -2, 0]),
+			])
+		if case .floats(let values) = dump.fields["quant_field.test"] {
+			#expect(values[0].bitPattern == Float(-0.0).bitPattern)
+			#expect(values[1].bitPattern == Float(1.2345678).bitPattern)
+		} else {
+			Issue.record("missing float field")
+		}
 	}
 
 	@Test("a bad header, malformed line, duplicate field or unparsable value throws")
