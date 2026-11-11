@@ -28,7 +28,52 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 	var testDescription: String { name }
 
 	/// The committed corpus. Each entry has a `.sem` fixture and provenance row.
-	static let all: [SemanticCorpusEntry] = []
+	static let all: [SemanticCorpusEntry] = [
+		SemanticCorpusEntry(
+			name: "edge", input: .linear(file: "edge_linear"), distance: 1,
+			knownIssues: [
+				"frame": ["GER-3387"], "block_context": ["GER-3387"],
+				"context_map": ["GER-3387"],
+			]),
+		SemanticCorpusEntry(
+			name: "multigroup", input: .linear(file: "multigroup_linear"), distance: 1,
+			knownIssues: [
+				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
+				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+			]),
+		SemanticCorpusEntry(
+			name: "flower_512_d1", input: .srgb8(file: "flower_512"), distance: 1,
+			knownIssues: [
+				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
+				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+			]),
+		SemanticCorpusEntry(
+			name: "flower_512_d3", input: .srgb8(file: "flower_512"), distance: 3,
+			knownIssues: [
+				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
+				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+			]),
+		SemanticCorpusEntry(
+			name: "flower_1024", input: .srgb8(file: "flower_1024"), distance: 1,
+			knownIssues: [
+				"coeff_order": ["GER-3386", "GER-3387", "GER-3419"],
+				"frame": ["GER-3387"], "block_context": ["GER-3387"],
+				"context_map": ["GER-3387", "GER-3419"],
+			]),
+	]
+}
+
+extension SemanticCorpusEntry {
+	func encoded() throws -> SwiftSemanticEncoding.Result {
+		switch input {
+		case .srgb8(let file):
+			return try SwiftSemanticEncoding.encode(
+				loadPPM(fixture: file), distance: distance)
+		case .linear(let file):
+			return try SwiftSemanticEncoding.encode(
+				linear: StageDump(fixture: file), distance: distance)
+		}
+	}
 }
 
 /// One corpus entry compared in one category: the unit of expected divergence.
@@ -53,13 +98,21 @@ struct SemanticCase: CustomTestStringConvertible, Sendable {
 	/// `fixture` reference takes. A reference outside this set is compared by
 	/// no test.
 	static var references: Set<String> {
-		[]
+		Set(
+			all.map {
+				"Tests/JXLEncoderTests/Fixtures/semantic/" + $0.entry.name + ".sem#"
+					+ $0.category
+			})
 	}
 
 	/// The subset of `references` whose case runs under a known issue; such a
 	/// fixture verifies nothing.
 	static var knownIssueReferences: Set<String> {
-		[]
+		Set(
+			all.filter { !$0.knownIssues.isEmpty }.map {
+				"Tests/JXLEncoderTests/Fixtures/semantic/" + $0.entry.name + ".sem#"
+					+ $0.category
+			})
 	}
 }
 
@@ -72,7 +125,32 @@ enum StageFixtureKnownIssues {
 
 /// Reads an 8-bit binary PPM; Foundation-only so it runs on Linux CI.
 func loadPPM(fixture name: String) throws -> ImageBuffer {
-	throw SemanticDumpError.unimplemented
+	guard
+		let url = Bundle.module.url(
+			forResource: name, withExtension: "ppm", subdirectory: "Fixtures/semantic")
+	else { throw SemanticDumpError.fixtureNotFound(name) }
+	let data = [UInt8](try Data(contentsOf: url))
+	var offset = 0
+	func token() -> String {
+		while offset < data.count {
+			if data[offset] == 35 {
+				while offset < data.count && data[offset] != 10 { offset += 1 }
+			} else if [9, 10, 13, 32].contains(data[offset]) {
+				offset += 1
+			} else {
+				break
+			}
+		}
+		let start = offset
+		while offset < data.count && ![9, 10, 13, 32].contains(data[offset]) { offset += 1 }
+		return String(decoding: data[start..<offset], as: UTF8.self)
+	}
+	guard token() == "P6", let width = Int(token()), let height = Int(token()),
+		token() == "255", offset < data.count
+	else { throw SemanticDumpError.badHeader(name) }
+	if data[offset] == 13 && offset + 1 < data.count && data[offset + 1] == 10 { offset += 1 }
+	offset += 1
+	return try ImageBuffer(width: width, height: height, samples: Array(data[offset...]))
 }
 
 /// The Swift encoder's decisions, dumped from its own internals, agree with the
@@ -82,29 +160,153 @@ func loadPPM(fixture name: String) throws -> ImageBuffer {
 struct SemanticFixtureTests {
 	@Test("the recomposed encode is byte-identical to Encoder.encode")
 	func recompositionMatchesEncoder() throws {
-		Issue.record("unimplemented")
+		let entries = SemanticCorpusEntry.all.filter {
+			if case .srgb8 = $0.input { return true }
+			return false
+		}
+		#expect(entries.count == 3)
+		for entry in entries {
+			guard case .srgb8(let file) = entry.input else { continue }
+			let image = try loadPPM(fixture: file)
+			#expect(
+				try SwiftSemanticEncoding.encode(image, distance: entry.distance)
+					.codestream
+					== Encoder.encode(image, distance: entry.distance))
+		}
 	}
 
 	@Test("the recomposed linear encode is byte-identical to Encoder.encodeFrame")
 	func linearRecompositionMatchesEncodeFrame() throws {
-		Issue.record("unimplemented")
+		let entries = SemanticCorpusEntry.all.filter {
+			if case .linear = $0.input { return true }
+			return false
+		}
+		#expect(entries.count == 2)
+		for entry in entries {
+			guard case .linear(let file) = entry.input else { continue }
+			let input = try StageDump(fixture: file)
+			let pixels = input.interleaved
+			let width = input.width
+			let params = try DistanceParams(distance: entry.distance)
+			var writer = BitWriter()
+			try ImageHeader.write(
+				width: input.width, height: input.height, transferFunction: .linear,
+				to: &writer)
+			try Encoder.encodeFrame(
+				stripeAt: {
+					PlaneBuffer.copyAndPad(
+						source: pixels, sourceWidth: width, rect: $0)
+				}, width: input.width, height: input.height, params: params,
+				optimizeCodes: true, writer: &writer)
+			writer.zeroPadToByte()
+			let result = try SwiftSemanticEncoding.encode(
+				linear: input, distance: entry.distance)
+			#expect(result.codestream == writer.take())
+			if entry.name == "multigroup" {
+				// Distinct block values pin group placement and partial edge groups.
+				var decisions = result.decisions
+				let dim = ImageDim(width: input.width, height: input.height)
+				let groupSize = Geometry.groupDimInBlocks
+				for group in 0..<dim.groupCount {
+					let x0 = group % dim.widthInGroups * groupSize
+					let y0 = group / dim.widthInGroups * groupSize
+					let width = min(groupSize, dim.widthInBlocks - x0)
+					decisions.quantFields[group] = decisions.quantFields[group]
+						.indices.map {
+							UInt8(
+								1
+									+ ((y0 + $0 / width)
+										* dim.widthInBlocks
+										+ x0 + $0 % width)
+									% 251)
+						}
+				}
+				let expected = (0..<(dim.widthInBlocks * dim.heightInBlocks)).map {
+					Int64(1 + $0 % 251)
+				}
+				#expect(
+					SemanticDump(swiftDecisions: decisions).fields[
+						"quant_field.raw"] == .integers(expected))
+			}
+		}
 	}
 
 	@Test("the corpus has a large multi-group entry above 8 groups")
 	func corpusCoversStreamingSize() throws {
-		Issue.record("unimplemented")
+		#expect(SemanticCorpusEntry.all.count == 5)
+		let entry = try #require(SemanticCorpusEntry.all.first { $0.name == "flower_1024" })
+		guard case .srgb8(let file) = entry.input else {
+			Issue.record("large entry must be an 8-bit image")
+			return
+		}
+		let image = try loadPPM(fixture: file)
+		#expect(ImageDim(width: image.width, height: image.height).groupCount == 16)
 	}
 
 	@Test("every known issue names an emitted category and an accepted issue")
 	func knownIssuesWellFormed() throws {
-		Issue.record("unimplemented")
+		#expect(Set(SemanticCorpusEntry.all.map(\.name)).count == 5)
+		#expect(SemanticCase.all.count == 25)
+		#expect(SemanticCase.references.count == 25)
+		for entry in SemanticCorpusEntry.all {
+			for (category, issues) in entry.knownIssues {
+				#expect(SemanticDump.swiftEmittedCategories.contains(category))
+				#expect(
+					!issues.isEmpty
+						&& issues.isSubset(of: [
+							"GER-3386", "GER-3387", "GER-3419",
+						]))
+			}
+		}
+		#expect(
+			SemanticCase.knownIssueReferences
+				== Set(
+					SemanticCase.all.filter { !$0.knownIssues.isEmpty }.map {
+						"Tests/JXLEncoderTests/Fixtures/semantic/"
+							+ $0.entry.name + ".sem#" + $0.category
+					}))
+	}
+
+	@Test(
+		"a custom coefficient order is signalled exactly when some channel's order is not natural"
+	)
+	func customOrderSignalledOnlyWhenNondefault() throws {
+		#expect(SemanticCorpusEntry.all.count == 5)
+		for entry in SemanticCorpusEntry.all {
+			let order = try entry.encoded().decisions.coeffOrder
+			#expect(
+				order.isCustom == order.orders.contains { $0 != CoeffOrder.natural }
+			)
+		}
 	}
 
 	@Test(
 		"Swift's decisions match the pinned libjxl's",
 		arguments: SemanticCase.all)
 	func matchesReference(_ semanticCase: SemanticCase) throws {
-		Issue.record("unimplemented")
+		let actual = SemanticDump(
+			swiftDecisions: try semanticCase.entry.encoded().decisions
+		).restricted(to: [semanticCase.category])
+		let reference = try SemanticDump(fixture: semanticCase.entry.name).restricted(to: [
+			semanticCase.category
+		])
+		#expect(!actual.fields.isEmpty && !reference.fields.isEmpty)
+		let differences = actual.differences(from: reference)
+		if semanticCase.knownIssues.isEmpty {
+			#expect(
+				differences.isEmpty,
+				"\(semanticCase.testDescription): \(differences)")
+		} else {
+			withKnownIssue(
+				Comment(
+					rawValue: semanticCase.knownIssues.sorted().joined(
+						separator: ", "))
+			) {
+				#expect(
+					differences.isEmpty,
+					"\(semanticCase.testDescription): \(differences)")
+			}
+		}
 	}
 }
 
