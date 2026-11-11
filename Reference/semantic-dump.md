@@ -33,6 +33,9 @@ Every other line is one field:
   locale, Swift its shortest round-tripping form). Equal dumps may differ in
   text, so dumps are compared parsed, never as text.
 - `count`: number of values that follow; 0 is allowed.
+- Name components are nonempty. Float values must be finite. A final LF is
+  optional when parsing; writers always include it. Parsers accept fields in
+  any order and reject duplicate names.
 - Fields are sorted by name and appear once each. Separators are single spaces.
 
 ## Comparison rules
@@ -46,7 +49,11 @@ dumps agree.
    (`noTolerance`), never silently compared.
 3. A field present in only one dump, a kind mismatch or a count mismatch is a
    difference.
-4. Only the first differing element of a field is reported.
+4. Only the first differing element of a field is reported. Differences are
+   sorted by field name. Structure is checked before float tolerances.
+5. ULP distance uses monotonic float32 bit ordering, with signed zeros
+   distinct and adjacent (0 ULP means bit-identical). Absolute tolerance is
+   inclusive. Nonfinite values never compare equal.
 
 A test that compares only some categories restricts both dumps first
 (`restricted(to:)`).
