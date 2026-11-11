@@ -1,12 +1,25 @@
 // Fixed writer exercise for the harness checks; omitted from user help.
 #include <cstdio>
 #include "registry.h"
+#include "decoded_frame.h"
 #include "stage_dump.h"
 #include "lib/jxl/memory_manager_internal.h"
 namespace harness {
 namespace {
+jxl::Status QuantFieldSelftest(const std::string& path) {
+  JxlMemoryManager manager; JXL_RETURN_IF_ERROR(jxl::MemoryManagerInit(&manager, nullptr));
+  DecodedFrame frame; frame.state = std::make_unique<jxl::PassesDecoderState>(&manager);
+  auto& field = frame.state->shared_storage.raw_quant_field;
+  JXL_ASSIGN_OR_RETURN(field, jxl::ImageI::Create(&manager, 3, 2));
+  for (size_t y = 0; y < 2; ++y) for (size_t x = 0; x < 3; ++x) field.Row(y)[x] = 10*y+x+1;
+  SemanticDumpWriter writer;
+  for (const auto& category : DumpCategories()) if (std::string(category.name) == "quant_field") category.dump(frame, writer);
+  FILE* out = std::fopen(path.c_str(), "wb"); if (!out) return false;
+  writer.Write(out); return std::fclose(out) == 0;
+}
 int RunSelftest(const std::vector<std::string>& args) {
   if (args.size() != 2) return 2;
+  if (args[0] == "--quant-field") return QuantFieldSelftest(args[1]) ? 0 : 1;
   if (args[0] == "--read") { jxl::Image3F image; return ReadStageDump(args[1], &image) ? 0 : 1; }
   SemanticDumpWriter writer;
   writer.Floats("quant_field.test", {-0.0f, 1.2345678f, -2.0f, 0.0f});

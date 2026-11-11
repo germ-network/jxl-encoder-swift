@@ -47,7 +47,46 @@ for path in output.glob('*.dump'):
 assert len(list(output.glob('*.dump')))==6
 PYCODE
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures; do
+semantic_fixtures_reproduce() {
+  # e4's uniform field cannot distinguish row-major from transposed output.
+  "$HARNESS" selftest --quant-field "$SCRATCH/quant.sem"
+  grep -Fx 'quant_field.raw i 6 1 2 3 11 12 13' "$SCRATCH/quant.sem"
+  bash "$REFERENCE/make_semantic_fixtures.sh" "$SCRATCH/semantic"
+  python3 - "$REFERENCE/.." "$SCRATCH/semantic" <<'PYCODE'
+import hashlib,sys
+from pathlib import Path
+root=Path(sys.argv[1]); output=Path(sys.argv[2])
+rows={r[0]:r for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#') for r in [line.split('\t')]}
+expected={'edge','multigroup','flower_512_d1','flower_512_d3','flower_1024'}
+assert {p.stem for p in output.glob('*.sem')}==expected
+for p in output.glob('*'):
+ if p.suffix not in ('.sem','.ppm'): continue
+ path='Tests/JXLEncoderTests/Fixtures/semantic/'+p.name
+ assert hashlib.sha256(p.read_bytes()).hexdigest()==rows[path][2], path
+for name in expected:
+ fields={line.split()[0]:line.split()[1:] for line in (output/(name+'.sem')).read_text().splitlines()[1:]}
+ required={'frame.size','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame.xyb','frame.qm_scales','frame.loop_filter.gab','frame.loop_filter.epf_iters','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc'}
+ assert set(fields)==required, name
+ size={'edge':(32,32),'multigroup':(301,301),'flower_512_d1':(512,512),'flower_512_d3':(512,512),'flower_1024':(1024,1024)}[name]
+ assert list(map(int,fields['frame.size'][2:]))==list(size)
+ assert int(fields['quant_field.raw'][1])==((size[0]+7)//8)*((size[1]+7)//8)
+ assert fields['frame.encoding']==['i','1','0'] and fields['frame.xyb']==['i','1','1']
+ assert fields['frame.passes']==['i','1','1']
+ assert fields['frame.loop_filter.epf_iters']==['i','1','2' if name=='flower_512_d3' else '1']
+ for channel in range(3): assert sorted(map(int,fields[f'coeff_order.dct8.c{channel}'][2:]))==list(range(64))
+ assert fields['frame.groups']==['i','1',str(((size[0]+255)//256)*((size[1]+255)//256))]
+PYCODE
+}
+dump_rejects_non_codestream() {
+  printf 'not a codestream' > "$SCRATCH/invalid.jxl"
+  if "$HARNESS" dump "$SCRATCH/invalid.jxl"; then return 1; fi
+  "$HARNESS" encode "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/edge_linear.dump" 1 "$SCRATCH/edge.jxl"
+  "$HARNESS" dump "$SCRATCH/edge.jxl" > "$SCRATCH/edge.sem"
+  head -c 4 "$SCRATCH/edge.jxl" > "$SCRATCH/truncated.jxl"
+  if "$HARNESS" dump "$SCRATCH/truncated.jxl"; then return 1; fi
+  if "$HARNESS" dump "$SCRATCH/edge.jxl" nonexistent; then return 1; fi
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce dump_rejects_non_codestream; do
   "$check"
   echo "PASS $check"
 done

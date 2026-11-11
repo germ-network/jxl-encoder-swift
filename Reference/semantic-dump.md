@@ -93,15 +93,36 @@ until they agree.
 
 ## Categories
 
-<!-- Each category lists its fields: name, kind, layout, and float tolerance. -->
+All fields below are `i` (signed decimal integers); no float tolerance is
+needed for these categories. The supported first frame is single-pass VarDCT,
+with DCT8 only and no preview, as produced by the corpus's e4 pixel path.
+Other frame configurations are rejected rather than partially dumped.
 
-| category | owner | fields |
+| category | field suffix | layout |
 |---|---|---|
-| `frame` | lane A | to be filled when the category is built |
-| `coeff_order` | lane A | to be filled when the category is built |
-| `block_context` | lane A | to be filled when the category is built |
-| `context_map` | lane A | to be filled when the category is built |
-| `quant_field` | lane A | to be filled when the category is built |
+| `frame` | `size` | width, height in pixels |
+| `frame` | `encoding` | scalar; 0 = VarDCT |
+| `frame` | `groups`, `dc_groups`, `passes` | one scalar each |
+| `frame` | `xyb` | scalar boolean, XYB color transform |
+| `frame` | `qm_scales` | X scale, B scale |
+| `frame` | `loop_filter.gab`, `loop_filter.epf_iters` | boolean and iteration count, one scalar each |
+| `coeff_order` | `nondefault_orders` | scalar derived bitmask: bucket bit is set iff any channel's decoded permutation differs from its natural order; only bit 0 (DCT8) can be set here |
+| `coeff_order` | `dct8.c0`, `dct8.c1`, `dct8.c2` | 64 decoded coefficient indices per channel, in scan order |
+| `block_context` | `dc_thresholds.c0`, `dc_thresholds.c1`, `dc_thresholds.c2` | ordered DC thresholds per channel, possibly empty |
+| `block_context` | `qf_thresholds` | ordered quant-field thresholds, possibly empty |
+| `block_context` | `ctx_map` | decoder's complete block-context map; channel order Y, X, B, then order bucket, quant-field bucket and DC bucket |
+| `block_context` | `num_ctxs` | scalar count of block contexts |
+| `context_map` | `num_histograms` | scalar count of pre-clustered histogram sets |
+| `context_map` | `ac` | first pass's AC map, trimmed to `num_histograms * NumACContexts()`; no decoder padding |
+| `quant_field` | `raw` | integer raw quantizer per block, whole-frame block raster order |
+| `quant_field` | `global_scale`, `quant_dc` | one scalar each, exact integer `QuantizerParams` values |
+
+`coeff_order.nondefault_orders` describes the decoded permutation, not the
+signaling syntax. At the pinned e4 configuration upstream clears the signaled
+bit for natural orders (`lib/jxl/enc_coeff_order.cc:231-233`), so its derived
+and signaled masks agree. The Swift emitter compares the orders themselves
+with `CoeffOrder.natural`; a separate Swift invariant test pins `isCustom`
+exactly to the existence of a nonnatural order.
 
 ## What the decoder does not retain
 
@@ -109,6 +130,9 @@ Without a libjxl patch (D-10), these are not recoverable from the decoder
 state after a decode. A category that needs one re-parses the section with
 libjxl's public decoder primitives, or the lane records it as out of reach:
 
+- the signaled coefficient-order mask (only its canonical form, derived from
+  the decoded permutations, is dumped; at the pinned e4 config upstream never
+  signals an explicit natural order, `enc_coeff_order.cc:231-233`);
 - the ANS histogram precision (shift) choice: only the normalized counts survive,
   in the alias tables;
 - quantized AC coefficients in a single-pass decode;
