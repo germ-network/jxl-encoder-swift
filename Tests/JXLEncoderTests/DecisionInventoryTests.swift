@@ -28,7 +28,7 @@ struct DecisionInventoryTests {
 			"verification": "diffed",
 			"evidence": "lib/jxl/enc_ans.h:40 Sources/JXLEncoder/ANSCoder.swift:12",
 			"replacement": "-",
-			"notes": "-",
+			"notes": "-", "fixture": "-",
 		]
 		fields.merge(overrides) { _, new in new }
 		return DecisionInventory.columns.map { fields[$0]! }.joined(separator: "\t")
@@ -48,7 +48,8 @@ struct DecisionInventoryTests {
 			inventoryTSV: ([header] + lines).joined(separator: "\n") + "\n",
 			exemptTSV: ([exemptHeader] + exempt).joined(separator: "\n") + "\n")
 		return inventory.parseViolations
-			+ inventory.violations(fileExists: fileExists)
+			+ inventory.violations(
+				fileExists: fileExists, fixtureStatus: { _ in .missing })
 	}
 
 	static func rules(_ lines: [String], exempt: [String] = []) -> Set<Rule> {
@@ -280,7 +281,7 @@ struct DecisionInventoryTests {
 		#expect(
 			DecisionInventory.isSettled(
 				classification: settledCase.classification,
-				verification: settledCase.verification)
+				verification: settledCase.verification, hasFixture: false)
 				== settledCase.settled)
 		var fields = [
 			"classification": settledCase.classification.rawValue,
@@ -420,7 +421,9 @@ struct DecisionInventoryTests {
 		let inventory = try Self.committed()
 		let violations =
 			inventory.parseViolations
-			+ inventory.violations(fileExists: PackageCheckout.fileExists)
+			+ inventory.violations(
+				fileExists: PackageCheckout.fileExists,
+				fixtureStatus: DecisionInventoryFixtureTests.committedStatus)
 		#expect(
 			violations.isEmpty,
 			"\(violations.map(\.description).joined(separator: "\n"))")

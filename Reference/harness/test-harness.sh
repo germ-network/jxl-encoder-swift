@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REFERENCE="$(dirname "$HERE")"
+HARNESS="$REFERENCE/build/harness/jxl-harness"
+SCRATCH="$(mktemp -d)"
+trap 'rm -rf "$SCRATCH"' EXIT
+source "$REFERENCE/libjxl.pin"
+version_reports_pin_and_neon() {
+  "$HARNESS" version > "$SCRATCH/version"
+  grep -Fx "libjxl=$LIBJXL_COMMIT" "$SCRATCH/version"
+  grep -Fx 'hwy=NEON' "$SCRATCH/version"
+}
+pin_check_clean_after_build() {
+  local linked
+  linked="$(sed -n 's/^LIBJXL_DIR:[^=]*=//p' "$REFERENCE/build/harness/CMakeCache.txt")"
+  test -n "$linked"
+  "$REFERENCE/pin-check.sh" "$linked"
+}
+semantic_writer_matches_golden() {
+  "$HARNESS" selftest "$SCRATCH/golden.sem" "$SCRATCH/test.dump"
+  cmp "$HERE/golden.sem" "$SCRATCH/golden.sem"
+}
+stage_dump_roundtrip() {
+  "$HARNESS" selftest "$SCRATCH/golden.sem" "$SCRATCH/test.dump"
+  "$HARNESS" selftest --read "$SCRATCH/test.dump"
+  python3 - "$SCRATCH/test.dump" <<'PYCODE'
+import struct,sys
+from pathlib import Path
+p=Path(sys.argv[1]); data=p.read_bytes()
+assert struct.unpack('<4I',data[:16]) == (0x304d5544,3,2,3)
+assert struct.unpack('<18f',data[16:]) == tuple(float(i)-4 for i in range(18))
+p.write_bytes(data[:-1])
+PYCODE
+  if "$HARNESS" selftest --read "$SCRATCH/test.dump"; then return 1; fi
+}
+stages_reproduce_committed_fixtures() {
+  bash "$REFERENCE/make_stage_fixtures.sh" "$SCRATCH/stages"
+  python3 - "$REFERENCE/.." "$SCRATCH/stages" <<'PYCODE'
+import csv,hashlib,sys
+from pathlib import Path
+root=Path(sys.argv[1]); output=Path(sys.argv[2])
+rows=[line for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#')]
+by_name={Path(r[0]).name:r[2] for r in csv.reader(rows,delimiter='\t') if r[1]=='fixture'}
+for path in output.glob('*.dump'):
+ assert hashlib.sha256(path.read_bytes()).hexdigest()==by_name[path.name], path.name
+assert len(list(output.glob('*.dump')))==6
+PYCODE
+}
+semantic_fixtures_reproduce() {
+  # e4's uniform field cannot distinguish row-major from transposed output.
+  "$HARNESS" selftest --quant-field "$SCRATCH/quant.sem"
+  grep -Fx 'quant_field.raw i 6 1 2 3 11 12 13' "$SCRATCH/quant.sem"
+  bash "$REFERENCE/make_semantic_fixtures.sh" "$SCRATCH/semantic"
+  python3 - "$REFERENCE/.." "$SCRATCH/semantic" <<'PYCODE'
+import hashlib,sys
+from pathlib import Path
+root=Path(sys.argv[1]); output=Path(sys.argv[2])
+rows={r[0]:r for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#') for r in [line.split('\t')]}
+expected={'edge','multigroup','flower_512_d1','flower_512_d3','flower_1024'}
+assert {p.stem for p in output.glob('*.sem')}==expected
+for p in output.glob('*'):
+ if p.suffix not in ('.sem','.ppm'): continue
+ path='Tests/JXLEncoderTests/Fixtures/semantic/'+p.name
+ assert hashlib.sha256(p.read_bytes()).hexdigest()==rows[path][2], path
+for name in expected:
+ fields={line.split()[0]:line.split()[1:] for line in (output/(name+'.sem')).read_text().splitlines()[1:]}
+ required={'frame.size','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame.xyb','frame.qm_scales','frame.loop_filter.gab','frame.loop_filter.epf_iters','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc'}
+ assert set(fields)==required, name
+ size={'edge':(32,32),'multigroup':(301,301),'flower_512_d1':(512,512),'flower_512_d3':(512,512),'flower_1024':(1024,1024)}[name]
+ assert list(map(int,fields['frame.size'][2:]))==list(size)
+ assert int(fields['quant_field.raw'][1])==((size[0]+7)//8)*((size[1]+7)//8)
+ assert fields['frame.encoding']==['i','1','0'] and fields['frame.xyb']==['i','1','1']
+ assert fields['frame.passes']==['i','1','1']
+ assert fields['frame.loop_filter.epf_iters']==['i','1','2' if name=='flower_512_d3' else '1']
+ for channel in range(3): assert sorted(map(int,fields[f'coeff_order.dct8.c{channel}'][2:]))==list(range(64))
+ assert fields['frame.groups']==['i','1',str(((size[0]+255)//256)*((size[1]+255)//256))]
+PYCODE
+}
+dump_rejects_non_codestream() {
+  printf 'not a codestream' > "$SCRATCH/invalid.jxl"
+  if "$HARNESS" dump "$SCRATCH/invalid.jxl"; then return 1; fi
+  "$HARNESS" encode "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/edge_linear.dump" 1 "$SCRATCH/edge.jxl"
+  "$HARNESS" dump "$SCRATCH/edge.jxl" > "$SCRATCH/edge.sem"
+  head -c 4 "$SCRATCH/edge.jxl" > "$SCRATCH/truncated.jxl"
+  if "$HARNESS" dump "$SCRATCH/truncated.jxl"; then return 1; fi
+  if "$HARNESS" dump "$SCRATCH/edge.jxl" nonexistent; then return 1; fi
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce dump_rejects_non_codestream; do
+  "$check"
+  echo "PASS $check"
+done

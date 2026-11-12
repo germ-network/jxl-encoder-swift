@@ -46,6 +46,7 @@ non-empty, and `-` means "none" where a column allows it.
 | 11 | `evidence` | Space-separated locations backing the classification (a line may be a range, `:12-20`): the row's own `<swift_file>:<line>` at the audited commit (omitted only for `(absent)`), and, when `upstream` is pinned, at least one `lib/…:<line>` or `tools/…:<line>` at the pin. `inherited-tiny` rows also name the libjxl-tiny source as `tiny:<file>:<function>` (tiny is unpinned). Never `-`. Output size, bits per pixel or successful decoding are never evidence. |
 | 12 | `replacement` | Comma-separated (no spaces) Linear issue ids that replace or verify this decision, or `-`. Only issues in the checker's `replacementIssues` list are accepted: GER-3386, GER-3387, GER-3388, GER-3389, GER-3392, GER-3418, GER-3419, plus any issue filed for this audit and added to that list. |
 | 13 | `notes` | Free text, or `-`. On `adapted` rows, the equivalence argument (never `-`). |
+| 14 | `fixture` | `-` or a comma list (no spaces) of verifying full-libjxl fixture references: `<path>#<category>` for `.sem`, `<path>` otherwise. |
 
 ## Classification
 
@@ -73,9 +74,10 @@ non-empty, and `-` means "none" where a column allows it.
 5. Provenance: `swift_symbol`, `decision` and `evidence` are never `-`; `evidence` holds the locations column 11 requires; `upstream_function`, when not `-`, is `(lib|tools)/<path>:<Function>`.
 6. `(absent)` rows are `original` with a pinned upstream.
 7. `inherited-tiny` rows name a `tiny:` source in `evidence`; `adapted` rows argue equivalence in `notes`.
-8. `replacement` is `-` only when the row needs no further work: `faithful` or `adapted`, with `diffed`. Every other row (every deviation, and every claim not compared line by line) names at least one accepted issue. A `faithful` or `adapted` row that is `cited` or `assumed` names GER-3392 as its verifier, alongside any area issue. `inherited-tiny` and `original` rows name an area issue (not GER-3392 alone), since they need replacing, not only verifying.
+8. `replacement` is `-` only when the row needs no further work: `faithful` or `adapted`, with `diffed` or at least one verifying fixture. Every other row (every deviation, and every claim not compared line by line) names at least one accepted issue. A `faithful` or `adapted` row that is `cited` or `assumed` without a verifying fixture names GER-3392 as its verifier, alongside any area issue. `inherited-tiny` and `original` rows name an area issue (not GER-3392 alone), since they need replacing, not only verifying.
 9. Every `swift_file` (in either file) is an existing `.swift` file under `Sources/`.
 10. Coverage: every `.swift` file under `Sources/` has at least one row or an exemption, never both; no file is exempted twice. The exemptions are exactly the agreed set (`DecisionInventory.agreedExemptions`); changing it is a reviewed decision. A file both inventoried and exempt is reported with rules 1–9; a file with neither is reported per source group (`SourceGroup`).
+11. `fixtureReference`: every fixture reference is well formed, has full-libjxl provenance, and is compared without a known issue. A semantic reference must belong to `SemanticCase.references`; known semantic and stage divergences verify nothing. Fixtures on `inherited-tiny` or `original` rows still must verify but do not settle those rows.
 
 The checker proves shape, not completeness of rows within a file: that one row per decision exists is established by review against the audited code.
 

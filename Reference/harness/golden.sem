@@ -1,0 +1,4 @@
+jxl-semantic-dump 1
+coeff_order.test i 4 0 1 3 2
+frame.size i 2 3 2
+quant_field.test f 4 -0 1.23456776 -2 0

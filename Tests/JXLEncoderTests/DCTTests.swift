@@ -2,11 +2,11 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Differential tests against libjxl-tiny's `ComputeScaledDCT<8, 8>`, fed the
+/// Differential tests against the pinned full-libjxl DCT8, fed the
 /// XYB stage output so the two stages compose exactly as they do in the encoder.
 @Suite("DCT")
 struct DCTTests {
-	@Test("matches libjxl-tiny bit-for-bit on the edge-case fixture")
+	@Test("matches full-libjxl bit-for-bit on the edge-case fixture")
 	func matchesReference() throws {
 		let xyb = try StageDump(fixture: "edge_xyb")
 		let expected = try StageDump(fixture: "edge_dct")

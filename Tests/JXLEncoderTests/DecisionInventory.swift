@@ -11,6 +11,7 @@ struct DecisionInventory {
 		"id", "swift_file", "swift_symbol", "decision", "path", "upstream",
 		"upstream_function",
 		"config", "classification", "verification", "evidence", "replacement", "notes",
+		"fixture",
 	]
 	static let exemptColumns = ["swift_file", "reason"]
 	static let pinnedUpstream = "libjxl@a7a9c787341cf703dede03c2009fa460cae5e5df"
@@ -53,6 +54,7 @@ struct DecisionInventory {
 		let evidence: String
 		let replacement: String
 		let notes: String
+		let fixture: String
 	}
 
 	struct Exemption {
@@ -101,6 +103,10 @@ struct DecisionInventory {
 		case swiftFile
 		/// File both has rows and is listed as exempt.
 		case coveredAndExempt
+		/// `fixture` is neither `-` nor a comma list of well-formed references
+		/// that each `.verifies`: a `full-libjxl` fixture (and, for a `.sem`,
+		/// category) that a test compares, not under a known issue.
+		case fixtureReference
 	}
 
 	enum InventoryFile: String {
@@ -202,7 +208,7 @@ struct DecisionInventory {
 				decision: f[3],
 				path: f[4], upstream: f[5], upstreamFunction: f[6], config: f[7],
 				classification: f[8], verification: f[9], evidence: f[10],
-				replacement: f[11], notes: f[12])
+				replacement: f[11], notes: f[12], fixture: f[13])
 		}
 		exemptions = exemptLines.map { line, f in
 			Exemption(line: line, swiftFile: f[0], reason: f[1])
@@ -256,18 +262,67 @@ struct DecisionInventory {
 		return result
 	}
 
-	/// Whether a row needs no replacement issue: `faithful` or `adapted`, with
-	/// `diffed` verification.
-	static func isSettled(classification: Classification, verification: Verification) -> Bool {
-		switch (classification, verification) {
-		case (.faithful, .diffed), (.adapted, .diffed): return true
-		default: return false
+	/// One entry of the `fixture` column: a fixture path as written in
+	/// `Reference/provenance.tsv`, and for a semantic dump (`.sem`) the
+	/// category that compares the row's decision, as `<path>#<category>`.
+	struct FixtureReference: Hashable {
+		let path: String
+		let category: String?
+
+		/// Nil unless `text` is `<path>` or `<path>#<category>` with both parts
+		/// non-empty; a `.sem` path requires the category, anything else forbids it.
+		init?(_ text: String) {
+			let parts = text.components(separatedBy: "#")
+			guard (1...2).contains(parts.count), !parts.contains(where: { $0.isEmpty }),
+				!text.contains(where: { $0.isWhitespace }), !text.contains(",")
+			else { return nil }
+			let path = parts[0]
+			guard !path.hasPrefix("/"), !path.split(separator: "/").contains("..")
+			else { return nil }
+			let category = parts.count == 2 ? parts[1] : nil
+			guard path.hasSuffix(".sem") == (category != nil) else { return nil }
+			if let category {
+				guard
+					category.utf8.allSatisfy({
+						(97...122).contains($0) || (48...57).contains($0)
+							|| $0 == 95
+					})
+				else { return nil }
+			}
+			self.path = path
+			self.category = category
 		}
 	}
 
-	/// Every rule violation except coverage, which `uncovered(_:)` reports
-	/// per source group. `fileExists` takes a path from the package root.
-	func violations(fileExists: (String) -> Bool) -> [Violation] {
+	/// What a fixture reference can establish.
+	enum FixtureStatus: Equatable {
+		/// A `full-libjxl` fixture whose comparison runs without a known issue.
+		case verifies
+		/// A `full-libjxl` fixture compared under `withKnownIssue`.
+		case knownIssue
+		/// A `full-libjxl` fixture (or `.sem` category) that no test compares,
+		/// e.g. a category the Swift side doesn't emit.
+		case notCompared
+		/// The path's provenance row has another origin.
+		case notFullLibjxl
+		/// No fixture row for the path.
+		case missing
+	}
+
+	/// Whether a row needs no GER-3392 verifier: `faithful` or `adapted`, and
+	/// either `diffed` or citing at least one fixture that `.verifies`.
+	static func isSettled(
+		classification: Classification, verification: Verification, hasFixture: Bool
+	) -> Bool {
+		(classification == .faithful || classification == .adapted)
+			&& (verification == .diffed || hasFixture)
+	}
+
+	/// Every rule violation except coverage, with each `fixture` reference
+	/// checked through `fixtureStatus`; only `.verifies` is accepted.
+	func violations(
+		fileExists: (String) -> Bool, fixtureStatus: (FixtureReference) -> FixtureStatus
+	) -> [Violation] {
 		var found: [Violation] = []
 		func add(_ rule: Rule, _ row: Row, _ message: String) {
 			found.append(
@@ -350,6 +405,26 @@ struct DecisionInventory {
 					"adapted rows argue equivalence in notes")
 			}
 
+			var hasFixture = false
+			if row.fixture != "-" {
+				for text in row.fixture.components(separatedBy: ",") {
+					guard let reference = FixtureReference(text) else {
+						add(
+							.fixtureReference, row,
+							"malformed fixture reference \(text)")
+						continue
+					}
+					let status = fixtureStatus(reference)
+					if status == .verifies {
+						hasFixture = true
+					} else {
+						add(
+							.fixtureReference, row,
+							"fixture \(text): \(status)")
+					}
+				}
+			}
+
 			let issues = row.replacement.components(separatedBy: ",")
 			let named = row.replacement == "-" ? [] : issues
 			if !named.isEmpty && !named.allSatisfy(Self.replacementIssues.contains) {
@@ -357,7 +432,8 @@ struct DecisionInventory {
 			}
 			if let classification, let verification,
 				let message = Self.replacementShortfall(
-					classification, verification, named: Set(named))
+					classification, verification, hasFixture: hasFixture,
+					named: Set(named))
 			{
 				add(.replacementRequired, row, message)
 			}
@@ -476,10 +552,14 @@ struct DecisionInventory {
 	}
 
 	private static func replacementShortfall(
-		_ classification: Classification, _ verification: Verification, named: Set<String>
+		_ classification: Classification, _ verification: Verification, hasFixture: Bool,
+		named: Set<String>
 	) -> String? {
 		let verifier = "GER-3392"
-		if isSettled(classification: classification, verification: verification) {
+		if isSettled(
+			classification: classification, verification: verification,
+			hasFixture: hasFixture)
+		{
 			return nil
 		}
 		switch classification {

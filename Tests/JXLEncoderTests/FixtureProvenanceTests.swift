@@ -16,13 +16,17 @@ struct FixtureProvenanceTests {
 		]
 		var diskFixtures: [String] = []
 		for dir in fixtureDirs {
-			let contents = try FileManager.default.contentsOfDirectory(
-				at: dir,
-				includingPropertiesForKeys: nil,
-				options: []
-			)
-			for fileURL in contents {
+			let contents = try #require(
+				FileManager.default.enumerator(
+					at: dir, includingPropertiesForKeys: [.isDirectoryKey],
+					options: []))
+			for case let fileURL as URL in contents {
 				if fileURL.lastPathComponent == ".DS_Store" { continue }
+				if try fileURL.resourceValues(forKeys: [.isDirectoryKey])
+					.isDirectory == true
+				{
+					continue
+				}
 				let rel = fileURL.path.replacingOccurrences(
 					of: root.path + "/", with: "")
 				diskFixtures.append(rel)

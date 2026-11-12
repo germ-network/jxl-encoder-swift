@@ -59,7 +59,7 @@ struct StripePipelineTests {
 		return out
 	}
 
-	@Test("padded stripes match libjxl-tiny bit-for-bit through XYB and DCT")
+	@Test("padded stripes match full-libjxl whole-frame XYB and DCT")
 	func matchesReference() throws {
 		let input = try StageDump(fixture: "stripe_linear")
 		let expected = try StageDump(fixture: "stripe_dct")
@@ -67,7 +67,10 @@ struct StripePipelineTests {
 		let dim = ImageDim(width: input.width, height: input.height)
 		let source = input.interleaved
 
-		var actual: [[Float]] = [[], [], []]
+		var actual = Array(
+			repeating: Array(
+				repeating: Float(0),
+				count: dim.widthInBlocks * dim.heightInBlocks * 64), count: 3)
 		for gx in 0..<dim.widthInGroups {
 			for ty in 0..<dim.heightInTiles {
 				let rect = dim.stripeRect(groupX: gx, tileY: ty)
@@ -77,9 +80,23 @@ struct StripePipelineTests {
 					linearRGB: interleaved(padded),
 					pixelCount: padded.width * padded.height)
 				for (c, plane) in [xyb.x, xyb.y, xyb.b].enumerated() {
-					actual[c] += DCT.forwardBlocks(
+					let coefficients = DCT.forwardBlocks(
 						plane: plane, width: padded.width,
 						height: padded.height)
+					for by in 0..<(padded.height / 8) {
+						for bx in 0..<(padded.width / 8) {
+							let local =
+								(by * (padded.width / 8) + bx) * 64
+							let frame =
+								((rect.y0 / 8 + by)
+									* dim.widthInBlocks + rect
+									.x0 / 8 + bx) * 64
+							actual[c].replaceSubrange(
+								frame..<(frame + 64),
+								with: coefficients[
+									local..<(local + 64)])
+						}
+					}
 				}
 			}
 		}

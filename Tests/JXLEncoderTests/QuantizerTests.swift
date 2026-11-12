@@ -13,13 +13,15 @@ struct QuantizerTests {
 
 	@Test("matches libjxl-tiny exactly on the edge-case fixture")
 	func matchesReference() throws {
-		let xyb = try StageDump(fixture: "edge_xyb")
+		let input = try StageDump(fixture: "edge_linear")
+		let xyb = XYB.toXYB(linearRGB: input.interleaved, pixelCount: input.pixelCount)
+		let planes = [xyb.x, xyb.y, xyb.b]
 		let expected = try StageDump(fixture: "edge_quant")
 
 		var mismatches = 0
 		for channel in 0..<3 {
 			let coeffs = DCT.forwardBlocks(
-				plane: xyb.planes[channel], width: xyb.width, height: xyb.height)
+				plane: planes[channel], width: input.width, height: input.height)
 			let actual = Quantizer.quantizePlane(
 				coefficients: coeffs, channel: channel, quant: Self.quant,
 				scale: Self.scale)
