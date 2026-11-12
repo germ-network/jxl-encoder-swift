@@ -54,7 +54,9 @@ struct PixelSemanticFixtureTests {
 	@Test("quant fields match upstream around clamp and decision boundaries")
 	func quantFieldBoundaryDistancesMatchReference() throws {
 		let reference = try SemanticDump(fixture: "distance_params")
-		let boundaries: [Float] = [0.03, 0.05, 0.299, 0.7, 1.25, 1.5, 3, 4, 5, 9, 10]
+		let boundaries: [Float] = [
+			0.03, 0.05, 0.299, 0.5, 0.7, 1.25, 1.5, 2.5, 3, 4, 5, 5.5, 9, 9.5, 10,
+		]
 		var distances: [Float] = []
 		for boundary in boundaries {
 			distances.append(boundary.nextDown)
@@ -87,28 +89,96 @@ struct PixelSemanticFixtureTests {
 				try distances.map {
 					Int64(try DistanceParams(distance: $0).uniformQuant)
 				}))
-		for channel in 0..<3 {
-			var values: [Int64] = []
-			for distance in distances {
-				let params = try DistanceParams(distance: distance)
-				for i in 0..<9 {
-					values.append(
-						Int64(
-							ACGroupEncoder.quantizedDC(
-								coefficient: Float(i - 4) * 0.001,
-								inverseFactor:
-									ACGroupEncoder
-									.inverseDCQuant[channel]
-									* params.scaleDC,
-								yDC: Int16(i - 4),
-								cflFactor: channel == 2 ? 0.5 : 0)))
-				}
-			}
-			emitted.record(
-				"distance_params.quantized_dc.c\(channel)", .integers(values))
-		}
 		#expect(reference.fields["distance_params.neon_target"] == .integers([1]))
 		#expect(emitted.differences(from: reference).isEmpty)
+	}
+
+	@Test("upstream filter and matrix transition boundaries are explicit per category")
+	func filterAndMatrixTransitionsAtDistanceBoundsMatchReference() throws {
+		let reference = try SemanticDump(fixture: "distance_filters")
+		let params = try SemanticDump(fixture: "distance_params")
+		guard
+			case .integers(let inputBits)? = params.fields["distance_params.inputs"],
+			case .integers(let gaborish)? = reference.fields[
+				"distance_filters.gaborish_effort4"],
+			case .integers(let epf)? = reference.fields[
+				"distance_filters.epf_iterations_effort4"],
+			case .integers(let xScale)? = reference.fields[
+				"distance_filters.x_matrix_scale_effort4"],
+			case .integers(let bScale)? = reference.fields[
+				"distance_filters.b_matrix_scale_effort4"]
+		else {
+			Issue.record("missing distance filter observations")
+			return
+		}
+		let distances = inputBits.map { Float(bitPattern: UInt32(truncatingIfNeeded: $0)) }
+		#expect(reference.fields["distance_filters.inputs"] == .integers(inputBits))
+		#expect(gaborish == [Int64](repeating: 0, count: distances.count))
+		for (boundary, expected) in [
+			(Float(0.7), [Int64(0), 1, 1]),
+			(Float(1.5), [Int64(1), 2, 2]),
+			(Float(4), [Int64(2), 3, 3]),
+		] {
+			let index = try #require(distances.firstIndex(of: boundary.nextDown))
+			#expect(Array(epf[index..<(index + 3)]) == expected)
+		}
+		#expect(
+			xScale
+				== distances.map {
+					Int64($0 <= 2.5 ? 3 : $0 <= 5.5 ? 4 : $0 <= 9.5 ? 5 : 6)
+				})
+		#expect(bScale == [Int64](repeating: 2, count: distances.count))
+
+		let swiftGaborish = try distances.map { distance -> Int64 in
+			let params = try DistanceParams(distance: distance)
+			return params.epfIterations == 2 ? 1 : 0
+		}
+		let swiftXScale = try distances.map {
+			Int64(try DistanceParams(distance: $0).xQuantMatrixScale)
+		}
+		let swiftEPF = try distances.map {
+			Int64(try DistanceParams(distance: $0).epfIterations)
+		}
+		let gaborishIssues = Set(19...27)
+		let xScaleIssues = Set(Array(7...16) + Array(23...44))
+		let epfIssues: Set<Int> = [43, 44]
+		for index in distances.indices {
+			let distance = distances[index]
+			if gaborishIssues.contains(index) {
+				withKnownIssue(Comment(rawValue: "GER-3387")) {
+					#expect(
+						swiftGaborish[index] == gaborish[index],
+						"Gaborish at \(distance)")
+				}
+			} else {
+				#expect(
+					swiftGaborish[index] == gaborish[index],
+					"Gaborish at \(distance)")
+			}
+			if xScaleIssues.contains(index) {
+				withKnownIssue(Comment(rawValue: "GER-3387")) {
+					#expect(
+						swiftXScale[index] == xScale[index],
+						"X matrix scale at \(distance)")
+				}
+			} else {
+				#expect(
+					swiftXScale[index] == xScale[index],
+					"X matrix scale at \(distance)")
+			}
+			if epfIssues.contains(index) {
+				withKnownIssue(Comment(rawValue: "GER-3387")) {
+					#expect(
+						swiftEPF[index] == epf[index],
+						"EPF iterations at \(distance)")
+				}
+			} else {
+				#expect(
+					swiftEPF[index] == epf[index],
+					"EPF iterations at \(distance)")
+			}
+			#expect(bScale[index] == 2, "B matrix scale at \(distance)")
+		}
 	}
 
 	@Test("upstream group extents match Swift full-frame geometry")
@@ -133,6 +203,10 @@ struct PixelSemanticFixtureTests {
 			#expect(
 				metadata.fields["pixel_stages.quant_field_mismatches"]
 					== .integers([0]))
+			#expect(metadata.fields["pixel_stages.resampling"] == .integers([1]))
+			#expect(
+				metadata.fields["pixel_stages.streaming_mode"]
+					== .integers([dim.groupCount > 8 ? 1 : 0]))
 			if name == "pixel_lifecycle_2057x521" {
 				#expect(
 					metadata.fields["pixel_stages.dc_group_lifecycle"]
@@ -383,7 +457,7 @@ struct QuantMatrixFixtureTests {
 			let actual = emitted.restricted(to: [category])
 			#expect(!expected.fields.isEmpty, "missing \(category) fixture")
 			if category == "inverse_quant_matrix" {
-				withKnownIssue("inverse AC matrix has known 1 ULP entries") {
+				withKnownIssue(Comment(rawValue: "GER-3387")) {
 					#expect(actual.differences(from: expected).isEmpty)
 				}
 			} else {

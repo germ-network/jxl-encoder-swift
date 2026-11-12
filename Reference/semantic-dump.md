@@ -245,11 +245,15 @@ Other frame configurations are rejected rather than partially dumped.
 | `quant_field` | `global_scale`, `quant_dc` | one scalar each, exact integer `QuantizerParams` values |
 | `quantized_ac` | `c0`, `c1`, `c2` | 64 fixed-DCT primitive outputs per X/Y/B channel from actual pinned NEON `QuantizeBlockAC`; input, thresholds, multiplier, quant and scale are fixed by the generator |
 | `quantized_ac` | `neon_target` | scalar marker, 1 only when the harness is compiled for NEON |
+| `quantized_edge` | `c0`, `c1`, `c2` | Every fixed-parameter `QuantizeBlockAC` result for all 16 edge DCT blocks and X/Y/B channels, generated directly by the pinned NEON primitive |
+| `quantized_edge` | `block_count`, `neon_target` | Raster block count and NEON-target marker for the fixed edge experiment |
 | `quant_bias` | `c0`, `c1`, `c2` | 13 float32 output bit patterns from actual NEON `AdjustQuantBias` inputs, stored as unsigned integer values |
 | `quant_bias` | `neon_target` | scalar marker, 1 only when the harness is compiled for NEON |
-| `distance_params` | `inputs`, `effective_distance`, `global_scale`, `quant_dc`, `quant_field`, `quantized_dc.c0` … `quantized_dc.c2`, `neon_target` | predecessor/exact/successor float32 inputs at the listed transitions; values from actual `InitialQuantDC`, `ComputeGlobalScaleAndQuant`, `SetQuantFieldRect`, `GetInvDcStep`, and fused DC rounding |
+| `distance_params` | `inputs`, `effective_distance`, `global_scale`, `quant_dc`, `quant_field`, `neon_target` | predecessor/exact/successor float32 inputs at the listed transitions; values from actual `InitialQuantDC`, `ComputeGlobalScaleAndQuant`, and `SetQuantFieldRect` |
+| `distance_filters` | `inputs`, `gaborish_effort4`, `epf_iterations_effort4`, `x_matrix_scale_effort4`, `b_matrix_scale_effort4` | Public e4 encode/decode observations at the same float32 boundaries; decoded Gaborish, EPF, and matrix decisions are compared per distance and field |
+| `dc_boundary` | `inputs`, `blocks_per_distance`, `c0`, `c1`, `c2`, `neon_target` | Fixed 32×32 image encoded at each boundary, then source-corresponding ToXYB/padding/resampling, actual `AddVarDCTDC`, public modular stream encode/decode; channel arrays retain upstream coded block counts |
 | `coded_blocks` | `dimensions`, `widths`, `heights`, `width_blocks.h0v0` … `width_blocks.h1v1`, `height_blocks.h0v0` … `height_blocks.h1v1` | explicit small/asymmetric dimensions and independent axis block counts from upstream `FrameDimensions::Set`, varying maximum horizontal and vertical chroma shifts |
-| `pixel_stages` | `dimensions`, `ac_group_block_dims`, `dc_group_lifecycle`, `quant_field_mismatches` | full-frame dimensions; absolute AC group ids and block extents; per-DC-group crop, padding, origin and global-state lifecycle; zero when the recomputed raw quant field matches the decoded frame |
+| `pixel_stages` | `dimensions`, `streaming_mode`, `resampling`, `ac_group_block_dims`, `dc_group_lifecycle`, `quant_field_mismatches` | full-frame dimensions; public Cheetah streaming/resampling state; absolute AC group ids and block extents; per-DC-group crop, padding, origin and global-state lifecycle; zero when the recomputed raw quant field matches the decoded frame |
 
 The corresponding `.ac.bin` and `.dc.bin` fixtures preserve actual upstream
 coefficient-stage observations as absolute-group/channel-major AC and

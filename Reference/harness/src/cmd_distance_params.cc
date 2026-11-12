@@ -1,6 +1,5 @@
 #include <algorithm>
 #include <array>
-#include <cmath>
 #include <cstdio>
 #include <limits>
 #include <vector>
@@ -15,7 +14,7 @@
 namespace harness { namespace {
 jxl::Status WriteDistanceParams(const std::string& output) {
   if (HWY_TARGET != HWY_NEON) return false;
-  constexpr std::array<float, 11> boundaries = {0.03f,0.05f,0.299f,0.7f,1.25f,1.5f,3.0f,4.0f,5.0f,9.0f,10.0f};
+  constexpr std::array<float, 15> boundaries = {0.03f,0.05f,0.299f,0.5f,0.7f,1.25f,1.5f,2.5f,3.0f,4.0f,5.0f,5.5f,9.0f,9.5f,10.0f};
   std::vector<float> inputs;
   for (float boundary : boundaries) {
     inputs.push_back(std::nextafter(boundary, -std::numeric_limits<float>::infinity()));
@@ -27,7 +26,6 @@ jxl::Status WriteDistanceParams(const std::string& output) {
   jxl::DequantMatrices matrices;
   JXL_RETURN_IF_ERROR(matrices.EnsureComputed(&memory_manager, 1));
   std::vector<int64_t> input_bits, global_scales, quant_dcs, quant_fields;
-  std::array<std::vector<int64_t>, 3> dc_values;
   std::vector<float> effective_distances;
   for (float input : inputs) {
     const float distance = std::max(input, 0.03f);
@@ -45,18 +43,6 @@ jxl::Status WriteDistanceParams(const std::string& output) {
     global_scales.push_back(params.global_scale);
     quant_dcs.push_back(params.quant_dc);
     quant_fields.push_back(raw_quant_field.Row(0)[0]);
-    for (size_t channel = 0; channel < 3; ++channel) {
-      const float cfl = channel == 2 ? 0.5f : 0.0f;
-      for (int i = 0; i < 9; ++i) {
-        const float coefficient = static_cast<float>(i - 4) * 0.001f;
-        const int16_t y_dc = static_cast<int16_t>(i - 4);
-        const float correction = static_cast<float>(y_dc) * cfl;
-        const float value = std::fma(coefficient,
-                                     quantizer.GetInvDcStep(channel),
-                                     -correction);
-        dc_values[channel].push_back(static_cast<int64_t>(std::round(value)));
-      }
-    }
   }
   SemanticDumpWriter dump;
   dump.Integers("distance_params.neon_target", {1});
@@ -65,10 +51,6 @@ jxl::Status WriteDistanceParams(const std::string& output) {
   dump.Integers("distance_params.global_scale", global_scales);
   dump.Integers("distance_params.quant_dc", quant_dcs);
   dump.Integers("distance_params.quant_field", quant_fields);
-  for (size_t channel = 0; channel < 3; ++channel) {
-    dump.Integers("distance_params.quantized_dc.c" + std::to_string(channel),
-                  dc_values[channel]);
-  }
   FILE* file = std::fopen(output.c_str(), "w");
   if (!file) return false;
   dump.Write(file);

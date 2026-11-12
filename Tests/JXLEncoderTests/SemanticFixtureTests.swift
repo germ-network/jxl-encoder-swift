@@ -136,6 +136,15 @@ struct SemanticCase: CustomTestStringConvertible, Sendable {
 	}
 }
 
+enum SemanticFixtureComparison {
+	static func differences(
+		actual: SemanticDump, reference: SemanticDump, category: String
+	) -> [SemanticDifference] {
+		actual.restricted(to: [category]).differences(
+			from: reference.restricted(to: [category]))
+	}
+}
+
 /// Stage fixtures (`Fixtures/*.dump`) whose consuming test runs under
 /// `withKnownIssue`, by fixture path, with the issue. Kept next to the
 /// wrappers it describes; an inventory row can't cite these as verification.
@@ -330,6 +339,58 @@ struct SemanticFixtureTests {
 					"\(semanticCase.testDescription): \(differences)")
 			}
 		}
+	}
+
+	@Test("a known alphabet divergence does not hide an entropy frequency mutation")
+	func knownAlphabetIssueDoesNotMaskEntropyMutation() throws {
+		let jpeg = try JPEGParserTests.fixture("ac_entropy_jpeg_2x1")
+		let transcode = try JPEGTranscode(JPEGParser.parse(jpeg))
+		var writer = BitWriter()
+		let acCode = try Encoder.encodeJPEGFrame(
+			transcode, optimizeCodes: true, writer: &writer
+		).ac
+		var actual = SemanticDump()
+		try actual.recordACEntropyCode(acCode)
+		let reference = try SemanticDump(fixture: "ac_entropy_jpeg_2x1")
+		let alphabetDifferences = SemanticFixtureComparison.differences(
+			actual: actual, reference: reference,
+			category: "ac_entropy_alphabet")
+		#expect(!alphabetDifferences.isEmpty)
+		#expect(
+			alphabetDifferences.map(\.field) == [
+				"ac_entropy_alphabet.ans_log_alpha_size"
+			])
+		withKnownIssue(Comment(rawValue: "GER-3388")) {
+			#expect(alphabetDifferences.isEmpty)
+		}
+		let entropyDifferences = SemanticFixtureComparison.differences(
+			actual: actual, reference: reference, category: "ac_entropy")
+		#expect(entropyDifferences.contains { $0.field == "ac_entropy.ans.frequencies" })
+		let frequencyLine = try #require(
+			actual.serialized.split(separator: "\n").first {
+				$0.hasPrefix("ac_entropy.ans.frequencies ")
+			})
+		var parts = frequencyLine.split(separator: " ").map(String.init)
+		let values = parts.dropFirst(3).compactMap { Int64($0) }
+		#expect(values.count >= 2)
+		parts[3] = String(values[0] + 1)
+		parts[4] = String(values[1] - 1)
+		let mutatedLine = parts.joined(separator: " ")
+		let entropyMutation = try SemanticDump(
+			parsing: actual.serialized.replacingOccurrences(
+				of: String(frequencyLine), with: mutatedLine))
+		let mutatedEntropyDifferences = SemanticFixtureComparison.differences(
+			actual: entropyMutation, reference: reference, category: "ac_entropy")
+		#expect(
+			mutatedEntropyDifferences.contains {
+				$0.field == "ac_entropy.ans.frequencies"
+			})
+		let mutationOnlyDifferences = SemanticFixtureComparison.differences(
+			actual: entropyMutation, reference: actual, category: "ac_entropy")
+		#expect(
+			mutationOnlyDifferences.map(\.field) == [
+				"ac_entropy.ans.frequencies"
+			])
 	}
 }
 

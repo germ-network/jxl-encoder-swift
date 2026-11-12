@@ -14,13 +14,20 @@ python3 "$HERE/make_pixel_lifecycle_input.py" "$OUT/pixel_lifecycle_2057x521.ppm
 SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 "$HARNESS" quantized-ac "$SCRATCH/bounded_quantized.sem"
+"$HARNESS" quantized-edge-ac "$ROOT/Tests/JXLEncoderTests/Fixtures/edge_dct.dump" "$SCRATCH/edge_fixed_quantized.sem"
 "$HARNESS" coded-dimensions "$SCRATCH/coded_dimensions.sem"
 "$HARNESS" quant-bias "$SCRATCH/quant_bias.sem"
 "$HARNESS" distance-params "$SCRATCH/distance_params.sem"
+python3 "$HERE/make_distance_filter_fixture.py" "$HARNESS" "$SCRATCH/distance_params.sem" "$SCRATCH/distance_filters.sem"
+python3 "$HERE/make_dc_boundary_fixture.py" "$HARNESS" "$SCRATCH/distance_params.sem" "$SCRATCH"
 cp "$SCRATCH/bounded_quantized.sem" "$OUT/bounded_quantized.sem"
+cp "$SCRATCH/edge_fixed_quantized.sem" "$OUT/edge_fixed_quantized.sem"
 cp "$SCRATCH/coded_dimensions.sem" "$OUT/coded_dimensions.sem"
 cp "$SCRATCH/quant_bias.sem" "$OUT/quant_bias.sem"
 cp "$SCRATCH/distance_params.sem" "$OUT/distance_params.sem"
+cp "$SCRATCH/distance_filters.sem" "$OUT/distance_filters.sem"
+cp "$SCRATCH/dc_boundary.sem" "$OUT/dc_boundary.sem"
+cp "$SCRATCH/dc_boundary.ppm" "$OUT/dc_boundary.ppm"
 for name in flower_1024 pixel_lifecycle_2057x521; do
   "$HARNESS" encode "$OUT/$name.ppm" 1 "$SCRATCH/$name.jxl"
   "$HARNESS" pixel-stages "$OUT/$name.ppm" "$SCRATCH/$name.jxl" \

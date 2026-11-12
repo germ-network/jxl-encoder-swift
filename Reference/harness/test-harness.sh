@@ -140,7 +140,7 @@ from pathlib import Path
 root=Path(sys.argv[1]); output=Path(sys.argv[2])
 manifest={line.split('\t')[0]:line.split('\t') for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#')}
 fixtures=sorted(p for p in output.iterdir() if p.is_file())
-names={'bounded_quantized.sem','coded_dimensions.sem','distance_params.sem','quant_bias.sem'}
+names={'bounded_quantized.sem','edge_fixed_quantized.sem','coded_dimensions.sem','distance_params.sem','distance_filters.sem','dc_boundary.sem','dc_boundary.ppm','quant_bias.sem'}
 for stem in ('flower_1024','pixel_lifecycle_2057x521'):
  names.update({stem+'.ppm',stem+'.ac.bin',stem+'.dc.bin',stem+'.stages.sem'})
 expected={name:manifest['Tests/JXLEncoderTests/Fixtures/semantic/'+name][2] for name in names}

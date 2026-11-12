@@ -1,5 +1,7 @@
 #include <algorithm>
+#include <cmath>
 #include <cstdio>
+#include <cstdlib>
 #include <fstream>
 #include <iterator>
 #include <string>
@@ -40,7 +42,8 @@ jxl::Status WritePixelStages(const std::string& ppm_path,
                              const std::string& codestream_path,
                              const std::string& ac_path,
                              const std::string& dc_path,
-                             const std::string& semantic_path) {
+                             const std::string& semantic_path,
+                             float distance) {
   size_t width, height;
   std::vector<uint8_t> pixels;
   if (!ReadPixels(ppm_path, &width, &height, &pixels)) return false;
@@ -65,9 +68,10 @@ jxl::Status WritePixelStages(const std::string& ppm_path,
 
   jxl::PassesEncoderState state(&memory_manager);
   state.cparams.speed_tier = jxl::SpeedTier::kCheetah;
-  state.cparams.butteraugli_distance = 1.0f;
+  state.cparams.butteraugli_distance = distance;
   JXL_RETURN_IF_ERROR(jxl::ParamsPostInit(&state.cparams));
-  const bool streaming = full.num_dc_groups > 1;
+  if (state.cparams.resampling != 1 && full.num_dc_groups > 1) return false;
+  const bool streaming = state.cparams.resampling == 1 && full.num_groups > 8;
   state.streaming_mode = streaming;
   JXL_ASSIGN_OR_RETURN(auto modular,
                        jxl::ModularFrameEncoder::Create(
@@ -109,18 +113,28 @@ jxl::Status WritePixelStages(const std::string& ppm_path,
         }
       }
     }
-    JXL_RETURN_IF_ERROR(jxl::ToXYB(jxl::ColorEncoding::SRGB(false), 255.0f,
+    JXL_RETURN_IF_ERROR(jxl::ToXYB(jxl::ColorEncoding::SRGB(false),
+                                   decoded.metadata.m.IntensityTarget(),
                                    nullptr, nullptr, &image,
                                    *JxlGetDefaultCms(), nullptr));
     JXL_RETURN_IF_ERROR(jxl::PadImageToBlockMultipleInPlace(&image));
+    // Match the public encoder's pre-heuristic XYB resampling path.
+    if (frame_header.upsampling == 2) {
+      JXL_RETURN_IF_ERROR(jxl::DownsampleImage2_Sharper(&image));
+      JXL_RETURN_IF_ERROR(jxl::PadImageToBlockMultipleInPlace(&image));
+    } else if (frame_header.upsampling != 1) {
+      JXL_ASSIGN_OR_RETURN(image, jxl::DownsampleImage(image, frame_header.upsampling));
+      JXL_RETURN_IF_ERROR(jxl::PadImageToBlockMultipleInPlace(&image));
+    }
     const jxl::Rect group_rect(
         x0 - patch.x0(), y0 - patch.y0(),
         jxl::RoundUpToBlockDim(xsize), jxl::RoundUpToBlockDim(ysize));
+    const jxl::Rect processing_rect = streaming ? group_rect : jxl::Rect(image);
     JXL_RETURN_IF_ERROR(jxl::LossyFrameHeuristics(
-        frame_header, &state, modular.get(), nullptr, &image, group_rect,
+        frame_header, &state, modular.get(), nullptr, &image, processing_rect,
         *JxlGetDefaultCms(), nullptr, nullptr));
     JXL_RETURN_IF_ERROR(jxl::InitializePassesEncoder(
-        frame_header, image, group_rect, *JxlGetDefaultCms(), nullptr,
+        frame_header, image, processing_rect, *JxlGetDefaultCms(), nullptr,
         &state, modular.get(), nullptr));
 
     const auto& local = state.shared.frame_dim;
@@ -133,7 +147,10 @@ jxl::Status WritePixelStages(const std::string& ppm_path,
     const auto params = state.shared.quantizer.GetParams();
     const auto public_params = decoded.state->shared->quantizer.GetParams();
     if (params.global_scale != public_params.global_scale ||
-        params.quant_dc != public_params.quant_dc) return false;
+        params.quant_dc != public_params.quant_dc) {
+      std::fprintf(stderr, "pixel-stages: quantizer mismatch local=%u/%u public=%u/%u\n", params.global_scale, params.quant_dc, public_params.global_scale, public_params.quant_dc);
+      return false;
+    }
 
     for (size_t local_group = 0; local_group < local.num_groups; ++local_group) {
       const size_t absolute_group = modular->ComputeStreamingAbsoluteAcGroupId(
@@ -188,7 +205,10 @@ jxl::Status WritePixelStages(const std::string& ppm_path,
     modular->ClearModularStreamData();
   }
   if (quant_mismatches != 0 ||
-      std::find(ac_seen.begin(), ac_seen.end(), false) != ac_seen.end()) return false;
+      std::find(ac_seen.begin(), ac_seen.end(), false) != ac_seen.end()) {
+    std::fprintf(stderr, "pixel-stages: quant field mismatches=%zu, missing groups=%zu\n", quant_mismatches, static_cast<size_t>(std::count(ac_seen.begin(), ac_seen.end(), false)));
+    return false;
+  }
 
   std::ofstream ac_file(ac_path, std::ios::binary);
   std::ofstream dc_file(dc_path, std::ios::binary);
@@ -203,6 +223,8 @@ jxl::Status WritePixelStages(const std::string& ppm_path,
       static_cast<int64_t>(width), static_cast<int64_t>(height),
       static_cast<int64_t>(full.xsize_blocks), static_cast<int64_t>(full.ysize_blocks),
       static_cast<int64_t>(full.num_groups), static_cast<int64_t>(full.num_dc_groups)});
+  dump.Integers("pixel_stages.streaming_mode", {static_cast<int64_t>(streaming)});
+  dump.Integers("pixel_stages.resampling", {static_cast<int64_t>(state.cparams.resampling)});
   dump.Integers("pixel_stages.ac_group_block_dims", group_dims);
   dump.Integers("pixel_stages.dc_group_lifecycle", dc_group_info);
   dump.Integers("pixel_stages.quant_field_mismatches", {static_cast<int64_t>(quant_mismatches)});
@@ -213,8 +235,14 @@ jxl::Status WritePixelStages(const std::string& ppm_path,
 }
 
 int RunPixelStages(const std::vector<std::string>& args) {
-  if (args.size() != 5) return 2;
-  return WritePixelStages(args[0], args[1], args[2], args[3], args[4]) ? 0 : 1;
+  if (args.size() != 5 && args.size() != 6) return 2;
+  float distance = 1.0f;
+  if (args.size() == 6) {
+    char* end = nullptr;
+    distance = std::strtof(args[5].c_str(), &end);
+    if (end == args[5].c_str() || *end || !std::isfinite(distance) || distance <= 0) return 2;
+  }
+  return WritePixelStages(args[0], args[1], args[2], args[3], args[4], distance) ? 0 : 1;
 }
 
 const RegisterSubcommand kRegister(

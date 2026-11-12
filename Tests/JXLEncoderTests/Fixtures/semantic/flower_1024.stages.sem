@@ -3,3 +3,5 @@ pixel_stages.ac_group_block_dims i 48 0 32 32 1 32 32 2 32 32 3 32 32 4 32 32 5 
 pixel_stages.dc_group_lifecycle i 12 0 1 0 0 1024 1024 1024 1024 0 0 128 128
 pixel_stages.dimensions i 6 1024 1024 128 128 16 1
 pixel_stages.quant_field_mismatches i 1 0
+pixel_stages.resampling i 1 1
+pixel_stages.streaming_mode i 1 1
