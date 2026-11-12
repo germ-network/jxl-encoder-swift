@@ -8,6 +8,10 @@ jpeg_fixtures_reproduce() {
   for name in $names; do
     cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/semantic/$name.sem" "$out/$name.sem"
   done
+  for suffix in 420 422 440; do
+    name="jpeg_flower_513x267_${suffix}_context"
+    cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/semantic/$name.sem" "$out/$name.sem"
+  done
   for name in jpeg_flat_444 jpeg_flower_513x267_440 jpeg_flower_513x267_420; do
     cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/semantic/$name.jpg" "$out/$name.jpg"
   done
@@ -33,6 +37,12 @@ for name,sampling in [('jpeg_flat_444','1x1'),('jpeg_flower_513x267_440','1x2'),
  row=rows[f'Tests/JXLEncoderTests/Fixtures/semantic/{name}.jpg']
  assert row[3]=='libjpeg-turbo' and row[7]==f"libjpeg-turbo {pins['JPEG_TURBO_VERSION']}" and f'sampling={sampling}' in row[8]
  assert hashlib.sha256((root/row[0]).read_bytes()).hexdigest()==row[2]
+for suffix in ('420','422','440'):
+ name=f'jpeg_flower_513x267_{suffix}_context'
+ row=rows[f'Tests/JXLEncoderTests/Fixtures/semantic/{name}.sem']
+ assert row[3]=='full-libjxl' and row[7]==f"libjxl {pins['LIBJXL_COMMIT']}", name
+ assert 'jpeg-witness' in row[5] and 'full-resolution luma DC buckets' in row[8], name
+ assert hashlib.sha256((root/row[0]).read_bytes()).hexdigest()==row[2], name
 assert pins['JPEG_TURBO_VERSION']=='3.2.0'
 PYCODE
 }

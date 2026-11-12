@@ -87,6 +87,12 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 				"Tests/JXLEncoderTests/Fixtures/semantic/\($0.entry.name).sem#\($0.category)"
 			})
 	}
+	static var contextWitnessReferences: Set<String> {
+		Set(
+			["420", "422", "440"].map {
+				"Tests/JXLEncoderTests/Fixtures/semantic/jpeg_flower_513x267_\($0)_context.sem#block_context"
+			})
+	}
 	static var knownIssueReferences: Set<String> {
 		Set(
 			all.filter { !$0.knownIssues.isEmpty }.map {
@@ -252,16 +258,74 @@ struct JPEGSemanticFixtureTests {
 
 	@Test(
 		"parsed JPEG component grids cover every encoded block",
-		.disabled("Pending implementation"))
-	func jpegComponentGridsCoverEncodedBlocks() throws {}
+	)
+	func jpegComponentGridsCoverEncodedBlocks() throws {
+		for entry in JPEGSemanticCorpusEntry.all {
+			let bytes = try JPEGSemanticCorpusEntry.jpegBytes(entry.jpegFixture)
+			let transcode = try JPEGTranscode(JPEGParser.parse(bytes))
+			let dim = ImageDim(
+				width: transcode.width, height: transcode.height,
+				blockAlignment: (
+					x: 1 << transcode.subsampling.maxHorizontalShift,
+					y: 1 << transcode.subsampling.maxVerticalShift
+				))
+			for channel in 0..<3 {
+				#expect(
+					transcode.blocksPerLine(channel: channel)
+						== transcode.subsampling.blocksAcross(
+							channel: channel,
+							fullWidthInBlocks: dim.widthInBlocks))
+				#expect(
+					transcode.blocksPerColumn(channel: channel)
+						== transcode.subsampling.blocksDown(
+							channel: channel,
+							fullHeightInBlocks: dim.heightInBlocks))
+			}
+		}
+	}
 
 	@Test(
 		"JPEG tokens use full-resolution luma DC buckets at sampled chroma positions",
-		.disabled("Pending implementation"))
-	func jpegContextsUseFullResolutionLumaDCBuckets() throws {}
+	)
+	func jpegContextsUseFullResolutionLumaDCBuckets() throws {
+		for suffix in ["420", "422", "440"] {
+			let name = "jpeg_flower_513x267_\(suffix)"
+			let entry = try #require(
+				JPEGSemanticCorpusEntry.all.first { $0.name == name })
+			let transcode = try JPEGTranscode(
+				JPEGParser.parse(
+					JPEGSemanticCorpusEntry.jpegBytes(entry.jpegFixture)))
+			let reference = try SemanticDump(fixture: name)
+			let expected = try SemanticDump(fixture: "\(name)_context")
+			let actual = try SwiftJPEGSemanticEncoding.contextWitness(
+				transcode, reference: reference)
+			#expect(actual == expected, "\(name) context witness differs")
+			#expect(expected.fields["jpeg_context.group_count"] == .integers([6]))
+			#expect(expected.fields["jpeg_context.bucket_count"] == .integers([3]))
+			let distinguishing = suffix == "420" ? 608 : suffix == "422" ? 636 : 644
+			let equalities = suffix == "440" ? 3 : 9
+			#expect(
+				expected.fields["jpeg_context.distinguishing_chroma_positions"]
+					== .integers([Int64(distinguishing)]))
+			#expect(
+				expected.fields["jpeg_context.threshold_equalities"]
+					== .integers([Int64(equalities)]))
+		}
+	}
 
 	@Test(
 		"DC buckets advance only when the DC value is strictly greater than a threshold",
-		.disabled("Pending implementation"))
-	func jpegDCBucketBoundaryUsesStrictGreaterThan() throws {}
+	)
+	func jpegDCBucketBoundaryUsesStrictGreaterThan() throws {
+		let thresholds = [-3, 0, 7]
+		let values: [Int32] = [-4, -3, -2, -1, 0, 1, 6, 7, 8]
+		let dump = try SwiftJPEGSemanticEncoding.dcBoundaryWitness(
+			thresholds: thresholds, dc: values)
+		#expect(
+			dump.fields["jpeg_context.boundary"]
+				== .integers([
+					-4, 0, -3, 0, -2, 1, -1, 1, 0, 1, 1, 2,
+					6, 2, 7, 2, 8, 3,
+				]))
+	}
 }

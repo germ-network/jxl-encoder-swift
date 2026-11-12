@@ -42,6 +42,8 @@ struct DecisionInventoryFixtureTests {
 		if let category = reference.category {
 			let key = reference.path + "#" + category
 			let references = SemanticCase.references.union(JPEGSemanticCase.references)
+				.union(
+					JPEGSemanticCase.contextWitnessReferences)
 			guard references.contains(key) else { return .notCompared }
 			let knownIssues = SemanticCase.knownIssueReferences.union(
 				JPEGSemanticCase.knownIssueReferences)

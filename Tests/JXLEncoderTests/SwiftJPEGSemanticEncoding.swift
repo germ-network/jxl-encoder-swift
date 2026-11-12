@@ -187,23 +187,176 @@ enum SwiftJPEGSemanticEncoding {
 	static func contextWitness(
 		_ transcode: JPEGTranscode, reference: SemanticDump
 	) throws -> SemanticDump {
-		throw JPEGSemanticCaptureError.unsupportedWitnessConfiguration
+		func integers(_ name: String) throws -> [Int] {
+			guard case .integers(let values)? = reference.fields[name] else {
+				throw JPEGSemanticCaptureError.invalidReference(name)
+			}
+			return values.map(Int.init)
+		}
+		let thresholds = try integers("block_context.dc_thresholds.c1")
+		let contextMap = try integers("block_context.ctx_map")
+		let contextCountValues = try integers("block_context.num_ctxs")
+		guard contextCountValues.count == 1,
+			let contextCount = contextCountValues.first, contextCount > 0,
+			contextMap.count == 3 * JPEGBlockContextMap.numOrders
+				* (thresholds.count + 1),
+			contextMap.allSatisfy({ (0...Int(UInt8.max)).contains($0) })
+		else {
+			throw JPEGSemanticCaptureError.invalidReference("block_context")
+		}
+		guard transcode.image.components.count == 3,
+			!transcode.subsampling.is444,
+			thresholds.count >= 1,
+			transcode.blocksPerLine(channel: 1) >= 1,
+			transcode.blocksPerColumn(channel: 1) >= 1
+		else {
+			throw JPEGSemanticCaptureError.unsupportedWitnessConfiguration
+		}
+		let orders = try (0..<3).map { channel in
+			try integers("coeff_order.dct8.c\(channel)")
+		}
+		guard orders.allSatisfy({ $0.count == 64 && Set($0) == Set(0..<64) }) else {
+			throw JPEGSemanticCaptureError.invalidReference("coeff_order.dct8")
+		}
+		let map = JPEGBlockContextMap.Result(
+			thresholds: thresholds, contextMap: contextMap.map(UInt8.init),
+			numContexts: contextCount)
+		let dim = ImageDim(
+			width: transcode.width, height: transcode.height,
+			blockAlignment: (
+				x: 1 << transcode.subsampling.maxHorizontalShift,
+				y: 1 << transcode.subsampling.maxVerticalShift
+			))
+		let order = orders
+		let baseCode = EntropyCode(
+			contextMap: [UInt8](
+				repeating: 0,
+				count: contextCount
+					* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+			prefixCodes: [])
+		var dump = SemanticDump()
+		let bucketCount = thresholds.count + 1
+		var buckets = [Int64]()
+		buckets.reserveCapacity(dim.widthInBlocks * dim.heightInBlocks)
+		for y in 0..<dim.heightInBlocks {
+			for x in 0..<dim.widthInBlocks {
+				guard x < transcode.blocksPerLine(channel: 1),
+					y < transcode.blocksPerColumn(channel: 1)
+				else { throw JPEGSemanticCaptureError.invalidGeometry }
+				buckets.append(
+					Int64(map.bucket(dc: transcode.dc(channel: 1, x: x, y: y))))
+			}
+		}
+		dump.record(
+			"jpeg_context.size",
+			.integers([
+				Int64(dim.widthInBlocks), Int64(dim.heightInBlocks),
+			]))
+		dump.record("jpeg_context.group_count", .integers([Int64(dim.groupCount)]))
+		dump.record("jpeg_context.buckets", .integers(buckets))
+		dump.record("jpeg_context.bucket_count", .integers([Int64(bucketCount)]))
+		var distinguishing = 0
+		var equalities = 0
+		for y in 0..<dim.heightInBlocks {
+			for x in 0..<dim.widthInBlocks {
+				let luma = transcode.dc(channel: 1, x: x, y: y)
+				if thresholds.contains(where: { Int32($0) == luma }) {
+					equalities += 1
+				}
+				for channel in [0, 2]
+				where transcode.subsampling.codesBlock(
+					channel: channel, blockX: x, blockY: y)
+				{
+					let wrongX = transcode.subsampling.subsampledX(
+						channel: channel, blockX: x)
+					let wrongY = transcode.subsampling.subsampledY(
+						channel: channel, blockY: y)
+					let wrongDC = transcode.dc(channel: 1, x: wrongX, y: wrongY)
+					let correctContext = map.category(
+						channel: channel, dcBucket: map.bucket(dc: luma))
+					let wrongContext = map.category(
+						channel: channel, dcBucket: map.bucket(dc: wrongDC))
+					distinguishing += correctContext != wrongContext ? 1 : 0
+				}
+			}
+		}
+		dump.record(
+			"jpeg_context.distinguishing_chroma_positions",
+			.integers([Int64(distinguishing)]))
+		dump.record("jpeg_context.threshold_equalities", .integers([Int64(equalities)]))
+		for gy in 0..<dim.heightInGroups {
+			for gx in 0..<dim.widthInGroups {
+				let group = gy * dim.widthInGroups + gx
+				let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
+				let groupDim = ImageDim(
+					width: rect.width, height: rect.height,
+					blockAlignment: (
+						x: 1 << transcode.subsampling.maxHorizontalShift,
+						y: 1 << transcode.subsampling.maxVerticalShift
+					))
+				var quantDC = (0..<3).map { channel in
+					[Int16](
+						repeating: 0,
+						count: transcode.subsampling.blocksAcross(
+							channel: channel,
+							fullWidthInBlocks: groupDim.widthInBlocks)
+							* transcode.subsampling.blocksDown(
+								channel: channel,
+								fullHeightInBlocks: groupDim
+									.heightInBlocks))
+				}
+				var section = SectionWriter(mode: .staging(baseCode))
+				ACGroupEncoder.encodeJPEG(
+					transcode: transcode,
+					blockX0: gx * Geometry.groupDimInBlocks,
+					blockY0: gy * Geometry.groupDimInBlocks,
+					widthInBlocks: groupDim.widthInBlocks,
+					heightInBlocks: groupDim.heightInBlocks,
+					quantDC: &quantDC, blockContextMap: map,
+					order: order, writer: &section)
+				var tokens = [Int64]()
+				for record in section.staged {
+					guard case .token(let context, let value) = record else {
+						throw JPEGSemanticCaptureError.nonTokenACRecord(
+							group: group)
+					}
+					tokens.append(Int64(context))
+					tokens.append(Int64(value))
+				}
+				let prefix = "jpeg_context.g\(group)"
+				dump.record(
+					"\(prefix).geometry",
+					.integers([
+						Int64(group), 0,
+						Int64(gx * Geometry.groupDimInBlocks),
+						Int64(gy * Geometry.groupDimInBlocks),
+						Int64(groupDim.widthInBlocks),
+						Int64(groupDim.heightInBlocks),
+					]))
+				dump.record(
+					"\(prefix).token_count",
+					.integers([Int64(tokens.count / 2)]))
+				dump.record("\(prefix).tokens", .integers(tokens))
+			}
+		}
+		return dump
 	}
 
 	static func dcBoundaryWitness(
 		thresholds: [Int], dc: [Int32]
 	) throws -> SemanticDump {
+		let map = JPEGBlockContextMap.Result(
+			thresholds: thresholds,
+			contextMap: [UInt8](
+				repeating: 0,
+				count: 3 * JPEGBlockContextMap.numOrders * (thresholds.count + 1)),
+			numContexts: 1)
 		var dump = SemanticDump()
 		dump.record(
 			"jpeg_context.boundary",
 			.integers(
-				zip(
-					dc,
-					dc.map { value in
-						thresholds.filter { value > Int32($0) }.count
-					}
-				)
-				.flatMap { [Int64($0.0), Int64($0.1)] }))
+				zip(dc, dc.map { Int32(map.bucket(dc: $0)) })
+					.flatMap { [Int64($0.0), Int64($0.1)] }))
 		return dump
 	}
 }

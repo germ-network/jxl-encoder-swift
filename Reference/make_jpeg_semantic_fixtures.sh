@@ -53,5 +53,14 @@ for i in "${!names[@]}"; do
   cmp "$WORK/$name-cjxl.sem" "$WORK/$name-api.sem"
   cp "$WORK/$name-api.sem" "$OUT/$name.sem"
 done
+for suffix in 420 422 440; do
+  name="jpeg_flower_513x267_${suffix}"
+  case "$suffix" in
+    420|440) input="$OUT/$name.jpg" ;;
+    422) input="$ROOT/Tests/JXLEncoderTests/Fixtures/ac_entropy_jpeg_2x1.jpg" ;;
+  esac
+  "$HARNESS" encode-jpeg "$input" "$WORK/$name-api.jxl"
+  "$HARNESS" jpeg-witness "$input" "$WORK/$name-api.jxl" > "$OUT/${name}_context.sem"
+done
 "$HARNESS" version
 "$HERE/pin-check.sh" "$LINKED"
