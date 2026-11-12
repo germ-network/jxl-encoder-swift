@@ -70,8 +70,12 @@ enum SwiftEntropySemanticEncoding {
 		return dump
 	}
 
-	static func contextMap(entries: [UInt8], allowANS: Bool) throws -> SemanticDump {
-		guard entries.allSatisfy({ $0 < 255 }) else {
+	static func contextMap(
+		entries: [UInt8], numHistograms: Int, allowANS: Bool
+	) throws -> SemanticDump {
+		guard numHistograms > 0,
+			entries.allSatisfy({ Int($0) < numHistograms })
+		else {
 			throw SemanticDumpError.unimplemented
 		}
 		var writer = BitWriter()
@@ -79,7 +83,16 @@ enum SwiftEntropySemanticEncoding {
 			entries, allowANS: allowANS, writer: &writer)
 		var dump = SemanticDump()
 		dump.record("entropy.context_map.entries", .integers(entries.map(Int64.init)))
-		dump.record("entropy.context_map.allow_ans", .integers([allowANS ? 1 : 0]))
+		dump.record("entropy.context_map.num_histograms", .integers([Int64(numHistograms)]))
+		let simple = entries.max() == 0
+		let usePrefix =
+			simple
+			? -1
+			: (allowANS && entries.count >= SectionOptimizer.ansMinimumTokens ? 0 : 1)
+		dump.record("entropy.context_map.simple", .integers([simple ? 1 : 0]))
+		dump.record("entropy.context_map.entry_bits", .integers([simple ? 0 : -1]))
+		dump.record("entropy.context_map.use_mtf", .integers([0]))
+		dump.record("entropy.context_map.use_prefix_code", .integers([Int64(usePrefix)]))
 		dump.record("entropy.context_map.bit_count", .integers([Int64(writer.bitsWritten)]))
 		dump.record("entropy.context_map.bytes", .integers(writer.bytes.map(Int64.init)))
 		return dump

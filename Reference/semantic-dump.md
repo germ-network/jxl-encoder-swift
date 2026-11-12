@@ -227,3 +227,23 @@ libjxl's public decoder primitives, or the lane records it as out of reach:
 - quantized AC coefficients in a single-pass decode;
 - quantized DC integers, and the modular DC tree, its histograms and context
   map (private to `ModularFrameDecoder`).
+
+## Isolated entropy decision fixtures
+
+The `entropy.context_map` fixture fields are produced by pinned full libjxl's
+`EncodeContextMap` API for explicit map entries and histogram count. `simple`
+records the simple-code choice, `entry_bits` is its fixed width or -1 when the
+simple code was not selected, `use_mtf` records the upstream move-to-front
+choice, and `use_prefix_code` records the subsequent entropy-code choice or -1
+for a simple map. `bit_count` and `bytes` preserve the exact resulting stream.
+The fixture input also records whether the Swift writer permits ANS; upstream
+always applies its own `HistogramParams()` policy. Context-map entry count and
+histogram count are distinct inputs. The 99/100 token cases pin the upstream
+prefix/ANS threshold after its RLE preprocessing.
+Candidate fixtures additionally record `mtf_entries`, raw/MTF histogram costs
+returned by `BuildAndEncodeHistograms`, and `simple_cost` (or -1 when the
+simple form is unavailable). `context_simple_profitability` verifies that the
+simple cost is strictly below both entropy candidates. `context_tie_raw_mtf`
+uses sixteen possible histograms, which makes the simple form unavailable; its
+identical raw/MTF candidate arrays have equal costs, so the strict MTF
+comparison keeps the raw map.

@@ -93,6 +93,33 @@ struct EntropyReferenceTests {
 	}
 
 	@Test
+	func contextMapSimpleChoiceIsStrictlyCheaper() throws {
+		let fixture = try EntropyReferenceFixture.load("context_simple_profitability")
+		guard
+			case .integers(let simpleCost)? = fixture.expected.fields[
+				"entropy.context_map.simple_cost"],
+			case .integers(let rawCost)? = fixture.expected.fields[
+				"entropy.context_map.raw_cost"],
+			case .integers(let mtfCost)? = fixture.expected.fields[
+				"entropy.context_map.mtf_cost"]
+		else { throw SemanticDumpError.unimplemented }
+		#expect(fixture.expected.fields["entropy.context_map.simple"] == .integers([1]))
+		#expect(simpleCost[0] < rawCost[0])
+		#expect(simpleCost[0] < mtfCost[0])
+	}
+
+	@Test
+	func contextMapRawWinsExactCostTie() throws {
+		let fixture = try EntropyReferenceFixture.load("context_tie_raw_mtf")
+		#expect(
+			fixture.expected.fields["entropy.context_map.raw_cost"]
+				== fixture.expected.fields["entropy.context_map.mtf_cost"])
+		#expect(
+			fixture.expected.fields["entropy.context_map.use_mtf"]
+				== .integers([0]))
+	}
+
+	@Test
 	func malformedFixturesAreRejectedBeforeEncodingHelpers() throws {
 		let histogram = try EntropyReferenceFixture.load("ans_singleton_precise")
 		let badCounts = try SemanticDump(
@@ -178,6 +205,26 @@ struct EntropyReferenceTests {
 			try EntropyReferenceFixture.validate(
 				name: "clusters_farthest_fast", input: clusterOverflow.input,
 				expected: overflowingTotals)
+		}
+		let context = try EntropyReferenceFixture.load("context_ans_100")
+		let outOfRangeMap = try SemanticDump(
+			parsing: context.input.serialized.replacingOccurrences(
+				of: "input.context_map.entries i 100 3 7",
+				with: "input.context_map.entries i 100 16 7"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_ans_100", input: outOfRangeMap,
+				expected: context.expected)
+		}
+		let contextTie = try EntropyReferenceFixture.load("context_tie_raw_mtf")
+		let badCost = try SemanticDump(
+			parsing: contextTie.expected.serialized.replacingOccurrences(
+				of: "entropy.context_map.mtf_cost i 1 23",
+				with: "entropy.context_map.mtf_cost i 1 22"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_tie_raw_mtf", input: contextTie.input,
+				expected: badCost)
 		}
 	}
 
@@ -318,10 +365,75 @@ struct EntropyReferenceTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func contextMapChoiceMatchesReference() throws {
-		Issue.record(
-			"Context map coding choices match the reference for identical map inputs.")
+		for (name, knownDifferences) in [
+			("context_single_histogram", Set<String>()),
+			(
+				"context_simple_two_histograms",
+				Set([
+					"entropy.context_map.simple",
+					"entropy.context_map.entry_bits",
+					"entropy.context_map.use_prefix_code",
+					"entropy.context_map.bit_count",
+					"entropy.context_map.bytes",
+				])
+			),
+			(
+				"context_mtf_ans",
+				Set([
+					"entropy.context_map.use_mtf",
+					"entropy.context_map.bit_count",
+					"entropy.context_map.bytes",
+				])
+			),
+			(
+				"context_raw_ans",
+				Set([
+					"entropy.context_map.bit_count",
+					"entropy.context_map.bytes",
+				])
+			),
+			(
+				"context_prefix_99",
+				Set(["entropy.context_map.bit_count", "entropy.context_map.bytes"])
+			),
+			(
+				"context_ans_100",
+				Set(["entropy.context_map.bit_count", "entropy.context_map.bytes"])
+			),
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let entries)? = fixture.input.fields[
+					"input.context_map.entries"],
+				case .integers(let numHistograms)? = fixture.input.fields[
+					"input.context_map.num_histograms"],
+				case .integers(let allowANS)? = fixture.input.fields[
+					"input.context_map.allow_ans"]
+			else { throw SemanticDumpError.unimplemented }
+			let actual = try SwiftEntropySemanticEncoding.contextMap(
+				entries: entries.map(UInt8.init),
+				numHistograms: Int(numHistograms[0]),
+				allowANS: allowANS[0] != 0)
+			let differences = actual.differences(from: fixture.expected)
+			let differenceFields = Set(differences.map(\.field))
+			#expect(differenceFields == knownDifferences, "\(name): \(differences)")
+			#expect(
+				actual.differences(
+					from: fixture.expected, excludingFields: knownDifferences
+				)
+				.isEmpty,
+				"\(name) has unexpected context-map differences")
+			for field in knownDifferences {
+				let fieldDifferences = differences.filter { $0.field == field }
+				withKnownIssue(Comment(rawValue: "GER-3386: \(field)")) {
+					#expect(
+						fieldDifferences.isEmpty,
+						"\(name): \(fieldDifferences)")
+				}
+			}
+		}
 	}
 
 	@Test(.disabled("Awaiting entropy reference implementation"))
