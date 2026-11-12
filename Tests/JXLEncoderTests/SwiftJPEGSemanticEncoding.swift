@@ -387,6 +387,7 @@ extension SemanticDump {
 				x: 1 << t.subsampling.maxHorizontalShift,
 				y: 1 << t.subsampling.maxVerticalShift
 			))
+		try recordACEntropyCode(d.acCode)
 		let map =
 			d.acCode.originalContextMap?.map {
 				d.acCode.contextMap[Int($0)]
@@ -402,7 +403,6 @@ extension SemanticDump {
 			throw JPEGSemanticCaptureError.invalidReference(
 				"JPEG AC context map shape or label range")
 		}
-		try recordACEntropyCode(d.acCode)
 		record("frame.size", .integers([Int64(t.width), Int64(t.height)]))
 		record("frame.encoding", .integers([0]))
 		record("frame.groups", .integers([Int64(dim.groupCount)]))

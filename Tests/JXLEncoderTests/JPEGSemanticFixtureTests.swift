@@ -396,6 +396,60 @@ struct JPEGSemanticFixtureTests {
 
 	}
 
+	@Test("the JPEG adapter preserves shared AC validation errors")
+	func jpegAdapterPreservesACValidationErrors() throws {
+		let entry = try #require(
+			JPEGSemanticCorpusEntry.all.first { $0.name == "jpeg_small_444" })
+		let baseline = try entry.encoded().decisions
+		func capture(_ acCode: EntropyCode) throws -> SemanticDump {
+			try SemanticDump(
+				swiftJPEGDecisions: SwiftJPEGFrameDecisions(
+					transcode: baseline.transcode,
+					coeffOrder: baseline.coeffOrder,
+					blockContextMap: baseline.blockContextMap,
+					dcCode: baseline.dcCode, acCode: acCode,
+					acGroups: baseline.acGroups))
+		}
+		let invalidOriginalMap = EntropyCode(
+			contextMap: [0],
+			prefixCodes: baseline.acCode.prefixCodes,
+			originalContextMap: [1],
+			ansInfoTables: baseline.acCode.ansInfoTables)
+		#expect(throws: ACEntropyCaptureError.invalidContextMap) {
+			try capture(invalidOriginalMap)
+		}
+		let invalidSelectedTable = EntropyCode(
+			contextMap: [UInt8](
+				repeating: .max,
+				count: baseline.blockContextMap.numContexts
+					* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+			prefixCodes: baseline.acCode.prefixCodes,
+			ansInfoTables: baseline.acCode.ansInfoTables)
+		#expect(throws: ACEntropyCaptureError.invalidContextMap) {
+			try capture(invalidSelectedTable)
+		}
+		#expect(throws: ACEntropyCaptureError.invalidTableCount) {
+			try capture(EntropyCode(contextMap: [], prefixCodes: []))
+		}
+
+		let malformedShape = EntropyCode(
+			contextMap: Array(baseline.acCode.contextMap.dropLast()),
+			prefixCodes: baseline.acCode.prefixCodes,
+			ansInfoTables: baseline.acCode.ansInfoTables)
+		do {
+			_ = try capture(malformedShape)
+			Issue.record("expected the JPEG adapter to reject malformed map shape")
+		} catch let error as JPEGSemanticCaptureError {
+			if case .invalidReference(let reason) = error {
+				#expect(reason == "JPEG AC context map shape or label range")
+			} else {
+				Issue.record("unexpected JPEG capture error: \(error)")
+			}
+		} catch {
+			Issue.record("unexpected capture error: \(error)")
+		}
+	}
+
 	@Test(
 		"the JPEG corpus covers sampling, odd bounds and partial multigroup edges",
 	)
