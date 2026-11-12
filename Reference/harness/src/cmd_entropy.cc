@@ -1,5 +1,6 @@
 #include "registry.h"
 
+#include <algorithm>
 #include <charconv>
 #include <sstream>
 #include <string_view>
@@ -32,7 +33,7 @@ bool ParseCounts(const std::string& text, std::vector<int>* counts) {
 }
 
 int RunHistogram(const std::vector<std::string>& args) {
-	if (args.size() < 3) return 2;
+	if (args.size() < 2) return 2;
   int log_alpha_size = 0;
 	if (!ParseInt(args[0], &log_alpha_size) || log_alpha_size <= 0 ||
       log_alpha_size >= ANS_LOG_TAB_SIZE) return 2;
@@ -62,7 +63,7 @@ int RunHistogram(const std::vector<std::string>& args) {
   codes.log_alpha_size = log_alpha_size;
   const size_t alphabet_size = histogram.alphabet_size();
   codes.encoding_info.resize(1);
-  codes.encoding_info[0].resize(alphabet_size);
+  codes.encoding_info[0].resize(std::max<size_t>(1, alphabet_size));
   jxl::BitWriter writer(&manager);
   size_t cost = 0;
   const jxl::Status status = writer.WithMaxBits(
@@ -107,7 +108,9 @@ int RunHistogram(const std::vector<std::string>& args) {
     frequencies.push_back(info.freq_);
     for (uint16_t value : info.reverse_map_) reverse_map.push_back(value);
   }
-  for (const auto& value : codes.encoding_info[0]) normalized.push_back(value.freq_);
+  for (size_t i = 0; i < alphabet_size; ++i) {
+    normalized.push_back(codes.encoding_info[0][i].freq_);
+  }
   std::vector<int64_t> serialized(bytes.begin(), bytes.end());
   SemanticDumpWriter dump;
   dump.Integers("entropy.histogram.normalized", normalized);
@@ -150,10 +153,14 @@ int RunClusters(const std::vector<std::string>& args) {
   std::vector<int64_t> cluster_lengths;
   std::vector<int64_t> totals;
   std::vector<int64_t> values;
+  int64_t input_total = 0;
+  int64_t output_total = 0;
+  for (const auto& histogram : input) input_total += histogram.total_count;
   for (const auto& cluster : clusters) {
     const size_t length = cluster.alphabet_size();
     cluster_lengths.push_back(length);
     totals.push_back(cluster.total_count);
+    output_total += cluster.total_count;
     for (size_t i = 0; i < length; ++i) values.push_back(cluster.counts[i]);
   }
   std::vector<int64_t> map(symbols.begin(), symbols.end());
@@ -163,6 +170,8 @@ int RunClusters(const std::vector<std::string>& args) {
   dump.Integers("entropy.clusters.alphabet_lengths", cluster_lengths);
   dump.Integers("entropy.clusters.total_counts", totals);
   dump.Integers("entropy.clusters.histogram_counts", values);
+  dump.Integers("entropy.clusters.input_total_count", {input_total});
+  dump.Integers("entropy.clusters.output_total_count", {output_total});
   dump.Write(stdout);
   return 0;
 }

@@ -19,7 +19,7 @@ generate() {
 	{
 		printf 'jxl-semantic-dump 1\n'
 		printf 'input.histogram.counts i %s' "$#"
-		printf ' %s' "$@"
+		if (($# > 0)); then printf ' %s' "$@"; fi
 		printf '\ninput.histogram.log_alpha_size i 1 %s\n' "$log_alpha"
 		case "$strategy" in
 			fast) printf 'input.histogram.strategy i 1 0\n' ;;
@@ -72,13 +72,29 @@ generate_cluster() {
 rm -f "$out"/ans_sparse_precise.* "$out"/ans_skewed_approximate.* \
 	"$out"/ans_boundary_fast.*
 generate ans_singleton_precise 7 precise 0 0 0 10
+generate ans_empty 7 fast
+generate ans_all_zero 7 fast 0 0 0
 generate ans_two_symbol_approximate 7 approximate 1 3
 generate ans_precision_fast 7 fast 1800 1500 700 96
+generate ans_sparse_precise 7 precise 0 3 0 0 15 0 1
+generate ans_skewed_approximate 7 approximate 10000 1 4 16 256 1024
+threshold48=()
+threshold64=()
+for ((index = 0; index < 48; index++)); do threshold48+=(1); done
+for ((index = 0; index < 64; index++)); do threshold64+=(1); done
+generate ans_threshold48_fast 7 fast "${threshold48[@]}"
+generate ans_threshold64_fast 7 fast "${threshold64[@]}"
 generate_cluster clusters_fast_identical fast 4 16,0 16,0
 generate_cluster clusters_best_identical best 4 16,0 16,0
 generate_cluster clusters_fast_merge fast 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
 generate_cluster clusters_best_merge best 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
+generate_cluster clusters_ties_fast fast 3 \
+	10,0,10,0 0,10,0,10 10,0,10,0 0,10,0,10
+generate_cluster clusters_farthest_fast fast 3 \
+	100,0,0,0 0,0,0,100 50,0,0,50 0,100,0,0 0,0,100,0
+generate_cluster clusters_over_eight_fast fast 4 \
+	8,0 0,8 8,0 0,8 8,0 0,8 8,0 0,8 8,0
 
 { head -n 2 "$tmp"; tail -n +3 "$tmp" | sort -t $'\t' -k1,1; } > "$root/Reference/provenance.tsv"
