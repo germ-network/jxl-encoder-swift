@@ -23,5 +23,8 @@ for name in edge multigroup flower_512_d1 flower_512_d3 flower_1024; do
   "$HARNESS" encode "$input" "$distance" "$SCRATCH/$name.jxl"
   "$HARNESS" dump "$SCRATCH/$name.jxl" > "$OUT/$name.sem"
 done
+"$HARNESS" encode "$HERE/../Tests/JXLEncoderTests/Fixtures/semantic/ac_entropy_flat.ppm" 1 "$SCRATCH/ac_entropy_flat_singleton.jxl"
+"$HARNESS" dump "$SCRATCH/ac_entropy_flat_singleton.jxl" ac_entropy ac_entropy ac_entropy_alphabet > "$OUT/ac_entropy_flat_singleton.sem"
+"$HARNESS" dump "$HERE/../Tests/JXLEncoderTests/Fixtures/edge_whole.jxl" ac_entropy ac_entropy ac_entropy_alphabet > "$OUT/ac_entropy_static_prefix.sem"
 "$HARNESS" version
 "$HERE/pin-check.sh" "$LINKED"

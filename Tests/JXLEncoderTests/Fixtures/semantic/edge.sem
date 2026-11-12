@@ -1,4 +1,11 @@
 jxl-semantic-dump 1
+ac_entropy.ans.alphabet_lengths i 1 31
+ac_entropy.ans.frequencies i 31 2178 256 512 128 128 64 128 64 64 64 32 32 32 32 32 16 64 64 32 32 32 16 16 32 16 8 8 2 2 8 2
+ac_entropy.kind i 1 1
+ac_entropy.lz77_enabled i 1 0
+ac_entropy.table_count i 1 1
+ac_entropy.uint_config i 3 4 2 0
+ac_entropy_alphabet.ans_log_alpha_size i 1 7
 block_context.ctx_map i 39 0 1 2 2 3 3 4 5 6 6 6 6 6 7 8 9 9 10 11 12 13 14 14 14 14 14 7 8 9 9 10 11 12 13 14 14 14 14 14
 block_context.dc_thresholds.c0 i 0
 block_context.dc_thresholds.c1 i 0

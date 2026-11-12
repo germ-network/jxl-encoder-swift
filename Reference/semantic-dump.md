@@ -95,6 +95,34 @@ until they agree.
 
 ## Categories
 
+### `ac_entropy`
+
+These fields describe the actual AC code tables selected for the frame. Tables
+remain in transmitted order. `ac_entropy.kind` is 0 for prefix and 1 for ANS;
+`ac_entropy.table_count` counts clustered code tables, while
+`context_map.num_histograms` continues to count pre-clustered histogram sets.
+Every table contributes one `(split_exponent, msb_in_token, lsb_in_token)`
+triple to `ac_entropy.uint_config`. `ac_entropy.lz77_enabled` is zero for the
+supported encoder path.
+
+For ANS, `ac_entropy.ans.alphabet_lengths` gives the trimmed symbol count per
+table and `ac_entropy.ans.frequencies` concatenates those normalized frequency
+vectors. Only trailing zero frequencies are removed; internal zeros remain.
+The flattened vectors have total frequency 4096 per table. The separate
+`ac_entropy_alphabet.ans_log_alpha_size` category contains one value for ANS
+and an empty array for prefix codes.
+
+For prefix codes, `ac_entropy.prefix.alphabet_lengths` gives each effective
+symbol count, `ac_entropy.prefix.depths` concatenates the trimmed depth vectors,
+and `ac_entropy.prefix.singleton_symbols` contains the singleton symbol or -1
+for a nonsingleton table. Singleton tables have zero decoder depths through
+their singleton symbol, including the all-zero encoder representation, which
+serializes as singleton symbol 0. Only trailing unused symbols are removed.
+
+The actual encoder stores a one-bit placeholder for a prefix singleton; the
+decoder consumes zero bits. The semantic dump records the decoder form. AC
+LZ77 is unsupported and a reference frame with it enabled is rejected.
+
 All fields below are `i` (signed decimal integers); no float tolerance is
 needed for these categories. The supported first frame is single-pass VarDCT,
 with DCT8 only and no preview, as produced by the corpus's e4 pixel path.

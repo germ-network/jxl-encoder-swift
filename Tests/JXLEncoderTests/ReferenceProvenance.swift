@@ -5,10 +5,28 @@ import Foundation
 /// so the provenance tests read them from the source tree.
 enum RepositoryLayout {
 	static var root: URL {
-		URL(fileURLWithPath: #filePath)
-			.deletingLastPathComponent()  // JXLEncoderTests
-			.deletingLastPathComponent()  // Tests
-			.deletingLastPathComponent()
+		let file = URL(fileURLWithPath: #filePath).standardizedFileURL
+		let workingDirectory = URL(
+			fileURLWithPath: FileManager.default.currentDirectoryPath,
+			isDirectory: true)
+		for start in [file.deletingLastPathComponent(), workingDirectory] {
+			var directory = start
+			while directory.path != directory.deletingLastPathComponent().path {
+				let markers = [
+					"Package.swift",
+					"Reference/libjxl.pin",
+					"Reference/provenance.tsv",
+				]
+				if markers.allSatisfy({
+					FileManager.default.fileExists(
+						atPath: directory.appendingPathComponent($0).path)
+				}) {
+					return directory
+				}
+				directory.deleteLastPathComponent()
+			}
+		}
+		return file.deletingLastPathComponent()
 	}
 
 	static var pinRecord: URL { root.appendingPathComponent("Reference/libjxl.pin") }

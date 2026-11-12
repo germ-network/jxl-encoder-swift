@@ -1,0 +1,9 @@
+jxl-semantic-dump 1
+ac_entropy.kind i 1 0
+ac_entropy.lz77_enabled i 1 0
+ac_entropy.prefix.alphabet_lengths i 1 1
+ac_entropy.prefix.depths i 1 0
+ac_entropy.prefix.singleton_symbols i 1 0
+ac_entropy.table_count i 1 1
+ac_entropy.uint_config i 3 4 2 0
+ac_entropy_alphabet.ans_log_alpha_size i 0

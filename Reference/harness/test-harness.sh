@@ -57,15 +57,17 @@ import hashlib,sys
 from pathlib import Path
 root=Path(sys.argv[1]); output=Path(sys.argv[2])
 rows={r[0]:r for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#') for r in [line.split('\t')]}
-expected={'edge','multigroup','flower_512_d1','flower_512_d3','flower_1024'}
+expected={'edge','multigroup','flower_512_d1','flower_512_d3','flower_1024','ac_entropy_flat_singleton','ac_entropy_static_prefix'}
 assert {p.stem for p in output.glob('*.sem')}==expected
 for p in output.glob('*'):
  if p.suffix not in ('.sem','.ppm'): continue
  path='Tests/JXLEncoderTests/Fixtures/semantic/'+p.name
  assert hashlib.sha256(p.read_bytes()).hexdigest()==rows[path][2], path
-for name in expected:
+for name in expected-{'ac_entropy_flat_singleton','ac_entropy_static_prefix'}:
  fields={line.split()[0]:line.split()[1:] for line in (output/(name+'.sem')).read_text().splitlines()[1:]}
- required={'frame.size','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame.xyb','frame.qm_scales','frame.loop_filter.gab','frame.loop_filter.epf_iters','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc'}
+ required={'frame.size','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame.xyb','frame.qm_scales','frame.loop_filter.gab','frame.loop_filter.epf_iters','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc','ac_entropy.kind','ac_entropy.table_count','ac_entropy.uint_config','ac_entropy.lz77_enabled','ac_entropy_alphabet.ans_log_alpha_size'}
+ if fields['ac_entropy.kind'][2]=='1': required|={'ac_entropy.ans.alphabet_lengths','ac_entropy.ans.frequencies'}
+ else: required|={'ac_entropy.prefix.alphabet_lengths','ac_entropy.prefix.singleton_symbols','ac_entropy.prefix.depths'}
  assert set(fields)==required, name
  size={'edge':(32,32),'multigroup':(301,301),'flower_512_d1':(512,512),'flower_512_d3':(512,512),'flower_1024':(1024,1024)}[name]
  assert list(map(int,fields['frame.size'][2:]))==list(size)
@@ -77,6 +79,25 @@ for name in expected:
  assert fields['frame.groups']==['i','1',str(((size[0]+255)//256)*((size[1]+255)//256))]
 PYCODE
 }
+actual_entropy_prefix_streams() {
+  "$HARNESS" encode "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/semantic/ac_entropy_flat.ppm" 1 "$SCRATCH/ac_entropy_flat.jxl"
+  "$HARNESS" dump "$SCRATCH/ac_entropy_flat.jxl" ac_entropy > "$SCRATCH/ac_entropy_flat.sem"
+  grep -Fx 'ac_entropy.prefix.alphabet_lengths i 1 1' "$SCRATCH/ac_entropy_flat.sem"
+  grep -Fx 'ac_entropy.prefix.singleton_symbols i 1 0' "$SCRATCH/ac_entropy_flat.sem"
+  grep -Fx 'ac_entropy.prefix.depths i 1 0' "$SCRATCH/ac_entropy_flat.sem"
+  "$HARNESS" dump "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/edge_whole.jxl" ac_entropy > "$SCRATCH/ac_entropy_static.sem"
+  python3 - "$SCRATCH/ac_entropy_static.sem" <<'PYCODE'
+import sys
+fields={line.split()[0]:line.split()[1:] for line in open(sys.argv[1]).read().splitlines()[1:]}
+assert fields['ac_entropy.kind']==['i','1','0']
+depths=list(map(int,fields['ac_entropy.prefix.depths'][2:]))
+assert max(depths)>8
+PYCODE
+}
+actual_entropy_jpeg_reference() {
+  bash "$REFERENCE/make_ac_entropy_jpeg_fixture.sh" "$SCRATCH/ac_entropy_jpeg_2x1.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/semantic/ac_entropy_jpeg_2x1.sem" "$SCRATCH/ac_entropy_jpeg_2x1.sem"
+}
 dump_rejects_non_codestream() {
   printf 'not a codestream' > "$SCRATCH/invalid.jxl"
   if "$HARNESS" dump "$SCRATCH/invalid.jxl"; then return 1; fi
@@ -86,7 +107,7 @@ dump_rejects_non_codestream() {
   if "$HARNESS" dump "$SCRATCH/truncated.jxl"; then return 1; fi
   if "$HARNESS" dump "$SCRATCH/edge.jxl" nonexistent; then return 1; fi
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce dump_rejects_non_codestream; do
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream; do
   "$check"
   echo "PASS $check"
 done
