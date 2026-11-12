@@ -2,8 +2,11 @@
 
 enum SwiftEntropySemanticEncoding {
 	static func histogram(counts: [Int], logAlphaSize: Int) -> SemanticDump {
-		precondition(logAlphaSize > 0 && logAlphaSize < ANSConstants.logTabSize)
+		precondition((5...8).contains(logAlphaSize))
+		precondition(counts.count <= 256)
+		precondition(((counts.count + 15) / 16) * 16 <= (1 << logAlphaSize))
 		precondition(counts.allSatisfy { $0 >= 0 && $0 <= Int(UInt32.max) })
+		precondition(counts.reduce(UInt64(0)) { $0 + UInt64($1) } <= UInt64(UInt32.max))
 		let normalized = ANSHistogramNormalizer.normalize(counts.map(UInt32.init))
 		let alphabetSize = ANSHistogramWriter.alphabetSize(for: normalized)
 		let symbols =
@@ -34,9 +37,12 @@ enum SwiftEntropySemanticEncoding {
 		return dump
 	}
 
-	static func clusters(histograms: [Histogram], limit: Int) -> SemanticDump {
-		precondition(limit > 0)
-		let result = HistogramCluster.cluster(histograms, limit: limit)
+	static func clusters(histograms: [Histogram], limit: Int? = nil) -> SemanticDump {
+		if let limit { precondition(limit > 0) }
+		let result =
+			limit.map {
+				HistogramCluster.cluster(histograms, limit: $0)
+			} ?? HistogramCluster.cluster(histograms)
 		var dump = SemanticDump()
 		dump.record("entropy.clusters.map", .integers(result.contextMap.map(Int64.init)))
 		dump.record("entropy.clusters.count", .integers([Int64(result.clusters.count)]))

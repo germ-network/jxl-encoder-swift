@@ -71,7 +71,16 @@ and shift, table frequencies, reverse map, bit count, and bytes.
 
 Cluster inputs record mode, limit, histogram lengths, and flattened counts.
 Outputs record the cluster map and histograms plus input and output token totals
-to assert count conservation independently of the clustering result. The Swift
+to assert count conservation independently of the clustering result. The pair
+`[14,14,0,0]` and `[0,0,14,14]` has Shannon merge distance 56 bits: each
+source has 28 bits of entropy and the combined histogram has 112 bits. Its
+Huffman merge distance is also 56 bits. It witnesses the pinned fast-clustering
+threshold of 48 against Swift's threshold of 64. The test asserts that pinned
+libjxl keeps the pair as two clusters while Swift merges it. The tie case
+retains two clusters with map `[0,1,0]`, the farthest case retains two separated
+pairs, and ten distinct contexts with limit nine produce nine clusters. The
+48- and 64-symbol histogram inputs are alphabet-size coverage, not clustering
+distance witnesses. The Swift
 tests compare all fields normally except the exact named fields listed as
 GER-3386 differences for individual fixtures; a changed difference set or any
 other field still fails.

@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <charconv>
+#include <cstdint>
+#include <limits>
 #include <sstream>
 #include <string_view>
 
@@ -24,9 +26,13 @@ bool ParseInt(std::string_view text, int* value) {
 bool ParseCounts(const std::string& text, std::vector<int>* counts) {
   std::stringstream stream(text);
   std::string value;
+  uint64_t total = 0;
   while (std::getline(stream, value, ',')) {
     int count = 0;
     if (!ParseInt(value, &count) || count < 0) return false;
+    if (static_cast<uint64_t>(count) >
+        std::numeric_limits<uint32_t>::max() - total) return false;
+    total += static_cast<uint64_t>(count);
     counts->push_back(count);
   }
   return !counts->empty();
@@ -35,8 +41,8 @@ bool ParseCounts(const std::string& text, std::vector<int>* counts) {
 int RunHistogram(const std::vector<std::string>& args) {
 	if (args.size() < 2) return 2;
   int log_alpha_size = 0;
-	if (!ParseInt(args[0], &log_alpha_size) || log_alpha_size <= 0 ||
-      log_alpha_size >= ANS_LOG_TAB_SIZE) return 2;
+  if (!ParseInt(args[0], &log_alpha_size) || log_alpha_size < 5 ||
+      log_alpha_size > 8) return 2;
   jxl::HistogramParams::ANSHistogramStrategy strategy;
 	if (args[1] == "fast") {
     strategy = jxl::HistogramParams::ANSHistogramStrategy::kFast;
@@ -49,9 +55,15 @@ int RunHistogram(const std::vector<std::string>& args) {
   }
 
 	jxl::Histogram histogram(args.size() - 2);
+	if (histogram.counts.size() > (size_t{1} << log_alpha_size) ||
+	    histogram.counts.size() > 256) return 2;
+	uint64_t total_count = 0;
 	for (size_t i = 2; i < args.size(); ++i) {
     int count = 0;
     if (!ParseInt(args[i], &count) || count < 0) return 2;
+		if (static_cast<uint64_t>(count) >
+		    std::numeric_limits<uint32_t>::max() - total_count) return 2;
+		total_count += static_cast<uint64_t>(count);
 		histogram.counts[i - 2] = count;
     histogram.total_count += count;
   }
@@ -134,9 +146,15 @@ int RunClusters(const std::vector<std::string>& args) {
 	if (!ParseInt(args[1], &limit) || limit <= 0) return 2;
   std::vector<jxl::Histogram> input;
   std::vector<int64_t> lengths;
+	uint64_t total_count = 0;
 	for (size_t i = 2; i < args.size(); ++i) {
     std::vector<int> counts;
     if (!ParseCounts(args[i], &counts)) return 2;
+    for (int count : counts) {
+      if (static_cast<uint64_t>(count) >
+          std::numeric_limits<uint32_t>::max() - total_count) return 2;
+      total_count += static_cast<uint64_t>(count);
+    }
     input.emplace_back(counts.size());
     for (size_t symbol = 0; symbol < counts.size(); ++symbol) {
       input.back().counts[symbol] = counts[symbol];

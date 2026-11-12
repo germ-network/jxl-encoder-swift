@@ -26,76 +26,20 @@ struct EntropyReferenceFixture {
 		let expected = try SemanticDump(
 			parsing: String(contentsOf: expectedURL, encoding: .utf8))
 		try validate(name: name, input: input, expected: expected)
-		func integers(in dump: SemanticDump, field: String) throws -> [Int64] {
-			guard case .integers(let values)? = dump.fields[field] else {
-				throw SemanticDumpError.malformedEntropyFixture(
-					name: name, field: field)
-			}
-			return values
-		}
-		let inputFields: [String]
-		let expectedFields: [String]
-		if name.hasPrefix("ans_") {
-			inputFields = [
-				"input.histogram.counts", "input.histogram.log_alpha_size",
-				"input.histogram.strategy",
-			]
-			expectedFields = [
-				"entropy.histogram.normalized", "entropy.histogram.alphabet_size",
-				"entropy.histogram.serialized_method",
-				"entropy.histogram.serialized_shift",
-				"entropy.histogram.log_alpha_size", "entropy.histogram.freqs",
-				"entropy.histogram.reverse_map", "entropy.histogram.bit_count",
-				"entropy.histogram.bytes",
-			]
-			let counts = try integers(in: input, field: "input.histogram.counts")
-			let logAlpha = try integers(
-				in: input, field: "input.histogram.log_alpha_size")
-			let strategy = try integers(in: input, field: "input.histogram.strategy")
-			guard counts.allSatisfy({ $0 >= 0 && $0 <= Int64(UInt32.max) }),
-				logAlpha.count == 1,
-				(1..<ANSConstants.logTabSize).contains(Int(logAlpha[0])),
-				strategy.count == 1, (0...2).contains(strategy[0])
-			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
-		} else if name.hasPrefix("clusters_") {
-			inputFields = [
-				"input.clusters.mode", "input.clusters.limit",
-				"input.clusters.lengths",
-				"input.clusters.counts",
-			]
-			expectedFields = [
-				"entropy.clusters.count", "entropy.clusters.map",
-				"entropy.clusters.alphabet_lengths",
-				"entropy.clusters.total_counts",
-				"entropy.clusters.histogram_counts",
-				"entropy.clusters.input_total_count",
-				"entropy.clusters.output_total_count",
-			]
-			let mode = try integers(in: input, field: "input.clusters.mode")
-			let limit = try integers(in: input, field: "input.clusters.limit")
-			let lengths = try integers(in: input, field: "input.clusters.lengths")
-			let counts = try integers(in: input, field: "input.clusters.counts")
-			guard mode.count == 1, (0...1).contains(mode[0]), limit.count == 1,
-				limit[0] > 0, lengths.count > 0,
-				lengths.allSatisfy({ (1...64).contains($0) }),
-				lengths.reduce(Int64(0), +) == Int64(counts.count),
-				counts.allSatisfy({ $0 >= 0 && $0 <= Int64(UInt32.max) })
-			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
-		} else {
-			throw SemanticDumpError.unsupportedEntropyFixture(name)
-		}
-		for field in inputFields where input.fields[field] == nil {
-			throw SemanticDumpError.malformedEntropyFixture(name: name, field: field)
-		}
-		for field in expectedFields where expected.fields[field] == nil {
-			throw SemanticDumpError.malformedEntropyFixture(name: name, field: field)
-		}
 		return Self(input: input, expected: expected)
 	}
 
 	static func validate(
 		name: String, input: SemanticDump, expected: SemanticDump
 	) throws {
+		func checkedSum(_ values: [Int64], limit: Int64) -> Int64? {
+			var sum: Int64 = 0
+			for value in values {
+				guard value >= 0, value <= limit - sum else { return nil }
+				sum += value
+			}
+			return sum
+		}
 		func integers(_ dump: SemanticDump, _ field: String) throws -> [Int64] {
 			guard case .integers(let values)? = dump.fields[field] else {
 				throw SemanticDumpError.malformedEntropyFixture(
@@ -121,9 +65,12 @@ struct EntropyReferenceFixture {
 			let counts = try integers(input, "input.histogram.counts")
 			let logAlpha = try integers(input, "input.histogram.log_alpha_size")
 			let strategy = try integers(input, "input.histogram.strategy")
-			guard counts.allSatisfy({ (0...Int64(Int32.max)).contains($0) }),
-				logAlpha.count == 1,
-				(1..<ANSConstants.logTabSize).contains(Int(logAlpha[0])),
+			guard logAlpha.count == 1,
+				(5...8).contains(logAlpha[0]),
+				counts.count <= 256,
+				((counts.count + 15) / 16) * 16 <= (1 << Int(logAlpha[0])),
+				checkedSum(counts, limit: Int64(UInt32.max)) != nil,
+				counts.allSatisfy({ (0...Int64(Int32.max)).contains($0) }),
 				strategy.count == 1, (0...2).contains(strategy[0])
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			let alphabet = try integers(expected, "entropy.histogram.alphabet_size")
@@ -183,10 +130,12 @@ struct EntropyReferenceFixture {
 			let limit = try integers(input, "input.clusters.limit")
 			let lengths = try integers(input, "input.clusters.lengths")
 			let counts = try integers(input, "input.clusters.counts")
-			guard mode.count == 1, (0...1).contains(mode[0]), limit.count == 1,
+			guard let total = checkedSum(counts, limit: Int64(UInt32.max)),
+				let lengthTotal = checkedSum(lengths, limit: Int64.max),
+				lengthTotal == Int64(counts.count),
+				mode.count == 1, (0...1).contains(mode[0]), limit.count == 1,
 				(1...128).contains(limit[0]), !lengths.isEmpty,
 				lengths.allSatisfy({ (1...64).contains($0) }),
-				lengths.reduce(0, +) == Int64(counts.count),
 				counts.allSatisfy({ (0...Int64(Int32.max)).contains($0) })
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			let clusterCount = try integers(expected, "entropy.clusters.count")
@@ -200,7 +149,6 @@ struct EntropyReferenceFixture {
 				expected, "entropy.clusters.input_total_count")
 			let outputTotal = try integers(
 				expected, "entropy.clusters.output_total_count")
-			let total = counts.reduce(0, +)
 			guard clusterCount.count == 1,
 				(1...min(Int(limit[0]), lengths.count)).contains(
 					Int(clusterCount[0])),
@@ -213,13 +161,16 @@ struct EntropyReferenceFixture {
 				outputCounts.count == alphabetLengths.reduce(0, +),
 				outputCounts.allSatisfy({ (0...Int64(Int32.max)).contains($0) }),
 				inputTotal == [total], outputTotal == [total],
-				totals.reduce(0, +) == total
+				checkedSum(totals, limit: Int64(UInt32.max)) == total
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			var offset = 0
 			for index in alphabetLengths.indices {
 				let end = offset + Int(alphabetLengths[index])
 				guard end <= outputCounts.count,
-					outputCounts[offset..<end].reduce(0, +) == totals[index]
+					checkedSum(
+						Array(outputCounts[offset..<end]),
+						limit: Int64(UInt32.max))
+						== totals[index]
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 				offset = end
 			}

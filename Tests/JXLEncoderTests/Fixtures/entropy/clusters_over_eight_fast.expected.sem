@@ -1,8 +1,8 @@
 jxl-semantic-dump 1
-entropy.clusters.alphabet_lengths i 1 2
-entropy.clusters.count i 1 1
-entropy.clusters.histogram_counts i 2 40 32
-entropy.clusters.input_total_count i 1 72
-entropy.clusters.map i 9 0 0 0 0 0 0 0 0 0
-entropy.clusters.output_total_count i 1 72
-entropy.clusters.total_counts i 1 72
+entropy.clusters.alphabet_lengths i 9 20 4 6 8 10 12 14 16 18
+entropy.clusters.count i 1 9
+entropy.clusters.histogram_counts i 108 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 20 20 0 0 0 0 20 20 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20
+entropy.clusters.input_total_count i 1 400
+entropy.clusters.map i 10 0 1 2 3 4 5 6 7 8 0
+entropy.clusters.output_total_count i 1 400
+entropy.clusters.total_counts i 9 80 40 40 40 40 40 40 40 40

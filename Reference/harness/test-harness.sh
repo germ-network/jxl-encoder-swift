@@ -107,7 +107,16 @@ dump_rejects_non_codestream() {
   if "$HARNESS" dump "$SCRATCH/truncated.jxl"; then return 1; fi
   if "$HARNESS" dump "$SCRATCH/edge.jxl" nonexistent; then return 1; fi
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream; do
+entropy_rejects_unsafe_histogram_config() {
+  if "$HARNESS" entropy histogram 4 fast 1; then return 1; fi
+  if "$HARNESS" entropy histogram 9 fast 1; then return 1; fi
+  local -a counts=()
+  for ((index = 0; index < 33; index++)); do counts+=(0); done
+  if "$HARNESS" entropy histogram 5 fast "${counts[@]}"; then return 1; fi
+  if "$HARNESS" entropy histogram 7 fast 2147483647 2147483647 2; then return 1; fi
+  if "$HARNESS" entropy cluster fast 2 2147483647 2147483647 2; then return 1; fi
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config; do
   "$check"
   echo "PASS $check"
 done

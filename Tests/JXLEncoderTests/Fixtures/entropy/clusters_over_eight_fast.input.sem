@@ -1,5 +1,5 @@
 jxl-semantic-dump 1
 input.clusters.mode i 1 0
-input.clusters.limit i 1 4
-input.clusters.lengths i 9 2 2 2 2 2 2 2 2 2
-input.clusters.counts i 18 8 0 0 8 8 0 0 8 8 0 0 8 8 0 0 8 8 0
+input.clusters.limit i 1 9
+input.clusters.lengths i 10 20 20 20 20 20 20 20 20 20 20
+input.clusters.counts i 200 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 20 20

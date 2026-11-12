@@ -5,8 +5,15 @@ root="$(cd "$(dirname "$0")/.." && pwd)"
 harness="$root/Reference/build/harness/jxl-harness"
 out="$root/Tests/JXLEncoderTests/Fixtures/entropy"
 test -x "$harness"
+linked="$(sed -n 's/^LIBJXL_DIR:[^=]*=//p' "$root/Reference/build/harness/CMakeCache.txt")"
+test -n "$linked"
+"$root/Reference/pin-check.sh" "$linked"
+source "$root/Reference/libjxl.pin"
+version="$("$harness" version)"
+grep -Fx "libjxl=$LIBJXL_COMMIT" <<< "$version"
+grep -Fx 'hwy=NEON' <<< "$version"
 mkdir -p "$out"
-pin="$(sed -n 's/^LIBJXL_COMMIT="\([^"]*\)"/\1/p' "$root/Reference/libjxl.pin")"
+pin="$LIBJXL_COMMIT"
 tmp="$(mktemp)"
 trap 'rm -f "$tmp"' EXIT
 head -n 2 "$root/Reference/provenance.tsv" > "$tmp"
@@ -70,7 +77,8 @@ generate_cluster() {
 }
 
 rm -f "$out"/ans_sparse_precise.* "$out"/ans_skewed_approximate.* \
-	"$out"/ans_boundary_fast.*
+	"$out"/ans_boundary_fast.* "$out"/ans_threshold48_fast.* \
+	"$out"/ans_threshold64_fast.*
 generate ans_singleton_precise 7 precise 0 0 0 10
 generate ans_empty 7 fast
 generate ans_all_zero 7 fast 0 0 0
@@ -82,19 +90,35 @@ threshold48=()
 threshold64=()
 for ((index = 0; index < 48; index++)); do threshold48+=(1); done
 for ((index = 0; index < 64; index++)); do threshold64+=(1); done
-generate ans_threshold48_fast 7 fast "${threshold48[@]}"
-generate ans_threshold64_fast 7 fast "${threshold64[@]}"
+generate ans_alphabet48_fast 7 fast "${threshold48[@]}"
+generate ans_alphabet64_fast 7 fast "${threshold64[@]}"
 generate_cluster clusters_fast_identical fast 4 16,0 16,0
 generate_cluster clusters_best_identical best 4 16,0 16,0
 generate_cluster clusters_fast_merge fast 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
 generate_cluster clusters_best_merge best 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
-generate_cluster clusters_ties_fast fast 3 \
-	10,0,10,0 0,10,0,10 10,0,10,0 0,10,0,10
-generate_cluster clusters_farthest_fast fast 3 \
-	100,0,0,0 0,0,0,100 50,0,0,50 0,100,0,0 0,0,100,0
-generate_cluster clusters_over_eight_fast fast 4 \
-	8,0 0,8 8,0 0,8 8,0 0,8 8,0 0,8 8,0
+generate_cluster clusters_ties_fast fast 2 \
+	40,40,0 40,0,40 0,40,40
+generate_cluster clusters_farthest_fast fast 2 \
+	50,50,0,0,0,0 50,50,0,0,0,0 0,0,40,40,0,0 0,0,0,0,30,30
+generate_cluster clusters_distance_48_fast fast 4 12,12,0,0 0,0,12,12
+generate_cluster clusters_distance_56_fast fast 4 14,14,0,0 0,0,14,14
+generate_cluster clusters_distance_64_fast fast 4 16,16,0,0 0,0,16,16
+over_eight_rows=()
+for ((index = 0; index < 10; index++)); do
+	row=()
+	for ((symbol = 0; symbol < 20; symbol++)); do
+		if ((symbol == index * 2 || symbol == index * 2 + 1)); then
+			row+=(20)
+		else
+			row+=(0)
+		fi
+	done
+	over_eight_rows+=("$(IFS=,; printf '%s' "${row[*]}")")
+done
+generate_cluster clusters_default_cap_fast fast 8 "${over_eight_rows[@]}"
+generate_cluster clusters_over_eight_fast fast 9 "${over_eight_rows[@]}"
 
 { head -n 2 "$tmp"; tail -n +3 "$tmp" | sort -t $'\t' -k1,1; } > "$root/Reference/provenance.tsv"
+"$root/Reference/pin-check.sh" "$linked"

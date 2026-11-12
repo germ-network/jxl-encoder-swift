@@ -47,7 +47,7 @@ struct EntropyReferenceTests {
 				])
 			),
 			(
-				"ans_threshold48_fast",
+				"ans_alphabet48_fast",
 				Set([
 					"entropy.histogram.serialized_method",
 					"entropy.histogram.serialized_shift",
@@ -55,7 +55,7 @@ struct EntropyReferenceTests {
 				])
 			),
 			(
-				"ans_threshold64_fast",
+				"ans_alphabet64_fast",
 				Set([
 					"entropy.histogram.serialized_method",
 					"entropy.histogram.serialized_shift",
@@ -121,6 +121,34 @@ struct EntropyReferenceTests {
 				name: "ans_singleton_precise", input: histogram.input,
 				expected: badBitCount)
 		}
+		for invalidLogAlpha in [4, 9] {
+			let invalidConfig = try SemanticDump(
+				parsing: histogram.input.serialized.replacingOccurrences(
+					of: "input.histogram.log_alpha_size i 1 7",
+					with:
+						"input.histogram.log_alpha_size i 1 \(invalidLogAlpha)"
+				))
+			#expect(throws: Error.self) {
+				try EntropyReferenceFixture.validate(
+					name: "ans_singleton_precise", input: invalidConfig,
+					expected: histogram.expected)
+			}
+		}
+		let tooWideCounts = Array(repeating: "0", count: 33).joined(separator: " ")
+		let overCapacity = try SemanticDump(
+			parsing: histogram.input.serialized
+				.replacingOccurrences(
+					of: "input.histogram.counts i 4 0 0 0 10",
+					with: "input.histogram.counts i 33 \(tooWideCounts)"
+				)
+				.replacingOccurrences(
+					of: "input.histogram.log_alpha_size i 1 7",
+					with: "input.histogram.log_alpha_size i 1 5"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ans_singleton_precise", input: overCapacity,
+				expected: histogram.expected)
+		}
 		let cluster = try EntropyReferenceFixture.load("clusters_fast_identical")
 		let badMap = try SemanticDump(
 			parsing: cluster.expected.serialized.replacingOccurrences(
@@ -140,35 +168,41 @@ struct EntropyReferenceTests {
 				name: "clusters_fast_identical", input: badLengths,
 				expected: cluster.expected)
 		}
+		let clusterOverflow = try EntropyReferenceFixture.load("clusters_farthest_fast")
+		let overflowingTotals = try SemanticDump(
+			parsing: clusterOverflow.expected.serialized.replacingOccurrences(
+				of: "entropy.clusters.total_counts i 2 200 140",
+				with: "entropy.clusters.total_counts i 2 \(Int64.max) \(Int64.max)")
+		)
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "clusters_farthest_fast", input: clusterOverflow.input,
+				expected: overflowingTotals)
+		}
 	}
 
 	@Test
 	func fastAndBestClustersMatchReference() throws {
-		for (name, knownDifferences) in [
+		let clusteringDifferences: Set<String> = [
+			"entropy.clusters.map", "entropy.clusters.count",
+			"entropy.clusters.alphabet_lengths",
+			"entropy.clusters.total_counts",
+			"entropy.clusters.histogram_counts",
+		]
+		let fixtures: [(String, Set<String>)] = [
 			("clusters_fast_identical", Set<String>()),
 			("clusters_best_identical", Set<String>()),
 			("clusters_ties_fast", Set<String>()),
-			(
-				"clusters_farthest_fast",
-				Set([
-					"entropy.clusters.map", "entropy.clusters.count",
-					"entropy.clusters.alphabet_lengths",
-					"entropy.clusters.total_counts",
-					"entropy.clusters.histogram_counts",
-				])
-			),
+			("clusters_distance_48_fast", clusteringDifferences),
+			("clusters_distance_56_fast", clusteringDifferences),
+			("clusters_distance_64_fast", Set<String>()),
+			("clusters_default_cap_fast", Set<String>()),
+			("clusters_farthest_fast", Set<String>()),
 			("clusters_over_eight_fast", Set<String>()),
-			(
-				"clusters_fast_merge",
-				Set([
-					"entropy.clusters.map", "entropy.clusters.count",
-					"entropy.clusters.alphabet_lengths",
-					"entropy.clusters.total_counts",
-					"entropy.clusters.histogram_counts",
-				])
-			),
+			("clusters_fast_merge", clusteringDifferences),
 			("clusters_best_merge", Set<String>()),
-		] {
+		]
+		for (name, knownDifferences) in fixtures {
 			let fixture = try EntropyReferenceFixture.load(name)
 			guard
 				case .integers(let lengths)? = fixture.input.fields[
@@ -197,8 +231,73 @@ struct EntropyReferenceTests {
 				histograms.append(histogram)
 			}
 			guard cursor == counts.count else { throw SemanticDumpError.unimplemented }
-			let actual = SwiftEntropySemanticEncoding.clusters(
-				histograms: histograms, limit: Int(limit[0]))
+			let boundaryDistances = [
+				"clusters_distance_48_fast": 48,
+				"clusters_distance_56_fast": 56,
+				"clusters_distance_64_fast": 64,
+			]
+			if let distance = boundaryDistances[name] {
+				#expect(histograms.count == 2)
+				var left = histograms[0]
+				var right = histograms[1]
+				left.computeBitCost()
+				right.computeBitCost()
+				#expect(HistogramCluster.distance(left, right) == Float(distance))
+			}
+			let actual: SemanticDump
+			if name == "clusters_default_cap_fast" {
+				actual = SwiftEntropySemanticEncoding.clusters(
+					histograms: histograms)
+			} else {
+				actual = SwiftEntropySemanticEncoding.clusters(
+					histograms: histograms, limit: Int(limit[0]))
+			}
+			if name == "clusters_distance_48_fast"
+				|| name == "clusters_distance_56_fast"
+			{
+				#expect(
+					fixture.expected.fields["entropy.clusters.count"]
+						== .integers([2]))
+				#expect(actual.fields["entropy.clusters.count"] == .integers([1]))
+			}
+			if name == "clusters_distance_64_fast" {
+				#expect(
+					fixture.expected.fields["entropy.clusters.count"]
+						== .integers([2]))
+				#expect(actual.fields["entropy.clusters.count"] == .integers([2]))
+			}
+			if name == "clusters_ties_fast" {
+				#expect(
+					fixture.expected.fields["entropy.clusters.count"]
+						== .integers([2]))
+				#expect(
+					fixture.expected.fields["entropy.clusters.map"]
+						== .integers([0, 1, 0]))
+			}
+			if name == "clusters_farthest_fast" {
+				#expect(
+					fixture.expected.fields["entropy.clusters.count"]
+						== .integers([2]))
+				#expect(
+					fixture.expected.fields["entropy.clusters.map"]
+						== .integers([0, 0, 1, 1]))
+			}
+			if name == "clusters_over_eight_fast" {
+				#expect(histograms.count == 10)
+				#expect(
+					fixture.expected.fields["entropy.clusters.count"]
+						== .integers([9]))
+				#expect(
+					fixture.expected.fields["entropy.clusters.map"]
+						== .integers([0, 1, 2, 3, 4, 5, 6, 7, 8, 0]))
+			}
+			if name == "clusters_default_cap_fast" {
+				#expect(histograms.count == 10)
+				#expect(
+					fixture.expected.fields["entropy.clusters.count"]
+						== .integers([8]))
+				#expect(actual.fields["entropy.clusters.count"] == .integers([8]))
+			}
 			let differences = actual.differences(from: fixture.expected)
 			let differenceFields = Set(differences.map(\.field))
 			#expect(differenceFields == knownDifferences, "\(name): \(differences)")
