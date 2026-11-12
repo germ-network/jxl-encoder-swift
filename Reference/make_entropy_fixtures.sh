@@ -83,7 +83,8 @@ generate_context_map() {
 		printf 'jxl-semantic-dump 1\n'
 		printf 'input.context_map.entries i %s' "$#"
 		if (($# > 0)); then printf ' %s' "$@"; fi
-		printf '\ninput.context_map.num_histograms i 1 %s\n' "$num_histograms"
+		printf '\ninput.context_map.map_length i 1 %s\n' "$#"
+		printf 'input.context_map.num_histograms i 1 %s\n' "$num_histograms"
 		printf 'input.context_map.allow_ans i 1 %s\n' "$allow_ans"
 	} > "$input"
 	"$harness" entropy context-map "$num_histograms" "$@" > "$out/$name.expected.sem"
@@ -110,6 +111,7 @@ generate_context_map_with_candidates() {
 		printf 'jxl-semantic-dump 1\n'
 		printf 'input.context_map.entries i %s' "${#entries[@]}"
 		printf ' %s' "${entries[@]}"
+		printf '\ninput.context_map.map_length i 1 %s' "${#entries[@]}"
 		printf '\ninput.context_map.num_histograms i 1 %s\n' "$num_histograms"
 		printf 'input.context_map.allow_ans i 1 1\n'
 		printf 'input.context_map.mtf_entries i %s' "${#mtf_entries[@]}"

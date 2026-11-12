@@ -270,6 +270,38 @@ int RunContextMap(const std::vector<std::string>& args) {
       if (!reader.Close()) return 1;
     }
   }
+  auto inspect_candidate = [&](const std::vector<uint8_t>& values,
+                               size_t* cost, size_t* token_count) -> bool {
+    jxl::HistogramParams params;
+    params.uint_method = jxl::HistogramParams::HybridUintMethod::kContextMap;
+    std::vector<std::vector<jxl::Token>> tokens(1);
+    for (uint8_t value : values) tokens[0].emplace_back(0, value);
+    jxl::EntropyEncodingData codes;
+    auto result = jxl::BuildAndEncodeHistograms(
+        &manager, params, 1, tokens, &codes, nullptr,
+        jxl::LayerType::Header, nullptr);
+    if (!result.ok()) return false;
+    *cost = std::move(result).value_();
+    *token_count = tokens[0].size();
+    return true;
+  };
+  size_t raw_cost = 0;
+  size_t mtf_cost = 0;
+  size_t raw_token_count = 0;
+  size_t mtf_token_count = 0;
+  if (measure_mtf &&
+      (!inspect_candidate(entries, &raw_cost, &raw_token_count) ||
+       !inspect_candidate(mtf_entries, &mtf_cost, &mtf_token_count))) return 1;
+  int64_t token_count = -1;
+  if (simple == 0) {
+    if (use_mtf == 1) {
+      if (measure_mtf) token_count = static_cast<int64_t>(mtf_token_count);
+    } else {
+      if (!measure_mtf &&
+          !inspect_candidate(entries, &raw_cost, &raw_token_count)) return 1;
+      token_count = static_cast<int64_t>(raw_token_count);
+    }
+  }
   std::vector<int64_t> serialized(bytes.begin(), bytes.end());
   SemanticDumpWriter dump;
   dump.Integers("entropy.context_map.entries",
@@ -279,27 +311,10 @@ int RunContextMap(const std::vector<std::string>& args) {
   dump.Integers("entropy.context_map.entry_bits", {entry_bits});
   dump.Integers("entropy.context_map.use_mtf", {use_mtf});
   dump.Integers("entropy.context_map.use_prefix_code", {use_prefix_code});
+  dump.Integers("entropy.context_map.token_count", {token_count});
   dump.Integers("entropy.context_map.bit_count", {static_cast<int64_t>(bit_count)});
   dump.Integers("entropy.context_map.bytes", serialized);
   if (measure_mtf) {
-    auto candidate_cost = [&](const std::vector<uint8_t>& values,
-                              size_t* cost) -> bool {
-      jxl::HistogramParams params;
-      params.uint_method = jxl::HistogramParams::HybridUintMethod::kContextMap;
-      std::vector<std::vector<jxl::Token>> tokens(1);
-      for (uint8_t value : values) tokens[0].emplace_back(0, value);
-      jxl::EntropyEncodingData codes;
-      auto result = jxl::BuildAndEncodeHistograms(
-          &manager, params, 1, tokens, &codes, nullptr,
-          jxl::LayerType::Header, nullptr);
-      if (!result.ok()) return false;
-      *cost = std::move(result).value_();
-      return true;
-    };
-    size_t raw_cost = 0;
-    size_t mtf_cost = 0;
-    if (!candidate_cost(entries, &raw_cost) ||
-        !candidate_cost(mtf_entries, &mtf_cost)) return 1;
     dump.Integers("entropy.context_map.raw_cost", {static_cast<int64_t>(raw_cost)});
     dump.Integers("entropy.context_map.mtf_cost", {static_cast<int64_t>(mtf_cost)});
     const size_t simple_entry_bits =

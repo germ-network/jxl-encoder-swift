@@ -85,6 +85,13 @@ tests compare all fields normally except the exact named fields listed as
 GER-3386 differences for individual fixtures; a changed difference set or any
 other field still fails.
 
+Context-map inputs record entries and `map_length` separately. Expected
+outputs include the selected simple, prefix, or ANS mode and `token_count`
+after libjxl's token construction, including LZ77 processing. The 99/100
+fixtures assert map length and token count independently, so they establish
+the ANS threshold using the actual token stream. A token count of `-1` means
+the selected path's token stream is unavailable through the harness API.
+
 ## Expected divergence
 
 A fixture for a decision Swift hasn't translated yet still runs. Expected

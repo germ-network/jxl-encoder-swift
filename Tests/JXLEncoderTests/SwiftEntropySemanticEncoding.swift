@@ -93,6 +93,9 @@ enum SwiftEntropySemanticEncoding {
 		dump.record("entropy.context_map.entry_bits", .integers([simple ? 0 : -1]))
 		dump.record("entropy.context_map.use_mtf", .integers([0]))
 		dump.record("entropy.context_map.use_prefix_code", .integers([Int64(usePrefix)]))
+		dump.record(
+			"entropy.context_map.token_count",
+			.integers([simple ? -1 : Int64(entries.count)]))
 		dump.record("entropy.context_map.bit_count", .integers([Int64(writer.bitsWritten)]))
 		dump.record("entropy.context_map.bytes", .integers(writer.bytes.map(Int64.init)))
 		return dump

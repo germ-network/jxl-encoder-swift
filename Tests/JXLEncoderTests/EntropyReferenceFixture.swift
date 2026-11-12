@@ -177,13 +177,14 @@ struct EntropyReferenceFixture {
 		} else if name.hasPrefix("context_") {
 			var requiredInputFields: Set<String> = [
 				"input.context_map.entries", "input.context_map.num_histograms",
-				"input.context_map.allow_ans",
+				"input.context_map.allow_ans", "input.context_map.map_length",
 			]
 			var requiredExpectedFields: Set<String> = [
 				"entropy.context_map.entries", "entropy.context_map.num_histograms",
 				"entropy.context_map.simple", "entropy.context_map.entry_bits",
 				"entropy.context_map.use_mtf",
 				"entropy.context_map.use_prefix_code",
+				"entropy.context_map.token_count",
 				"entropy.context_map.bit_count", "entropy.context_map.bytes",
 			]
 			let hasCandidates = [
@@ -201,6 +202,7 @@ struct EntropyReferenceFixture {
 			inputFields = requiredInputFields
 			expectedFields = requiredExpectedFields
 			let entries = try integers(input, "input.context_map.entries")
+			let mapLength = try integers(input, "input.context_map.map_length")
 			let candidateMTF =
 				hasCandidates
 				? try integers(input, "input.context_map.mtf_entries") : nil
@@ -209,6 +211,7 @@ struct EntropyReferenceFixture {
 			guard histograms.count == 1, (1...255).contains(histograms[0]),
 				allowANS.count == 1, (0...1).contains(allowANS[0]),
 				!entries.isEmpty, entries.count <= 1_000_000,
+				mapLength == [Int64(entries.count)],
 				entries.allSatisfy({ (0..<histograms[0]).contains($0) })
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			let outputEntries = try integers(expected, "entropy.context_map.entries")
@@ -219,6 +222,7 @@ struct EntropyReferenceFixture {
 			let useMTF = try integers(expected, "entropy.context_map.use_mtf")
 			let usePrefix = try integers(
 				expected, "entropy.context_map.use_prefix_code")
+			let tokenCount = try integers(expected, "entropy.context_map.token_count")
 			let bitCount = try integers(expected, "entropy.context_map.bit_count")
 			let bytes = try integers(expected, "entropy.context_map.bytes")
 			if hasCandidates {
@@ -271,9 +275,17 @@ struct EntropyReferenceFixture {
 				usePrefix.count == 1,
 				simple[0] == 1
 					? usePrefix[0] == -1 : (0...1).contains(usePrefix[0]),
+				tokenCount.count == 1,
+				simple[0] == 1 ? tokenCount == [-1] : tokenCount[0] >= -1,
 				bitCount.count == 1, encodedByteCount == Int64(bytes.count),
 				bytes.allSatisfy({ (0...255).contains($0) })
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			if name == "context_prefix_99" || name == "context_ans_100" {
+				let boundary = name == "context_prefix_99" ? 99 : 100
+				guard mapLength == [Int64(boundary)],
+					tokenCount == [Int64(boundary)]
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
 		} else {
 			throw SemanticDumpError.unsupportedEntropyFixture(name)
 		}

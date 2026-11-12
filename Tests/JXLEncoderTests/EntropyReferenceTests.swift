@@ -375,6 +375,7 @@ struct EntropyReferenceTests {
 					"entropy.context_map.simple",
 					"entropy.context_map.entry_bits",
 					"entropy.context_map.use_prefix_code",
+					"entropy.context_map.token_count",
 					"entropy.context_map.bit_count",
 					"entropy.context_map.bytes",
 				])
@@ -383,6 +384,7 @@ struct EntropyReferenceTests {
 				"context_mtf_ans",
 				Set([
 					"entropy.context_map.use_mtf",
+					"entropy.context_map.token_count",
 					"entropy.context_map.bit_count",
 					"entropy.context_map.bytes",
 				])
