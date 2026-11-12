@@ -1,7 +1,7 @@
 # Semantic dump (I-3)
 
 A semantic dump lists the encoder decisions a JPEG XL codestream carries, as
-named integer and float fields. Two sides write one:
+named integer and float fields. Decoder dumps are joined by a small set of explicitly documented encoder-stage observations, all using the same format.
 
 - **Reference:** `jxl-harness dump <file.jxl>` decodes any bare codestream with
   the pinned libjxl (`Reference/libjxl.pin`) and records what the decoder state
@@ -243,6 +243,19 @@ Other frame configurations are rejected rather than partially dumped.
 | `context_map` | `ac` | first pass's AC map, trimmed to `num_histograms * NumACContexts()`; no decoder padding |
 | `quant_field` | `raw` | integer raw quantizer per block, whole-frame block raster order |
 | `quant_field` | `global_scale`, `quant_dc` | one scalar each, exact integer `QuantizerParams` values |
+| `quantized_ac` | `c0`, `c1`, `c2` | 64 fixed-DCT primitive outputs per X/Y/B channel from actual pinned NEON `QuantizeBlockAC`; input, thresholds, multiplier, quant and scale are fixed by the generator |
+| `quantized_ac` | `neon_target` | scalar marker, 1 only when the harness is compiled for NEON |
+| `quant_bias` | `c0`, `c1`, `c2` | 13 float32 output bit patterns from actual NEON `AdjustQuantBias` inputs, stored as unsigned integer values |
+| `quant_bias` | `neon_target` | scalar marker, 1 only when the harness is compiled for NEON |
+| `distance_params` | `inputs`, `effective_distance`, `global_scale`, `quant_dc`, `quant_field`, `quantized_dc.c0` … `quantized_dc.c2`, `neon_target` | predecessor/exact/successor float32 inputs at the listed transitions; values from actual `InitialQuantDC`, `ComputeGlobalScaleAndQuant`, `SetQuantFieldRect`, `GetInvDcStep`, and fused DC rounding |
+| `coded_blocks` | `dimensions`, `widths`, `heights`, `width_blocks.h0v0` … `width_blocks.h1v1`, `height_blocks.h0v0` … `height_blocks.h1v1` | explicit small/asymmetric dimensions and independent axis block counts from upstream `FrameDimensions::Set`, varying maximum horizontal and vertical chroma shifts |
+| `pixel_stages` | `dimensions`, `ac_group_block_dims`, `dc_group_lifecycle`, `quant_field_mismatches` | full-frame dimensions; absolute AC group ids and block extents; per-DC-group crop, padding, origin and global-state lifecycle; zero when the recomputed raw quant field matches the decoded frame |
+
+The corresponding `.ac.bin` and `.dc.bin` fixtures preserve actual upstream
+coefficient-stage observations as group-major/channel-major AC and full-frame
+channel-major DC arrays. Their pixel arithmetic is not compared to Swift yet;
+placement is tested using unique synthetic channel/group/block values, while
+actual upstream metadata checks full-frame group extents and lifecycle.
 
 The eight matrix and DC-constant float fields use `ulps(0)`, preserving
 signed-zero differences. The inverse AC matrix's demonstrated one-ULP entries
@@ -290,3 +303,8 @@ simple cost is strictly below both entropy candidates. `context_tie_raw_mtf`
 uses sixteen possible histograms, which makes the simple form unavailable; its
 identical raw/MTF candidate arrays have equal costs, so the strict MTF
 comparison keeps the raw map.
+
+The `quantized_ac` stage fixture is not decoded from a codestream. It exercises
+a bounded, explicit fixed-parameter input to the pinned upstream primitive; it
+does not establish conversion safety for unrestricted floats or equality with
+ordinary-image e4 coefficients.

@@ -61,4 +61,56 @@ struct DCQuantizationTests {
 			coefficient: 1, inverseFactor: 100, yDC: 40, cflFactor: 0)
 		#expect(withoutY == 100)
 	}
+
+	@Test("per-channel DC integers match upstream at distance bounds")
+	func quantizedDCMatchesReferenceAtDistanceBounds() throws {
+		let reference = try SemanticDump(fixture: "distance_params")
+		let boundaries: [Float] = [
+			0.03, 0.05, 0.299, 0.7, 1.25, 1.5, 3, 4, 5, 9, 10,
+		]
+		var distances: [Float] = []
+		for boundary in boundaries {
+			distances.append(boundary.nextDown)
+			distances.append(boundary)
+			distances.append(boundary.nextUp)
+		}
+		let expected: [Int64]
+		switch reference.fields["distance_params.quant_dc"] {
+		case .integers(let values): expected = values
+		default:
+			Issue.record("missing upstream quant_dc values")
+			return
+		}
+		let actual = try distances.map {
+			Int64(try DistanceParams(distance: $0).quantDC)
+		}
+		#expect(actual == expected)
+		for channel in 0..<3 {
+			let expectedDC: [Int64]
+			switch reference.fields["distance_params.quantized_dc.c\(channel)"] {
+			case .integers(let values): expectedDC = values
+			default:
+				Issue.record("missing upstream quantized DC channel \(channel)")
+				continue
+			}
+			var actualDC: [Int64] = []
+			for distance in distances {
+				let params = try DistanceParams(distance: distance)
+				let inverseFactor =
+					ACGroupEncoder.inverseDCQuant[channel] * params.scaleDC
+				for i in 0..<9 {
+					let coefficient = Float(i - 4) * 0.001
+					let yDC = Int16(i - 4)
+					actualDC.append(
+						Int64(
+							ACGroupEncoder.quantizedDC(
+								coefficient: coefficient,
+								inverseFactor: inverseFactor,
+								yDC: yDC,
+								cflFactor: channel == 2 ? 0.5 : 0)))
+				}
+			}
+			#expect(actualDC == expectedDC)
+		}
+	}
 }

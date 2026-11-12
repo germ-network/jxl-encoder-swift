@@ -83,10 +83,10 @@ func ulpDistance(_ a: Float, _ b: Float) -> Int {
 struct UInt32Fixture {
 	let values: [UInt32]
 
-	init(name: String) throws {
+	init(name: String, subdirectory: String = "Fixtures") throws {
 		guard
 			let url = Bundle.module.url(
-				forResource: name, withExtension: "bin", subdirectory: "Fixtures")
+				forResource: name, withExtension: "bin", subdirectory: subdirectory)
 		else {
 			throw StageDump.DumpError.fixtureNotFound(name)
 		}

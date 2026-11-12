@@ -132,7 +132,24 @@ entropy_context_map_decisions_match_fixtures() {
   "$HARNESS" entropy context-map 16 0 1 --mtf 0 1 > "$SCRATCH/context_tie.sem"
   cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/context_tie_raw_mtf.expected.sem" "$SCRATCH/context_tie.sem"
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures; do
+stage2_fixtures_reproduce() {
+  bash "$REFERENCE/make_stage2_fixtures.sh" "$SCRATCH/stage2"
+  python3 - "$REFERENCE/.." "$SCRATCH/stage2" <<'PYCODE'
+import hashlib,sys
+from pathlib import Path
+root=Path(sys.argv[1]); output=Path(sys.argv[2])
+manifest={line.split('\t')[0]:line.split('\t') for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#')}
+fixtures=sorted(p for p in output.iterdir() if p.is_file())
+names={'bounded_quantized.sem','coded_dimensions.sem','distance_params.sem','quant_bias.sem'}
+for stem in ('flower_1024','pixel_lifecycle_2057x521'):
+ names.update({stem+'.ppm',stem+'.ac.bin',stem+'.dc.bin',stem+'.stages.sem'})
+expected={name:manifest['Tests/JXLEncoderTests/Fixtures/semantic/'+name][2] for name in names}
+assert {p.name for p in fixtures}==names
+for fixture in fixtures:
+ assert hashlib.sha256(fixture.read_bytes()).hexdigest()==expected[fixture.name], fixture.name
+PYCODE
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures; do
   "$check"
   echo "PASS $check"
 done

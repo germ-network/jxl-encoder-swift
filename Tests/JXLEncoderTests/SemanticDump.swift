@@ -202,6 +202,7 @@ enum FloatTolerance: Equatable {
 		"inverse_quant_matrix.dct8.c2": .ulps(0),
 		"dc_quant_matrix.values": .ulps(0),
 		"inverse_dc_quant_matrix.values": .ulps(0),
+		"distance_params.effective_distance": .ulps(0),
 	]
 
 	func contains(_ a: Float, _ b: Float) -> Bool {
