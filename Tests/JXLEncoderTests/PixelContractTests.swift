@@ -18,7 +18,7 @@ struct PixelSemanticFixtureTests {
 				"missing \(category) emitter for \(entry.name)")
 			if !entry.knownIssues[category, default: []].isEmpty {
 				let issues = entry.knownIssues[category, default: []].sorted()
-				withKnownIssue(issues.joined(separator: ", ")) {
+				withKnownIssue(Comment(rawValue: issues.joined(separator: ", "))) {
 					#expect(emitted.differences(from: reference).isEmpty)
 				}
 			} else {
@@ -166,6 +166,127 @@ struct PixelSemanticFixtureTests {
 				let reference = try #require(referenceGroupDims[groupIndex])
 				#expect(reference.0 == group.widthInBlocks)
 				#expect(reference.1 == group.heightInBlocks)
+			}
+		}
+	}
+
+	@Test("every Swift AC and DC integer is compared with pinned upstream stages")
+	func coefficientIntegersMatchPinnedStages() throws {
+		for (name, width, height) in [
+			("flower_1024", 1024, 1024),
+			("pixel_lifecycle_2057x521", 2057, 521),
+		] {
+			let encoded = try SwiftSemanticEncoding.encode(
+				loadPPM(fixture: name), distance: 1)
+			let groups = try #require(encoded.decisions.pixelGroups)
+			let swift = SwiftSemanticEncoding.coefficients(
+				from: groups, dimension: ImageDim(width: width, height: height))
+			let dimension = ImageDim(width: width, height: height)
+			let metadata = try SemanticDump(fixture: name + ".stages")
+			let groupValues: [Int64]
+			switch metadata.fields["pixel_stages.ac_group_block_dims"] {
+			case .integers(let values): groupValues = values
+			default:
+				Issue.record("missing AC group dimensions for \(name)")
+				continue
+			}
+			let referenceGroups = stride(
+				from: 0, to: groupValues.count, by: 3
+			).map { offset in
+				(
+					index: Int(groupValues[offset]),
+					width: Int(groupValues[offset + 1]),
+					height: Int(groupValues[offset + 2])
+				)
+			}.sorted { $0.index < $1.index }
+			// The binary is ordered by absolute group ID; lifecycle metadata is not.
+			#expect(referenceGroups.map(\.index) == Array(0..<dimension.groupCount))
+			let upstreamAC = try UInt32Fixture(
+				name: name + ".ac", subdirectory: "Fixtures/semantic"
+			).values.map {
+				Int32(bitPattern: $0)
+			}
+			let upstreamDC = try UInt32Fixture(
+				name: name + ".dc", subdirectory: "Fixtures/semantic"
+			).values.map {
+				Int32(bitPattern: $0)
+			}
+			var expectedAC = Array(
+				repeating: Array(
+					repeating: Int32(0),
+					count: dimension.widthInBlocks * dimension.heightInBlocks
+						* 64),
+				count: 3)
+			var sourceOffset = 0
+			for referenceGroup in referenceGroups {
+				let group = try #require(
+					groups.first {
+						$0.groupY * dimension.widthInGroups + $0.groupX
+							== referenceGroup.index
+					})
+				let groupWidth = referenceGroup.width
+				let groupHeight = referenceGroup.height
+				let groupCoefficients = groupWidth * groupHeight * 64
+				for channel in 0..<3 {
+					for y in 0..<groupHeight {
+						for x in 0..<groupWidth {
+							let source =
+								sourceOffset + channel
+								* groupCoefficients
+								+ (y * groupWidth + x) * 64
+							let destination =
+								((group.groupY
+									* Geometry.groupDimInBlocks
+									+ y)
+									* dimension.widthInBlocks
+									+ group.groupX
+									* Geometry.groupDimInBlocks
+									+ x) * 64
+							expectedAC[channel][
+								destination..<(destination + 64)] =
+								upstreamAC[source..<(source + 64)]
+						}
+					}
+				}
+				sourceOffset += groupCoefficients * 3
+			}
+			#expect(sourceOffset == upstreamAC.count)
+			#expect(
+				upstreamDC.count == dimension.widthInBlocks
+					* dimension.heightInBlocks * 3)
+			for channel in 0..<3 {
+				let acIssues =
+					name == "flower_1024"
+					? ["GER-3387", "GER-3419"] : ["GER-3387"]
+				let acDifferences = zip(swift.ac[channel], expectedAC[channel])
+					.enumerated().filter { $0.element.0 != $0.element.1 }
+				let acDifferenceCount = acDifferences.count
+				let firstACDifference = acDifferences.first?.offset
+				#expect(swift.ac[channel].count == expectedAC[channel].count)
+				withKnownIssue(Comment(rawValue: acIssues.joined(separator: ", ")))
+				{
+					#expect(
+						acDifferenceCount == 0,
+						"\(name)#ac.c\(channel): \(acDifferenceCount) differences; first \(firstACDifference?.description ?? "none")"
+					)
+				}
+				let dcStart =
+					channel * dimension.widthInBlocks * dimension.heightInBlocks
+				let expectedChannelDC = upstreamDC[
+					dcStart..<(dcStart + dimension.widthInBlocks
+						* dimension.heightInBlocks)]
+				let actualChannelDC = swift.dc[channel].map(Int32.init)
+				let dcDifferences = zip(actualChannelDC, expectedChannelDC)
+					.enumerated().filter { $0.element.0 != $0.element.1 }
+				let dcDifferenceCount = dcDifferences.count
+				let firstDCDifference = dcDifferences.first?.offset
+				#expect(actualChannelDC.count == expectedChannelDC.count)
+				withKnownIssue(Comment(rawValue: "GER-3387")) {
+					#expect(
+						dcDifferenceCount == 0,
+						"\(name)#dc.c\(channel): \(dcDifferenceCount) differences; first \(firstDCDifference?.description ?? "none")"
+					)
+				}
 			}
 		}
 	}

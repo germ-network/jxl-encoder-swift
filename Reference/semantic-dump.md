@@ -252,10 +252,14 @@ Other frame configurations are rejected rather than partially dumped.
 | `pixel_stages` | `dimensions`, `ac_group_block_dims`, `dc_group_lifecycle`, `quant_field_mismatches` | full-frame dimensions; absolute AC group ids and block extents; per-DC-group crop, padding, origin and global-state lifecycle; zero when the recomputed raw quant field matches the decoded frame |
 
 The corresponding `.ac.bin` and `.dc.bin` fixtures preserve actual upstream
-coefficient-stage observations as group-major/channel-major AC and full-frame
-channel-major DC arrays. Their pixel arithmetic is not compared to Swift yet;
-placement is tested using unique synthetic channel/group/block values, while
-actual upstream metadata checks full-frame group extents and lifecycle.
+coefficient-stage observations as absolute-group/channel-major AC and
+full-frame channel-major DC arrays. Pixel semantic tests compare every Swift
+AC and DC integer against these observations after sorting lifecycle metadata
+by absolute group ID and mapping AC groups into full-frame coordinates.
+Expected per-channel divergences are isolated under GER-3387 and, for
+`flower_1024` AC, GER-3419. Separate synthetic values continue to verify
+placement of channel, group, and block identity; metadata checks full-frame
+group extents and lifecycle.
 
 The eight matrix and DC-constant float fields use `ulps(0)`, preserving
 signed-zero differences. The inverse AC matrix's demonstrated one-ULP entries

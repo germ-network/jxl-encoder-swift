@@ -276,7 +276,8 @@ struct SemanticFixtureTests {
 				#expect(
 					!issues.isEmpty
 						&& issues.isSubset(of: [
-							"GER-3386", "GER-3387", "GER-3388", "GER-3419",
+							"GER-3386", "GER-3387", "GER-3388",
+							"GER-3419",
 						]))
 			}
 		}
@@ -435,7 +436,8 @@ struct SemanticMutationTests {
 		let pair = try Self.encodings(contextFlip: true)
 		#expect(pair.actual.codestream != pair.baseline.codestream)
 		let differences = try SemanticDump(
-			swiftDecisions: pair.actual.decisions).differences(
+			swiftDecisions: pair.actual.decisions
+		).differences(
 			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
 		#expect(differences.map(\.field) == ["context_map.ac"])
 		#expect(differences.first?.kind == pair.expected)
@@ -448,7 +450,8 @@ struct SemanticMutationTests {
 		let pair = try Self.encodings(contextFlip: false)
 		#expect(pair.actual.codestream != pair.baseline.codestream)
 		let differences = try SemanticDump(
-			swiftDecisions: pair.actual.decisions).differences(
+			swiftDecisions: pair.actual.decisions
+		).differences(
 			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
 		#expect(differences.map(\.field) == [pair.field])
 		#expect(differences.first?.kind == pair.expected)
