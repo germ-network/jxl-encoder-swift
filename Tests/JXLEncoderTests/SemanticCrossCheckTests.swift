@@ -43,6 +43,14 @@ struct SemanticCrossCheckTests {
 				to: directory.appendingPathComponent(entry.name + ".swift.sem"),
 				atomically: true, encoding: .utf8)
 		}
+		for entry in JPEGSemanticCorpusEntry.all where entry.knownIssues.isEmpty {
+			let result = try entry.encoded()
+			try Data(result.codestream).write(
+				to: directory.appendingPathComponent(entry.name + ".jxl"))
+			try SemanticDump(swiftJPEGDecisions: result.decisions).serialized.write(
+				to: directory.appendingPathComponent(entry.name + ".swift.sem"),
+				atomically: true, encoding: .utf8)
+		}
 		for (flip, suffix) in [(true, "ctxflip"), (false, "orderswap")] {
 			let pair = try SemanticMutationTests.encodings(contextFlip: flip)
 			try Data(pair.actual.codestream).write(
@@ -65,8 +73,8 @@ struct SemanticCrossCheckTests {
 		try Self.writeEncodings(to: directory)
 		let files = try FileManager.default.contentsOfDirectory(
 			at: directory, includingPropertiesForKeys: nil)
-		#expect(files.filter { $0.pathExtension == "jxl" }.count == 7)
-		#expect(files.filter { $0.lastPathComponent.hasSuffix(".swift.sem") }.count == 5)
+		#expect(files.filter { $0.pathExtension == "jxl" }.count == 8)
+		#expect(files.filter { $0.lastPathComponent.hasSuffix(".swift.sem") }.count == 6)
 	}
 
 	@Test(
@@ -74,22 +82,27 @@ struct SemanticCrossCheckTests {
 		.enabled(if: directory != nil))
 	func harnessAgreesWithEmitters() throws {
 		let directory = try #require(Self.directory)
-		#expect(SemanticCorpusEntry.all.count == 5)
-		for entry in SemanticCorpusEntry.all {
+		let pixelEntries = SemanticCorpusEntry.all.map { ($0.name, $0.knownIssues) }
+		let jpegEntries = JPEGSemanticCorpusEntry.all
+			.filter { $0.knownIssues.isEmpty }.map { ($0.name, $0.knownIssues) }
+		#expect(pixelEntries.count == 5)
+		#expect(jpegEntries.count == 1)
+		for (name, issues) in pixelEntries + jpegEntries {
 			let reference = try SemanticDump(
 				parsing: String(
 					contentsOf: directory.appendingPathComponent(
-						entry.name + ".harness.sem"), encoding: .utf8))
+						name + ".harness.sem"), encoding: .utf8))
 			let actual = try SemanticDump(
 				parsing: String(
 					contentsOf: directory.appendingPathComponent(
-						entry.name + ".swift.sem"), encoding: .utf8))
+						name + ".swift.sem"), encoding: .utf8))
 			#expect(
 				Set(actual.fields.keys.map { String($0.split(separator: ".")[0]) })
 					== SemanticDump.swiftEmittedCategories)
+			if name == "jpeg_flat_444" { #expect(issues.isEmpty) }
 			#expect(
 				reference.differences(from: actual).isEmpty,
-				"\(entry.name): \(reference.differences(from: actual))")
+				"\(name): \(reference.differences(from: actual))")
 		}
 	}
 

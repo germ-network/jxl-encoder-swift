@@ -13,4 +13,4 @@ for file in "$OUT"/*.jxl; do
   "$HARNESS" dump "$file" > "${file%.jxl}.harness.sem"
 done
 swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/(harnessAgreesWithEmitters|mutationsDifferInMutatedFieldOnly)'
-echo 'PASS semantic cross-check: five encodes and two decoded mutations'
+echo 'PASS semantic cross-check: six encodes and two decoded mutations'

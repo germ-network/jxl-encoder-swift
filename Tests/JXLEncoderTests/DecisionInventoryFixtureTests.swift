@@ -41,8 +41,11 @@ struct DecisionInventoryFixtureTests {
 		if StageFixtureKnownIssues.byFixture[reference.path] != nil { return .knownIssue }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
-			guard SemanticCase.references.contains(key) else { return .notCompared }
-			if SemanticCase.knownIssueReferences.contains(key) { return .knownIssue }
+			let references = SemanticCase.references.union(JPEGSemanticCase.references)
+			guard references.contains(key) else { return .notCompared }
+			let knownIssues = SemanticCase.knownIssueReferences.union(
+				JPEGSemanticCase.knownIssueReferences)
+			if knownIssues.contains(key) { return .knownIssue }
 		} else if row.consumers.isEmpty {
 			return .notCompared
 		}
