@@ -31,7 +31,8 @@ echo "Building jxl-harness against $TARGET_DIR..."
 # shellcheck disable=SC2086
 cmake -S "$HERE/harness" -B "$OUT" $CMAKE_FLAGS_RELEASE \
 	-DLIBJXL_DIR="$TARGET_DIR" -DLIBJXL_COMMIT="$LIBJXL_COMMIT" >/dev/null
-cmake --build "$OUT" --target jxl-harness -j"$NCPU" >/dev/null
+# GNU Make 3.81 splits the spaced Xcode developer path in recursive calls.
+env -u DEVELOPER_DIR cmake --build "$OUT" --target jxl-harness cjxl -j"$NCPU" >/dev/null
 
 "$HERE/pin-check.sh" "$TARGET_DIR"
-echo "Built $OUT/jxl-harness"
+echo "Built $OUT/jxl-harness and $OUT/libjxl/tools/cjxl"

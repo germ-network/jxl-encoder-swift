@@ -28,6 +28,6 @@ add_executable(jxl-harness ${HARNESS_SOURCES})
 target_include_directories(jxl-harness PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
   "${LIBJXL_DIR}")
-target_link_libraries(jxl-harness PRIVATE jxl-internal jxl_cms hwy)
+target_link_libraries(jxl-harness PRIVATE jxl-internal jxl_cms jxl_threads hwy)
 
 target_compile_definitions(jxl-harness PRIVATE LIBJXL_COMMIT="${LIBJXL_COMMIT}")

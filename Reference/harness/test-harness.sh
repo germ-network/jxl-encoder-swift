@@ -120,3 +120,4 @@ for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_w
   "$check"
   echo "PASS $check"
 done
+bash "$HERE/test-jpeg.sh"
