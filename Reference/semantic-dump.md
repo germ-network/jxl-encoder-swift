@@ -139,6 +139,14 @@ manifest records each input hash, encoder settings, source revision and SIMD
 target. It does not treat a successful reference rejection as a semantic
 fixture; 4:1:1 remains an explicit rejected input.
 
+For the three 513×267 color inputs, the generator also decodes the reference
+JXL with `jpeg-witness` and verifies its dimensions, sampling, DCT8 strategy,
+raw quant field and DC roundtrip before emitting `*_context.sem`. That witness
+uses the decoded frame's block-context map and the source JPEG's DC values to
+record full-resolution luma buckets and per-group AC tokens. Swift compares the
+whole witness, so the checks include sampled chroma positions and group edges;
+they are not inferred from the ordinary semantic dump.
+
 The decoder accepts a bare codestream or extracts a single codestream from a
 validated JXL container. Container extraction checks box bounds and supports
 `jxlc`, ordered `jxlp` fragments, extended sizes and zero-to-EOF box lengths;
