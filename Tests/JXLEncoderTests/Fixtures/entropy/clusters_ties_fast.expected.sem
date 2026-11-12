@@ -1,0 +1,8 @@
+jxl-semantic-dump 1
+entropy.clusters.alphabet_lengths i 2 3 3
+entropy.clusters.count i 1 2
+entropy.clusters.histogram_counts i 6 40 80 40 40 0 40
+entropy.clusters.input_total_count i 1 240
+entropy.clusters.map i 3 0 1 0
+entropy.clusters.output_total_count i 1 240
+entropy.clusters.total_counts i 2 160 80

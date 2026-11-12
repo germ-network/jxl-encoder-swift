@@ -120,10 +120,13 @@ struct SemanticDump: Equatable {
 	/// rather than compared, so every float comparison is a documented one.
 	func differences(
 		from reference: SemanticDump,
+		excludingFields: Set<String> = [],
 		tolerances: [String: FloatTolerance] = FloatTolerance.documented
 	) -> [SemanticDifference] {
 		var result: [SemanticDifference] = []
-		for name in Set(fields.keys).union(reference.fields.keys).sorted() {
+		for name in Set(fields.keys).union(reference.fields.keys).subtracting(
+			excludingFields
+		).sorted() {
 			func add(_ kind: SemanticDifference.Kind) {
 				result.append(SemanticDifference(field: name, kind: kind))
 			}
@@ -234,5 +237,7 @@ enum SemanticDumpError: Error, Equatable {
 	case badHeader(String)
 	case malformedLine(line: Int, reason: String)
 	case duplicateField(String)
+	case malformedEntropyFixture(name: String, field: String)
+	case unsupportedEntropyFixture(String)
 	case unimplemented
 }
