@@ -224,9 +224,8 @@ struct SemanticFixtureTests {
 				let expected = (0..<(dim.widthInBlocks * dim.heightInBlocks)).map {
 					Int64(1 + $0 % 251)
 				}
-				#expect(
-					SemanticDump(swiftDecisions: decisions).fields[
-						"quant_field.raw"] == .integers(expected))
+				let dump = try SemanticDump(swiftDecisions: decisions)
+				#expect(dump.fields["quant_field.raw"] == .integers(expected))
 			}
 		}
 	}
@@ -284,7 +283,7 @@ struct SemanticFixtureTests {
 		"Swift's decisions match the pinned libjxl's",
 		arguments: SemanticCase.all)
 	func matchesReference(_ semanticCase: SemanticCase) throws {
-		let actual = SemanticDump(
+		let actual = try SemanticDump(
 			swiftDecisions: try semanticCase.entry.encoded().decisions
 		).restricted(to: [semanticCase.category])
 		let reference = try SemanticDump(fixture: semanticCase.entry.name).restricted(to: [
@@ -412,8 +411,9 @@ struct SemanticMutationTests {
 	func flippedContextMapEntryCaught() throws {
 		let pair = try Self.encodings(contextFlip: true)
 		#expect(pair.actual.codestream != pair.baseline.codestream)
-		let differences = SemanticDump(swiftDecisions: pair.actual.decisions).differences(
-			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
+		let differences = try SemanticDump(swiftDecisions: pair.actual.decisions)
+			.differences(
+				from: SemanticDump(swiftDecisions: pair.baseline.decisions))
 		#expect(differences.map(\.field) == ["context_map.ac"])
 		#expect(differences.first?.kind == pair.expected)
 	}
@@ -424,8 +424,9 @@ struct SemanticMutationTests {
 	func swappedCoeffOrderCaught() throws {
 		let pair = try Self.encodings(contextFlip: false)
 		#expect(pair.actual.codestream != pair.baseline.codestream)
-		let differences = SemanticDump(swiftDecisions: pair.actual.decisions).differences(
-			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
+		let differences = try SemanticDump(swiftDecisions: pair.actual.decisions)
+			.differences(
+				from: SemanticDump(swiftDecisions: pair.baseline.decisions))
 		#expect(differences.map(\.field) == [pair.field])
 		#expect(differences.first?.kind == pair.expected)
 	}

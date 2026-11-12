@@ -135,8 +135,9 @@ extension SemanticDump {
 
 	/// The dump of `decisions` in exactly the field names and layout the
 	/// harness's decoder-side dumpers write for the same categories.
-	init(swiftDecisions decisions: SwiftFrameDecisions) {
+	init(swiftDecisions decisions: SwiftFrameDecisions) throws {
 		self.init()
+		try recordACEntropyCode(decisions.acCode)
 		let dim = ImageDim(width: decisions.width, height: decisions.height)
 		let params = decisions.params
 		record("frame.size", .integers([Int64(decisions.width), Int64(decisions.height)]))
