@@ -131,6 +131,7 @@ extension SemanticDump {
 	/// Lanes that add a category add it here alongside its emitter.
 	static let swiftEmittedCategories: Set<String> = [
 		"frame", "coeff_order", "block_context", "context_map", "quant_field",
+		"ac_entropy", "ac_entropy_alphabet",
 	]
 
 	/// The dump of `decisions` in exactly the field names and layout the

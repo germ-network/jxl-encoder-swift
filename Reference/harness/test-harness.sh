@@ -65,7 +65,9 @@ for p in output.glob('*'):
  assert hashlib.sha256(p.read_bytes()).hexdigest()==rows[path][2], path
 for name in expected:
  fields={line.split()[0]:line.split()[1:] for line in (output/(name+'.sem')).read_text().splitlines()[1:]}
- required={'frame.size','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame.xyb','frame.qm_scales','frame.loop_filter.gab','frame.loop_filter.epf_iters','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc'}
+ required={'frame.size','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame.xyb','frame.qm_scales','frame.loop_filter.gab','frame.loop_filter.epf_iters','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc','ac_entropy.kind','ac_entropy.table_count','ac_entropy.uint_config','ac_entropy.lz77_enabled','ac_entropy_alphabet.ans_log_alpha_size'}
+ if fields['ac_entropy.kind'][2]=='1': required|={'ac_entropy.ans.alphabet_lengths','ac_entropy.ans.frequencies'}
+ else: required|={'ac_entropy.prefix.alphabet_lengths','ac_entropy.prefix.singleton_symbols','ac_entropy.prefix.depths'}
  assert set(fields)==required, name
  size={'edge':(32,32),'multigroup':(301,301),'flower_512_d1':(512,512),'flower_512_d3':(512,512),'flower_1024':(1024,1024)}[name]
  assert list(map(int,fields['frame.size'][2:]))==list(size)

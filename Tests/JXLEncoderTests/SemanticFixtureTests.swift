@@ -34,24 +34,32 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 			knownIssues: [
 				"frame": ["GER-3387"], "block_context": ["GER-3387"],
 				"context_map": ["GER-3387"],
+				"ac_entropy": ["GER-3386"],
+				"ac_entropy_alphabet": ["GER-3388"],
 			]),
 		SemanticCorpusEntry(
 			name: "multigroup", input: .linear(file: "multigroup_linear"), distance: 1,
 			knownIssues: [
 				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"ac_entropy": ["GER-3386"],
+				"ac_entropy_alphabet": ["GER-3388"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_512_d1", input: .srgb8(file: "flower_512"), distance: 1,
 			knownIssues: [
 				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"ac_entropy": ["GER-3386"],
+				"ac_entropy_alphabet": ["GER-3388"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_512_d3", input: .srgb8(file: "flower_512"), distance: 3,
 			knownIssues: [
 				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"ac_entropy": ["GER-3386"],
+				"ac_entropy_alphabet": ["GER-3388"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_1024", input: .srgb8(file: "flower_1024"), distance: 1,
@@ -59,6 +67,8 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"coeff_order": ["GER-3386", "GER-3387", "GER-3419"],
 				"frame": ["GER-3387"], "block_context": ["GER-3387"],
 				"context_map": ["GER-3387", "GER-3419"],
+				"ac_entropy": ["GER-3386"],
+				"ac_entropy_alphabet": ["GER-3388"],
 			]),
 	]
 }
@@ -245,15 +255,16 @@ struct SemanticFixtureTests {
 	@Test("every known issue names an emitted category and an accepted issue")
 	func knownIssuesWellFormed() throws {
 		#expect(Set(SemanticCorpusEntry.all.map(\.name)).count == 5)
-		#expect(SemanticCase.all.count == 25)
-		#expect(SemanticCase.references.count == 25)
+		#expect(SemanticCase.all.count == 35)
+		#expect(SemanticCase.references.count == 35)
 		for entry in SemanticCorpusEntry.all {
 			for (category, issues) in entry.knownIssues {
 				#expect(SemanticDump.swiftEmittedCategories.contains(category))
 				#expect(
 					!issues.isEmpty
 						&& issues.isSubset(of: [
-							"GER-3386", "GER-3387", "GER-3419",
+							"GER-3386", "GER-3387", "GER-3388",
+							"GER-3419",
 						]))
 			}
 		}
