@@ -12,11 +12,15 @@ enum RepositoryLayout {
 		for start in [file.deletingLastPathComponent(), workingDirectory] {
 			var directory = start
 			while directory.path != directory.deletingLastPathComponent().path {
-				if FileManager.default.fileExists(
-					atPath: directory.appendingPathComponent(
-						"Reference/libjxl.pin"
-					).path)
-				{
+				let markers = [
+					"Package.swift",
+					"Sources/JXLEncoder",
+					"Reference/libjxl.pin",
+				]
+				if markers.allSatisfy({
+					FileManager.default.fileExists(
+						atPath: directory.appendingPathComponent($0).path)
+				}) {
 					return directory
 				}
 				directory.deleteLastPathComponent()
