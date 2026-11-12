@@ -8,6 +8,7 @@ import Foundation
 struct SwiftFrameDecisions {
 	let width: Int
 	let height: Int
+	let transferFunction: TransferFunction
 	let params: DistanceParams
 	var coeffOrder: CoeffOrder.Result
 	var acCode: EntropyCode
@@ -16,6 +17,7 @@ struct SwiftFrameDecisions {
 	/// Per AC group, in group raster order: the raw quant field the group
 	/// wrote, block-major.
 	var quantFields: [[UInt8]]
+	var pixelGroups: [Encoder.ACGroupCompute]?
 }
 
 /// Re-runs `Encoder.encodeFrame`'s optimized composition from the same
@@ -119,9 +121,10 @@ enum SwiftSemanticEncoding {
 		return Result(
 			codestream: writer.take(),
 			decisions: SwiftFrameDecisions(
-				width: width, height: height, params: params, coeffOrder: order,
+				width: width, height: height, transferFunction: transfer,
+				params: params, coeffOrder: order,
 				acCode: acCode, dcCode: dcCode,
-				quantFields: computes.map(\.quantField)))
+				quantFields: computes.map(\.quantField), pixelGroups: computes))
 	}
 
 }
