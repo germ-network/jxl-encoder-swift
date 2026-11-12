@@ -1,0 +1,38 @@
+name: Android
+
+on:
+  push:
+    # branches:
+    #   - main
+    paths-ignore:
+      - 'README.md'
+      - 'CODE_OF_CONDUCT.md'
+      - '.editorconfig'
+      - '.spi.yml'
+  pull_request:
+    branches:
+      - main
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  cancel-in-progress: true
+
+# These jobs only need to read the repository.
+permissions:
+  contents: read
+
+jobs:
+  linux-android:
+    name: Test Android (portable core)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # Match oauth4swift's Android toolchain and emulator test action.
+      - name: Test Swift package on Android
+        id: android
+        uses: skiptools/swift-android-action@2044b79660f201ccef8cbce62877e4ec5409f9c8 # v2.9.5
+        with:
+          swift-version: '6.3'
+      - name: Build portable core for Android
+        run: ${{ steps.android.outputs.swift-build }} --target JXLEncoder
