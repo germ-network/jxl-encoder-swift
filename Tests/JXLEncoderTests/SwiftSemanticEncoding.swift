@@ -133,8 +133,11 @@ extension SemanticDump {
 	/// The harness categories the Swift side emits from its own decisions.
 	/// Lanes that add a category add it here alongside its emitter.
 	static let swiftEmittedCategories: Set<String> = [
-		"frame", "coeff_order", "block_context", "context_map", "quant_field",
-		"ac_entropy", "ac_entropy_alphabet",
+		"image_header", "image_sample_format", "frame", "frame_flags", "gaborish",
+		"epf", "x_matrix_scale", "b_matrix_scale", "coeff_order", "block_context",
+		"context_map", "quant_field", "quant_matrix", "inverse_quant_matrix",
+		"dc_quant_matrix", "inverse_dc_quant_matrix", "ac_entropy",
+		"ac_entropy_alphabet",
 	]
 
 	/// The dump of `decisions` in exactly the field names and layout the
@@ -144,16 +147,10 @@ extension SemanticDump {
 		try recordACEntropyCode(decisions.acCode)
 		let dim = ImageDim(width: decisions.width, height: decisions.height)
 		let params = decisions.params
-		record("frame.size", .integers([Int64(decisions.width), Int64(decisions.height)]))
 		record("frame.encoding", .integers([0]))
 		record("frame.groups", .integers([Int64(dim.groupCount)]))
 		record("frame.dc_groups", .integers([Int64(dim.dcGroupCount)]))
 		record("frame.passes", .integers([1]))
-		record("frame.xyb", .integers([1]))
-		record("frame.qm_scales", .integers([Int64(params.xQuantMatrixScale), 2]))
-		// The default filter syntax at two iterations also enables gaborish.
-		record("frame.loop_filter.gab", .integers([params.epfIterations == 2 ? 1 : 0]))
-		record("frame.loop_filter.epf_iters", .integers([Int64(params.epfIterations)]))
 		for channel in 0..<3 {
 			record(
 				"coeff_order.dct8.c\(channel)",
@@ -193,5 +190,6 @@ extension SemanticDump {
 		record("quant_field.raw", .integers(quant))
 		record("quant_field.global_scale", .integers([Int64(params.globalScale)]))
 		record("quant_field.quant_dc", .integers([Int64(params.quantDC)]))
+		recordPixelDecisions(decisions)
 	}
 }

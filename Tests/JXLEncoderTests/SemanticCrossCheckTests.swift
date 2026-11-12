@@ -101,8 +101,14 @@ struct SemanticCrossCheckTests {
 					== SemanticDump.swiftEmittedCategories)
 			if name == "jpeg_flat_444" { #expect(issues.isEmpty) }
 			#expect(
-				reference.differences(from: actual).isEmpty,
-				"\(name): \(reference.differences(from: actual))")
+				reference.restricted(to: SemanticDump.decoderObservableCategories)
+					.differences(
+						from: actual.restricted(
+							to: SemanticDump.decoderObservableCategories
+						)
+					).isEmpty,
+				"\(name): \(reference.restricted(to: SemanticDump.decoderObservableCategories).differences(from: actual.restricted(to: SemanticDump.decoderObservableCategories)))"
+			)
 		}
 	}
 

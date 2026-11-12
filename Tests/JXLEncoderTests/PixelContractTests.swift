@@ -1,24 +1,54 @@
 import Testing
 
+@testable import JXLEncoder
+
 @Suite("Pixel semantic fixtures")
 struct PixelSemanticFixtureTests {
+	private func assertFixture(_ entry: SemanticCorpusEntry, categories: Set<String>) throws {
+		let expected = try SemanticDump(fixture: entry.name)
+		let actual = try SemanticDump(swiftDecisions: try entry.encoded().decisions)
+		for category in categories {
+			let reference = expected.restricted(to: [category])
+			let emitted = actual.restricted(to: [category])
+			#expect(
+				!reference.fields.isEmpty,
+				"missing \(category) fixture for \(entry.name)")
+			#expect(
+				!emitted.fields.isEmpty,
+				"missing \(category) emitter for \(entry.name)")
+			if !entry.knownIssues[category, default: []].isEmpty {
+				let issues = entry.knownIssues[category, default: []].sorted()
+				withKnownIssue(issues.joined(separator: ", ")) {
+					#expect(emitted.differences(from: reference).isEmpty)
+				}
+			} else {
+				#expect(
+					emitted.differences(from: reference).isEmpty,
+					"\(entry.name)#\(category)")
+			}
+		}
+	}
+
 	@Test(
 		"image header fields match the pinned reference independently of sample format",
-		.disabled("Awaiting independent image-header fixtures and exact field comparisons"))
-	func imageHeaderFieldsMatchReference() {
-		Issue.record(
-			"Compare decoded size, transfer function, color metadata, XYB and extra-channel fields exactly against the pinned reference."
-		)
+	)
+	func imageHeaderFieldsMatchReference() throws {
+		let categories: Set<String> = ["image_header", "image_sample_format"]
+		for entry in SemanticCorpusEntry.all {
+			try assertFixture(entry, categories: categories)
+		}
 	}
 
 	@Test(
 		"filter decisions match the pinned reference as independent comparison units",
-		.disabled(
-			"Awaiting independent frame-flag, gaborish, EPF and matrix-scale fixtures"))
-	func filterFieldsMatchReference() {
-		Issue.record(
-			"Compare frame flags, gaborish, EPF iterations and separate X/B matrix scales exactly without one known divergence masking another unit."
-		)
+	)
+	func filterFieldsMatchReference() throws {
+		let categories: Set<String> = [
+			"frame_flags", "gaborish", "epf", "x_matrix_scale", "b_matrix_scale",
+		]
+		for entry in SemanticCorpusEntry.all {
+			try assertFixture(entry, categories: categories)
+		}
 	}
 
 	@Test(
@@ -46,22 +76,40 @@ struct PixelSemanticFixtureTests {
 struct QuantMatrixFixtureTests {
 	@Test(
 		"forward quantization matrices and DC constants match the pinned reference exactly",
-		.disabled(
-			"Awaiting forward AC and DC matrix fixtures with strict float comparisons"))
-	func matricesMatchReference() {
-		Issue.record(
-			"Compare all 64 forward matrix entries in each X/Y/B channel and the separate forward DC constants with zero-ULP float equality, preserving signed zero."
-		)
+	)
+	func matricesMatchReference() throws {
+		let reference = try SemanticDump(fixture: "edge")
+		let emitted = try SemanticDump(
+			swiftDecisions: try SemanticCorpusEntry.all[0].encoded().decisions)
+		let categories: Set<String> = ["quant_matrix", "dc_quant_matrix"]
+		for category in categories {
+			let expected = reference.restricted(to: [category])
+			let actual = emitted.restricted(to: [category])
+			#expect(!expected.fields.isEmpty, "missing \(category) fixture")
+			#expect(actual.differences(from: expected).isEmpty)
+		}
 	}
 
 	@Test(
 		"inverse quantization matrices and DC constants are compared independently",
-		.disabled("Awaiting inverse AC and DC matrix fixtures with explicit DC-slot policy")
 	)
-	func inverseMatricesMatchReference() {
-		Issue.record(
-			"Compare all 64 inverse matrix entries per channel, including the already-zero DC slot, and separate inverse DC constants with zero-ULP equality; isolate documented inverse divergences."
-		)
+	func inverseMatricesMatchReference() throws {
+		let reference = try SemanticDump(fixture: "edge")
+		let emitted = try SemanticDump(
+			swiftDecisions: try SemanticCorpusEntry.all[0].encoded().decisions)
+		let categories: Set<String> = ["inverse_quant_matrix", "inverse_dc_quant_matrix"]
+		for category in categories {
+			let expected = reference.restricted(to: [category])
+			let actual = emitted.restricted(to: [category])
+			#expect(!expected.fields.isEmpty, "missing \(category) fixture")
+			if category == "inverse_quant_matrix" {
+				withKnownIssue("inverse AC matrix has known 1 ULP entries") {
+					#expect(actual.differences(from: expected).isEmpty)
+				}
+			} else {
+				#expect(actual.differences(from: expected).isEmpty)
+			}
+		}
 	}
 }
 
@@ -113,10 +161,24 @@ extension ChromaSubsamplingTests {
 extension ImageHeaderTests {
 	@Test(
 		"image header capture preserves the transfer function passed to the writer",
-		.disabled("Awaiting linear and sRGB header capture comparisons"))
-	func imageHeaderTransferFunctionIsCaptured() {
-		Issue.record(
-			"Compare captured linear and sRGB transfer functions with the corresponding written and reference-decoded image headers."
-		)
+	)
+	func imageHeaderTransferFunctionIsCaptured() throws {
+		let linearInput = try StageDump(fixture: "edge_linear")
+		let linear = try SwiftSemanticEncoding.encode(linear: linearInput, distance: 1)
+		let srgbInput = try loadPPM(fixture: "flower_512")
+		let srgb = try SwiftSemanticEncoding.encode(srgbInput, distance: 1)
+		for (result, value) in [(linear, 8), (srgb, 13)] {
+			#expect(
+				try SemanticDump(swiftDecisions: result.decisions).fields[
+					"image_header.transfer_function"]
+					== .integers([Int64(value)]))
+			var written = BitWriter()
+			try ImageHeader.write(
+				width: result.decisions.width, height: result.decisions.height,
+				transferFunction: result.decisions.transferFunction, to: &written)
+			#expect(
+				Array(result.codestream.prefix(written.bytes.count))
+					== written.bytes)
+		}
 	}
 }

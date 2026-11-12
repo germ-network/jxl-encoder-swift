@@ -193,7 +193,16 @@ enum FloatTolerance: Equatable {
 
 	/// The per-field table `Reference/semantic-dump.md` documents. Keys are
 	/// full field names.
-	static let documented: [String: FloatTolerance] = [:]
+	static let documented: [String: FloatTolerance] = [
+		"quant_matrix.dct8.c0": .ulps(0),
+		"quant_matrix.dct8.c1": .ulps(0),
+		"quant_matrix.dct8.c2": .ulps(0),
+		"inverse_quant_matrix.dct8.c0": .ulps(0),
+		"inverse_quant_matrix.dct8.c1": .ulps(0),
+		"inverse_quant_matrix.dct8.c2": .ulps(0),
+		"dc_quant_matrix.values": .ulps(0),
+		"inverse_dc_quant_matrix.values": .ulps(0),
+	]
 
 	func contains(_ a: Float, _ b: Float) -> Bool {
 		guard a.isFinite, b.isFinite else { return false }

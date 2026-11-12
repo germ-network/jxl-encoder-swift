@@ -212,19 +212,27 @@ The actual encoder stores a one-bit placeholder for a prefix singleton; the
 decoder consumes zero bits. The semantic dump records the decoder form. AC
 LZ77 is unsupported and a reference frame with it enabled is rejected.
 
-All fields below are `i` (signed decimal integers); no float tolerance is
-needed for these categories. The supported first frame is single-pass VarDCT,
+Integer fields are `i` (signed decimal integers). Matrix and DC-constant
+fields are `f` (float32) with strict zero-ULP comparisons. The supported first
+frame is single-pass VarDCT,
 with DCT8 only and no preview, as produced by the corpus's e4 pixel path.
 Other frame configurations are rejected rather than partially dumped.
 
 | category | field suffix | layout |
 |---|---|---|
-| `frame` | `size` | width, height in pixels |
+| `ac_entropy` | `kind`, `table_count`, `uint_config`, `lz77_enabled`, `ans.*` or `prefix.*` | decoded AC code-table type and transmitted table contents; ANS frequencies or prefix depths, in table order |
+| `ac_entropy_alphabet` | `ans_log_alpha_size` | one ANS alphabet precision value, empty for prefix coding |
 | `frame` | `encoding` | scalar; 0 = VarDCT |
 | `frame` | `groups`, `dc_groups`, `passes` | one scalar each |
-| `frame` | `xyb` | scalar boolean, XYB color transform |
-| `frame` | `qm_scales` | X scale, B scale |
-| `frame` | `loop_filter.gab`, `loop_filter.epf_iters` | boolean and iteration count, one scalar each |
+| `image_header` | `size` | width, height in pixels |
+| `image_header` | `transfer_function`, `color_space`, `white_point`, `primaries`, `rendering_intent`, `xyb`, `num_extra_channels` | one decoded metadata value each |
+| `image_sample_format` | `floating_point`, `bits_per_sample`, `exponent_bits_per_sample` | one decoded source-sample metadata value each |
+| `frame_flags` | `flags` | scalar frame-header flags |
+| `gaborish` | `enabled` | scalar boolean |
+| `epf` | `iterations` | scalar iteration count |
+| `x_matrix_scale`, `b_matrix_scale` | `value` | scalar scale index, independent per channel |
+| `quant_matrix`, `inverse_quant_matrix` | `dct8.c0`, `dct8.c1`, `dct8.c2` | 64 float32 values per X/Y/B channel in transform row order |
+| `dc_quant_matrix`, `inverse_dc_quant_matrix` | `values` | three float32 constants in X/Y/B order |
 | `coeff_order` | `nondefault_orders` | scalar derived bitmask: bucket bit is set iff any channel's decoded permutation differs from its natural order; only bit 0 (DCT8) can be set here |
 | `coeff_order` | `dct8.c0`, `dct8.c1`, `dct8.c2` | 64 decoded coefficient indices per channel, in scan order |
 | `block_context` | `dc_thresholds.c0`, `dc_thresholds.c1`, `dc_thresholds.c2` | ordered DC thresholds per channel, possibly empty |
@@ -235,6 +243,11 @@ Other frame configurations are rejected rather than partially dumped.
 | `context_map` | `ac` | first pass's AC map, trimmed to `num_histograms * NumACContexts()`; no decoder padding |
 | `quant_field` | `raw` | integer raw quantizer per block, whole-frame block raster order |
 | `quant_field` | `global_scale`, `quant_dc` | one scalar each, exact integer `QuantizerParams` values |
+
+The eight matrix and DC-constant float fields use `ulps(0)`, preserving
+signed-zero differences. The inverse AC matrix's demonstrated one-ULP entries
+remain a GER-3387 known issue; forward AC matrices and both DC constant sets
+are compared independently.
 
 `coeff_order.nondefault_orders` describes the decoded permutation, not the
 signaling syntax. At the pinned e4 configuration upstream clears the signaled

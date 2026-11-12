@@ -26,5 +26,22 @@ done
 "$HARNESS" encode "$HERE/../Tests/JXLEncoderTests/Fixtures/semantic/ac_entropy_flat.ppm" 1 "$SCRATCH/ac_entropy_flat_singleton.jxl"
 "$HARNESS" dump "$SCRATCH/ac_entropy_flat_singleton.jxl" ac_entropy ac_entropy ac_entropy_alphabet > "$OUT/ac_entropy_flat_singleton.sem"
 "$HARNESS" dump "$HERE/../Tests/JXLEncoderTests/Fixtures/edge_whole.jxl" ac_entropy ac_entropy ac_entropy_alphabet > "$OUT/ac_entropy_static_prefix.sem"
+"$HARNESS" pixel-matrices "$SCRATCH/matrices.sem"
+python3 - "$OUT" "$SCRATCH/matrices.sem" <<'PYCODE'
+import sys
+from pathlib import Path
+
+directory = Path(sys.argv[1])
+matrix_fields = Path(sys.argv[2]).read_text().splitlines()[1:]
+for name in ('edge', 'multigroup', 'flower_512_d1', 'flower_512_d3', 'flower_1024'):
+    fixture = directory / f'{name}.sem'
+    fields = {line.split(' ', 1)[0]: line for line in fixture.read_text().splitlines()[1:]}
+    for line in matrix_fields:
+        name = line.split(' ', 1)[0]
+        if name in fields:
+            raise SystemExit(f'duplicate semantic field: {name}')
+        fields[name] = line
+    fixture.write_text('jxl-semantic-dump 1\n' + '\n'.join(fields[name] for name in sorted(fields)) + '\n')
+PYCODE
 "$HARNESS" version
 "$HERE/pin-check.sh" "$LINKED"
