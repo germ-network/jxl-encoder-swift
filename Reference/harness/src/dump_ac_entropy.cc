@@ -73,7 +73,7 @@ void Dump(const DecodedFrame& frame, SemanticDumpWriter& out) {
     return;
   }
 
-  if (code.huffman_data.size() != count || code.degenerate_symbols.size() != count)
+  if (code.huffman_data.size() != count)
     Reject("invalid prefix table count");
 
   std::vector<int64_t> lengths, singletons, depths;
@@ -81,35 +81,41 @@ void Dump(const DecodedFrame& frame, SemanticDumpWriter& out) {
     const auto& table = code.huffman_data[index].table_;
     if (table.size() < (1u << jxl::kHuffmanTableBits))
       Reject("invalid prefix table");
-    std::vector<int64_t> symbols;
     std::vector<uint8_t> symbol_depths(PREFIX_MAX_ALPHABET_SIZE, 0);
+    int singleton = -1;
     const size_t root_size = 1u << jxl::kHuffmanTableBits;
     for (size_t root = 0; root < root_size; ++root) {
       const auto& item = table[root];
       if (item.bits > PREFIX_MAX_BITS) Reject("invalid prefix code depth");
+      if (item.value >= symbol_depths.size()) Reject("invalid prefix symbol index");
+      if (item.bits == 0) {
+        if (singleton >= 0 && singleton != item.value)
+          Reject("inconsistent prefix singleton leaves");
+        singleton = item.value;
+        continue;
+      }
       if (item.bits <= jxl::kHuffmanTableBits) {
-        if (item.value >= symbol_depths.size()) Reject("invalid prefix symbol index");
         symbol_depths[item.value] = item.bits;
       } else {
         const size_t extra = item.bits - jxl::kHuffmanTableBits;
         const size_t offset = item.value;
         const size_t entries = 1u << extra;
-        if (offset + entries > table.size()) Reject("invalid prefix extension");
+        if (offset > table.size() - root ||
+            entries > table.size() - root - offset)
+          Reject("invalid prefix extension");
+        const size_t extension = root + offset;
         for (size_t i = 0; i < entries; ++i) {
-          const auto& leaf = table[offset + i];
+          const auto& leaf = table[extension + i];
           if (leaf.bits > PREFIX_MAX_BITS) Reject("invalid prefix code depth");
+          if (leaf.value >= symbol_depths.size())
+            Reject("invalid prefix symbol index");
           if (leaf.bits <= extra) {
-            if (leaf.value >= symbol_depths.size())
-              Reject("invalid prefix symbol index");
             symbol_depths[leaf.value] = jxl::kHuffmanTableBits + leaf.bits;
           }
         }
       }
     }
-    const int singleton = code.degenerate_symbols[index];
     if (singleton >= 0) {
-      if (singleton >= static_cast<int>(symbol_depths.size()))
-        Reject("invalid prefix singleton");
       const size_t length = static_cast<size_t>(singleton) + 1;
       lengths.push_back(length);
       singletons.push_back(singleton);

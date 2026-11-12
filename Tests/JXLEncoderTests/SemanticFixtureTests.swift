@@ -35,7 +35,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"frame": ["GER-3387"], "block_context": ["GER-3387"],
 				"context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
-				"ac_entropy_alphabet": ["GER-3388"],
+				"ac_entropy_alphabet": ["GER-3386"],
 			]),
 		SemanticCorpusEntry(
 			name: "multigroup", input: .linear(file: "multigroup_linear"), distance: 1,
@@ -43,7 +43,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
-				"ac_entropy_alphabet": ["GER-3388"],
+				"ac_entropy_alphabet": ["GER-3386"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_512_d1", input: .srgb8(file: "flower_512"), distance: 1,
@@ -51,7 +51,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
-				"ac_entropy_alphabet": ["GER-3388"],
+				"ac_entropy_alphabet": ["GER-3386"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_512_d3", input: .srgb8(file: "flower_512"), distance: 3,
@@ -59,7 +59,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
-				"ac_entropy_alphabet": ["GER-3388"],
+				"ac_entropy_alphabet": ["GER-3386"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_1024", input: .srgb8(file: "flower_1024"), distance: 1,
@@ -68,7 +68,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"frame": ["GER-3387"], "block_context": ["GER-3387"],
 				"context_map": ["GER-3387", "GER-3419"],
 				"ac_entropy": ["GER-3386"],
-				"ac_entropy_alphabet": ["GER-3388"],
+				"ac_entropy_alphabet": ["GER-3386"],
 			]),
 	]
 }
@@ -123,6 +123,21 @@ struct SemanticCase: CustomTestStringConvertible, Sendable {
 				"Tests/JXLEncoderTests/Fixtures/semantic/" + $0.entry.name + ".sem#"
 					+ $0.category
 			})
+	}
+}
+
+enum SemanticFixtureComparison {
+	static func differences(
+		actual: SemanticDump, reference: SemanticDump, category: String
+	) -> [SemanticDifference] {
+		actual.restricted(to: [category]).differences(
+			from: reference.restricted(to: [category]))
+	}
+
+	static func isExpectedDivergence(
+		_ differences: [SemanticDifference], knownIssues: Set<String>
+	) -> Bool {
+		!differences.isEmpty && !knownIssues.isEmpty
 	}
 }
 
@@ -221,15 +236,20 @@ struct SemanticFixtureTests {
 					let x0 = group % dim.widthInGroups * groupSize
 					let y0 = group / dim.widthInGroups * groupSize
 					let width = min(groupSize, dim.widthInBlocks - x0)
-					decisions.quantFields[group] = decisions.quantFields[group]
-						.indices.map {
-							UInt8(
-								1
-									+ ((y0 + $0 / width)
-										* dim.widthInBlocks
-										+ x0 + $0 % width)
-									% 251)
-						}
+					let blockCount: Int = decisions.quantFields[group].count
+					var field = [UInt8]()
+					field.reserveCapacity(blockCount)
+					for localIndex in 0..<blockCount {
+						let localY: Int = localIndex / width
+						let localX: Int = localIndex % width
+						let absoluteY: Int = y0 + localY
+						let absoluteX: Int = x0 + localX
+						let rasterIndex: Int =
+							absoluteY * dim.widthInBlocks + absoluteX
+						let rawValue: Int = 1 + rasterIndex % 251
+						field.append(UInt8(rawValue))
+					}
+					decisions.quantFields[group] = field
 				}
 				let expected = (0..<(dim.widthInBlocks * dim.heightInBlocks)).map {
 					Int64(1 + $0 % 251)
@@ -301,8 +321,11 @@ struct SemanticFixtureTests {
 			semanticCase.category
 		])
 		#expect(!actual.fields.isEmpty && !reference.fields.isEmpty)
-		let differences = actual.differences(from: reference)
-		if semanticCase.knownIssues.isEmpty {
+		let differences = SemanticFixtureComparison.differences(
+			actual: actual, reference: reference, category: semanticCase.category)
+		if !SemanticFixtureComparison.isExpectedDivergence(
+			differences, knownIssues: semanticCase.knownIssues)
+		{
 			#expect(
 				differences.isEmpty,
 				"\(semanticCase.testDescription): \(differences)")
@@ -317,6 +340,46 @@ struct SemanticFixtureTests {
 					"\(semanticCase.testDescription): \(differences)")
 			}
 		}
+	}
+
+	@Test("a known alphabet divergence does not hide an entropy frequency mutation")
+	func knownAlphabetIssueDoesNotMaskEntropyMutation() throws {
+		let reference = try SemanticDump(fixture: "edge")
+		var alphabetMutation = try SemanticDump(parsing: reference.serialized)
+		let alpha = try #require(
+			alphabetMutation.fields["ac_entropy_alphabet.ans_log_alpha_size"])
+		if case .integers = alpha {
+			let text = reference.serialized.replacingOccurrences(
+				of: "ac_entropy_alphabet.ans_log_alpha_size i 1 7",
+				with: "ac_entropy_alphabet.ans_log_alpha_size i 1 6")
+			alphabetMutation = try SemanticDump(parsing: text)
+		}
+		let alphabetDifferences = SemanticFixtureComparison.differences(
+			actual: alphabetMutation, reference: reference,
+			category: "ac_entropy_alphabet")
+		#expect(!alphabetDifferences.isEmpty)
+		#expect(
+			SemanticFixtureComparison.isExpectedDivergence(
+				alphabetDifferences, knownIssues: ["GER-3388"]))
+		let frequencyLine = try #require(
+			reference.serialized.split(separator: "\n").first {
+				$0.hasPrefix("ac_entropy.ans.frequencies ")
+			})
+		var parts = frequencyLine.split(separator: " ").map(String.init)
+		let values = parts.dropFirst(3).compactMap { Int64($0) }
+		#expect(values.count >= 2)
+		parts[3] = String(values[0] + 1)
+		parts[4] = String(values[1] - 1)
+		let mutatedLine = parts.joined(separator: " ")
+		var entropyMutation = try SemanticDump(
+			parsing: reference.serialized.replacingOccurrences(
+				of: String(frequencyLine), with: mutatedLine))
+		let entropyDifferences = SemanticFixtureComparison.differences(
+			actual: entropyMutation, reference: reference, category: "ac_entropy")
+		#expect(entropyDifferences.contains { $0.field == "ac_entropy.ans.frequencies" })
+		#expect(
+			!SemanticFixtureComparison.isExpectedDivergence(
+				entropyDifferences, knownIssues: []))
 	}
 }
 
