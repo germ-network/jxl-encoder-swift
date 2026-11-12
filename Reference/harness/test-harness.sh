@@ -94,6 +94,10 @@ depths=list(map(int,fields['ac_entropy.prefix.depths'][2:]))
 assert max(depths)>8
 PYCODE
 }
+actual_entropy_jpeg_reference() {
+  bash "$REFERENCE/make_ac_entropy_jpeg_fixture.sh" "$SCRATCH/ac_entropy_jpeg_2x1.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/semantic/ac_entropy_jpeg_2x1.sem" "$SCRATCH/ac_entropy_jpeg_2x1.sem"
+}
 dump_rejects_non_codestream() {
   printf 'not a codestream' > "$SCRATCH/invalid.jxl"
   if "$HARNESS" dump "$SCRATCH/invalid.jxl"; then return 1; fi
@@ -103,7 +107,7 @@ dump_rejects_non_codestream() {
   if "$HARNESS" dump "$SCRATCH/truncated.jxl"; then return 1; fi
   if "$HARNESS" dump "$SCRATCH/edge.jxl" nonexistent; then return 1; fi
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams dump_rejects_non_codestream; do
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream; do
   "$check"
   echo "PASS $check"
 done

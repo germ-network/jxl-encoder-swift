@@ -134,11 +134,6 @@ enum SemanticFixtureComparison {
 			from: reference.restricted(to: [category]))
 	}
 
-	static func isExpectedDivergence(
-		_ differences: [SemanticDifference], knownIssues: Set<String>
-	) -> Bool {
-		!differences.isEmpty && !knownIssues.isEmpty
-	}
 }
 
 /// Stage fixtures (`Fixtures/*.dump`) whose consuming test runs under
@@ -323,9 +318,7 @@ struct SemanticFixtureTests {
 		#expect(!actual.fields.isEmpty && !reference.fields.isEmpty)
 		let differences = SemanticFixtureComparison.differences(
 			actual: actual, reference: reference, category: semanticCase.category)
-		if !SemanticFixtureComparison.isExpectedDivergence(
-			differences, knownIssues: semanticCase.knownIssues)
-		{
+		if semanticCase.knownIssues.isEmpty {
 			#expect(
 				differences.isEmpty,
 				"\(semanticCase.testDescription): \(differences)")
@@ -344,25 +337,31 @@ struct SemanticFixtureTests {
 
 	@Test("a known alphabet divergence does not hide an entropy frequency mutation")
 	func knownAlphabetIssueDoesNotMaskEntropyMutation() throws {
-		let reference = try SemanticDump(fixture: "edge")
-		var alphabetMutation = try SemanticDump(parsing: reference.serialized)
-		let alpha = try #require(
-			alphabetMutation.fields["ac_entropy_alphabet.ans_log_alpha_size"])
-		if case .integers = alpha {
-			let text = reference.serialized.replacingOccurrences(
-				of: "ac_entropy_alphabet.ans_log_alpha_size i 1 7",
-				with: "ac_entropy_alphabet.ans_log_alpha_size i 1 6")
-			alphabetMutation = try SemanticDump(parsing: text)
-		}
+		let jpeg = try JPEGParserTests.fixture("ac_entropy_jpeg_2x1")
+		let transcode = try JPEGTranscode(JPEGParser.parse(jpeg))
+		var writer = BitWriter()
+		let acCode = try Encoder.encodeJPEGFrame(
+			transcode, optimizeCodes: true, writer: &writer
+		).ac
+		var actual = SemanticDump()
+		try actual.recordACEntropyCode(acCode)
+		let reference = try SemanticDump(fixture: "ac_entropy_jpeg_2x1")
 		let alphabetDifferences = SemanticFixtureComparison.differences(
-			actual: alphabetMutation, reference: reference,
+			actual: actual, reference: reference,
 			category: "ac_entropy_alphabet")
 		#expect(!alphabetDifferences.isEmpty)
 		#expect(
-			SemanticFixtureComparison.isExpectedDivergence(
-				alphabetDifferences, knownIssues: ["GER-3388"]))
+			alphabetDifferences.map(\.field) == [
+				"ac_entropy_alphabet.ans_log_alpha_size"
+			])
+		withKnownIssue(Comment(rawValue: "GER-3388")) {
+			#expect(alphabetDifferences.isEmpty)
+		}
+		let entropyDifferences = SemanticFixtureComparison.differences(
+			actual: actual, reference: reference, category: "ac_entropy")
+		#expect(entropyDifferences.contains { $0.field == "ac_entropy.ans.frequencies" })
 		let frequencyLine = try #require(
-			reference.serialized.split(separator: "\n").first {
+			actual.serialized.split(separator: "\n").first {
 				$0.hasPrefix("ac_entropy.ans.frequencies ")
 			})
 		var parts = frequencyLine.split(separator: " ").map(String.init)
@@ -371,15 +370,19 @@ struct SemanticFixtureTests {
 		parts[3] = String(values[0] + 1)
 		parts[4] = String(values[1] - 1)
 		let mutatedLine = parts.joined(separator: " ")
-		var entropyMutation = try SemanticDump(
-			parsing: reference.serialized.replacingOccurrences(
+		let entropyMutation = try SemanticDump(
+			parsing: actual.serialized.replacingOccurrences(
 				of: String(frequencyLine), with: mutatedLine))
-		let entropyDifferences = SemanticFixtureComparison.differences(
+		let mutatedEntropyDifferences = SemanticFixtureComparison.differences(
 			actual: entropyMutation, reference: reference, category: "ac_entropy")
-		#expect(entropyDifferences.contains { $0.field == "ac_entropy.ans.frequencies" })
 		#expect(
-			!SemanticFixtureComparison.isExpectedDivergence(
-				entropyDifferences, knownIssues: []))
+			mutatedEntropyDifferences.contains {
+				$0.field == "ac_entropy.ans.frequencies"
+			})
+		let mutationOnlyDifferences = SemanticFixtureComparison.differences(
+			actual: entropyMutation, reference: actual, category: "ac_entropy")
+		#expect(
+			mutationOnlyDifferences.map(\.field) == ["ac_entropy.ans.frequencies"])
 	}
 }
 
