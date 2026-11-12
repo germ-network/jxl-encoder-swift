@@ -234,5 +234,7 @@ enum SemanticDumpError: Error, Equatable {
 	case badHeader(String)
 	case malformedLine(line: Int, reason: String)
 	case duplicateField(String)
+	case malformedEntropyFixture(name: String, field: String)
+	case unsupportedEntropyFixture(String)
 	case unimplemented
 }

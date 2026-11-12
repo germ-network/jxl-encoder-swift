@@ -1,0 +1,5 @@
+jxl-semantic-dump 1
+input.clusters.mode i 1 0
+input.clusters.limit i 1 4
+input.clusters.lengths i 2 2 2
+input.clusters.counts i 4 16 0 16 0
