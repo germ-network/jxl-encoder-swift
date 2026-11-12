@@ -125,17 +125,19 @@ struct DecisionInventoryFixtureTests {
 		#expect(!JPEGSemanticCase.contextWitnessContains("block_context", fixture: fixture))
 		#expect(expected.fields.keys.contains { $0.hasPrefix("jpeg_context.") })
 		#expect(!expected.fields.keys.contains { $0.hasPrefix("block_context.") })
-		let invalidReference =
-			"Tests/JXLEncoderTests/Fixtures/semantic/\(fixture).sem#block_context"
-		guard let reference = DecisionInventory.FixtureReference(invalidReference),
-			let manifest = try? ProvenanceManifest(
-				contentsOf: RepositoryLayout.provenanceManifest),
-			let row = manifest.rows.first(where: { $0.path == reference.path })
-		else {
-			Issue.record("missing JPEG context witness provenance")
-			return
-		}
-		#expect(Self.status(reference, row: row) == .notCompared)
+		let path = "Tests/JXLEncoderTests/Fixtures/semantic/\(fixture).sem"
+		let row = ProvenanceRow(
+			path: path, kind: .fixture,
+			sha256: String(repeating: "a", count: 64), origin: .fullLibjxl,
+			generator: "generator", invocation: "generate", input: "input",
+			upstream: DecisionInventory.pinnedUpstream, config: "hwy=NEON",
+			consumers: ["JPEGSemanticFixtureTests.swift"])
+		let validReference = try #require(
+			DecisionInventory.FixtureReference(path + "#jpeg_context"))
+		let invalidReference = try #require(
+			DecisionInventory.FixtureReference(path + "#block_context"))
+		#expect(Self.status(validReference, row: row) == .verifies)
+		#expect(Self.status(invalidReference, row: row) == .notCompared)
 	}
 
 	@Test("a malformed list, or a .sem without a category, is a violation")
