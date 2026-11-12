@@ -231,6 +231,11 @@ struct EntropyReferenceFixture {
 				expected, "entropy.context_map.token_count_status")
 			let bitCount = try integers(expected, "entropy.context_map.bit_count")
 			let bytes = try integers(expected, "entropy.context_map.bytes")
+			guard simple.count == 1, entryBits.count == 1,
+				useMTF.count == 1, usePrefix.count == 1,
+				tokenCount.count == 1, tokenCountStatus.count == 1,
+				bitCount.count == 1
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			if hasCandidates {
 				let outputMTF = try integers(
 					expected, "entropy.context_map.mtf_entries")
@@ -330,25 +335,22 @@ struct EntropyReferenceFixture {
 				}
 			}
 			let encodedByteCount =
-				bitCount.count == 1 && bitCount[0] >= 0
+				bitCount[0] >= 0
 				? bitCount[0] / 8 + (bitCount[0].isMultiple(of: 8) ? 0 : 1)
 				: -1
 			guard outputEntries == entries,
-				outputHistograms == histograms, simple.count == 1,
+				outputHistograms == histograms,
 				(0...1).contains(simple[0]),
-				entryBits.count == 1,
 				simple[0] == 1
 					? (0...3).contains(entryBits[0]) : entryBits[0] == -1,
-				useMTF.count == 1, (0...1).contains(useMTF[0]),
-				usePrefix.count == 1,
+				(0...1).contains(useMTF[0]),
 				simple[0] == 1
 					? usePrefix[0] == -1 : (0...1).contains(usePrefix[0]),
-				tokenCount.count == 1, tokenCountStatus.count == 1,
 				simple[0] == 1
 					? tokenCount == [-1] && tokenCountStatus == [0]
 					: (tokenCount[0] >= 0
 						&& (1...3).contains(tokenCountStatus[0])),
-				bitCount.count == 1, encodedByteCount == Int64(bytes.count),
+				encodedByteCount == Int64(bytes.count),
 				bytes.allSatisfy({ (0...255).contains($0) })
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			if name == "context_prefix_99" || name == "context_ans_100" {

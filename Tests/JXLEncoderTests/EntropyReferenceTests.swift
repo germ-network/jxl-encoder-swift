@@ -304,6 +304,25 @@ struct EntropyReferenceTests {
 				name: "context_tie_raw_mtf", input: contextTie.input,
 				expected: badCost)
 		}
+		let contextMTF = try EntropyReferenceFixture.load("context_mtf_ans")
+		let emptySelectedTokenCount = try SemanticDump(
+			parsing: contextMTF.expected.serialized.replacingOccurrences(
+				of: "entropy.context_map.token_count i 1 300",
+				with: "entropy.context_map.token_count i 0"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_mtf_ans", input: contextMTF.input,
+				expected: emptySelectedTokenCount)
+		}
+		let emptyMTFCandidateTokenCount = try SemanticDump(
+			parsing: contextMTF.expected.serialized.replacingOccurrences(
+				of: "entropy.context_map.mtf_token_count i 1 300",
+				with: "entropy.context_map.mtf_token_count i 0"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_mtf_ans", input: contextMTF.input,
+				expected: emptyMTFCandidateTokenCount)
+		}
 	}
 
 	@Test
