@@ -41,6 +41,14 @@ struct DecisionInventoryFixtureTests {
 		if StageFixtureKnownIssues.byFixture[reference.path] != nil { return .knownIssue }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
+			if JPEGSemanticCase.contextWitnessReferences.contains(key) {
+				let fixture = URL(fileURLWithPath: reference.path)
+					.deletingPathExtension().lastPathComponent
+				guard
+					JPEGSemanticCase.contextWitnessContains(
+						category, fixture: fixture)
+				else { return .notCompared }
+			}
 			let references = SemanticCase.references.union(JPEGSemanticCase.references)
 				.union(
 					JPEGSemanticCase.contextWitnessReferences)
@@ -107,6 +115,27 @@ struct DecisionInventoryFixtureTests {
 				Self.status(reference, row: row)
 					== (consumers.isEmpty ? .notCompared : .verifies))
 		}
+	}
+
+	@Test("a JPEG witness reference names a present, compared category")
+	func jpegWitnessCategoryIsVerified() throws {
+		let fixture = "jpeg_flower_513x267_420_context"
+		let expected = try SemanticDump(fixture: fixture)
+		#expect(JPEGSemanticCase.contextWitnessContains("jpeg_context", fixture: fixture))
+		#expect(!JPEGSemanticCase.contextWitnessContains("block_context", fixture: fixture))
+		#expect(expected.fields.keys.contains { $0.hasPrefix("jpeg_context.") })
+		#expect(!expected.fields.keys.contains { $0.hasPrefix("block_context.") })
+		let invalidReference =
+			"Tests/JXLEncoderTests/Fixtures/semantic/\(fixture).sem#block_context"
+		guard let reference = DecisionInventory.FixtureReference(invalidReference),
+			let manifest = try? ProvenanceManifest(
+				contentsOf: RepositoryLayout.provenanceManifest),
+			let row = manifest.rows.first(where: { $0.path == reference.path })
+		else {
+			Issue.record("missing JPEG context witness provenance")
+			return
+		}
+		#expect(Self.status(reference, row: row) == .notCompared)
 	}
 
 	@Test("a malformed list, or a .sem without a category, is a violation")

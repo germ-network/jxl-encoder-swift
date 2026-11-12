@@ -87,12 +87,148 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 				"Tests/JXLEncoderTests/Fixtures/semantic/\($0.entry.name).sem#\($0.category)"
 			})
 	}
+	static let contextWitnessCategory = "jpeg_context"
 	static var contextWitnessReferences: Set<String> {
 		Set(
 			["420", "422", "440"].map {
-				"Tests/JXLEncoderTests/Fixtures/semantic/jpeg_flower_513x267_\($0)_context.sem#block_context"
+				"Tests/JXLEncoderTests/Fixtures/semantic/jpeg_flower_513x267_\($0)_context.sem#\(contextWitnessCategory)"
 			})
 	}
+	static func contextWitnessContains(_ category: String, fixture: String) -> Bool {
+		guard category == contextWitnessCategory,
+			let dump = try? SemanticDump(fixture: fixture)
+		else { return false }
+		return dump.fields.keys.contains {
+			$0.split(separator: ".").first == Substring(category)
+		}
+	}
+	static let knownDivergentFields: [String: Set<String>] = [
+		"jpeg_small_444#coeff_order": [
+			"coeff_order.dct8.c0", "coeff_order.dct8.c1", "coeff_order.dct8.c2",
+		],
+		"jpeg_small_444#ac_entropy": ["ac_entropy.ans.frequencies"],
+		"jpeg_small_444#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
+		"jpeg_small_422#coeff_order": ["coeff_order.dct8.c0", "coeff_order.dct8.c1"],
+		"jpeg_small_422#ac_entropy": ["ac_entropy.ans.frequencies"],
+		"jpeg_small_422#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
+		"jpeg_small_440#coeff_order": ["coeff_order.dct8.c0", "coeff_order.dct8.c1"],
+		"jpeg_small_440#ac_entropy": ["ac_entropy.ans.frequencies"],
+		"jpeg_small_440#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
+		"jpeg_hopper_420_odd#coeff_order": [
+			"coeff_order.dct8.c0", "coeff_order.dct8.c1", "coeff_order.dct8.c2",
+		],
+		"jpeg_hopper_420_odd#context_map": ["context_map.ac"],
+		"jpeg_hopper_420_odd#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"jpeg_hopper_420_odd#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+		"jpeg_hopper_420_restart#coeff_order": [
+			"coeff_order.dct8.c0", "coeff_order.dct8.c1", "coeff_order.dct8.c2",
+		],
+		"jpeg_hopper_420_restart#context_map": ["context_map.ac"],
+		"jpeg_hopper_420_restart#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"jpeg_hopper_420_restart#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+		"jpeg_hopper_420_sof1#coeff_order": ["coeff_order.dct8.c1"],
+		"jpeg_hopper_420_sof1#context_map": ["context_map.ac"],
+		"jpeg_hopper_420_sof1#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"jpeg_hopper_420_sof1#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+		"jpeg_hopper_gray_odd#coeff_order": ["coeff_order.dct8.c1"],
+		"jpeg_hopper_gray_odd#context_map": ["context_map.ac"],
+		"jpeg_hopper_gray_odd#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"jpeg_hopper_gray_odd#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+		"ac_entropy_jpeg_2x1#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"ac_entropy_jpeg_2x1#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+		"jpeg_flower_513x267_420#coeff_order": [
+			"coeff_order.dct8.c0", "coeff_order.dct8.c1", "coeff_order.dct8.c2",
+		],
+		"jpeg_flower_513x267_420#context_map": ["context_map.ac"],
+		"jpeg_flower_513x267_420#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"jpeg_flower_513x267_420#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+		"jpeg_flower_513x267_422#coeff_order": [
+			"coeff_order.dct8.c0", "coeff_order.dct8.c1", "coeff_order.dct8.c2",
+		],
+		"jpeg_flower_513x267_422#context_map": ["context_map.ac"],
+		"jpeg_flower_513x267_422#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"jpeg_flower_513x267_422#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+		"jpeg_flower_513x267_440#coeff_order": [
+			"coeff_order.dct8.c0", "coeff_order.dct8.c1", "coeff_order.dct8.c2",
+		],
+		"jpeg_flower_513x267_440#context_map": ["context_map.ac"],
+		"jpeg_flower_513x267_440#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
+			"ac_entropy.table_count", "ac_entropy.uint_config",
+		],
+		"jpeg_flower_513x267_440#ac_entropy_alphabet": [
+			"ac_entropy_alphabet.ans_log_alpha_size"
+		],
+	]
+	static let knownDivergentActualCounts: [String: [String: Int]] = [
+		"jpeg_hopper_420_odd#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 2, "ac_entropy.ans.frequencies": 58,
+			"ac_entropy.uint_config": 6,
+		],
+		"jpeg_hopper_420_restart#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 4, "ac_entropy.ans.frequencies": 120,
+			"ac_entropy.uint_config": 12,
+		],
+		"jpeg_hopper_420_sof1#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 1, "ac_entropy.ans.frequencies": 5,
+			"ac_entropy.uint_config": 3,
+		],
+		"jpeg_hopper_gray_odd#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 1, "ac_entropy.ans.frequencies": 35,
+			"ac_entropy.uint_config": 3,
+		],
+		"ac_entropy_jpeg_2x1#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 9, "ac_entropy.ans.frequencies": 182,
+			"ac_entropy.uint_config": 27,
+		],
+		"jpeg_flower_513x267_420#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 10, "ac_entropy.ans.frequencies": 203,
+			"ac_entropy.uint_config": 30,
+		],
+		"jpeg_flower_513x267_422#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 9, "ac_entropy.ans.frequencies": 182,
+			"ac_entropy.uint_config": 27,
+		],
+		"jpeg_flower_513x267_440#ac_entropy": [
+			"ac_entropy.ans.alphabet_lengths": 9, "ac_entropy.ans.frequencies": 180,
+			"ac_entropy.uint_config": 27,
+		],
+	]
 	static var knownIssueReferences: Set<String> {
 		Set(
 			all.filter { !$0.knownIssues.isEmpty }.map {
@@ -166,13 +302,85 @@ struct JPEGSemanticFixtureTests {
 			let actual = try SemanticDump(
 				swiftJPEGDecisions: encoded[semanticCase.entry.name]!.decisions)
 			let reference = try SemanticDump(fixture: semanticCase.entry.name)
-			let differences = actual.restricted(to: [semanticCase.category])
-				.differences(
-					from: reference.restricted(to: [semanticCase.category]))
-			if semanticCase.knownIssues.isEmpty {
+			let actualCategory = actual.restricted(to: [semanticCase.category])
+			let referenceCategory = reference.restricted(to: [semanticCase.category])
+			let actualFields = Set(actualCategory.fields.keys)
+			let referenceFields = Set(referenceCategory.fields.keys)
+			#expect(
+				actualFields == referenceFields,
+				"\(semanticCase.testDescription): schema")
+			let sameKinds = actualFields.allSatisfy { field in
+				switch (
+					actualCategory.fields[field],
+					referenceCategory.fields[field]
+				) {
+				case (.some(.integers(_)), .some(.integers(_))),
+					(.some(.floats(_)), .some(.floats(_))):
+					true
+				default: false
+				}
+			}
+			#expect(sameKinds, "\(semanticCase.testDescription): field kind")
+			let differences = actualCategory.differences(from: referenceCategory)
+			let divergentFields = Set(differences.map(\.field))
+			let expectedDivergentFields =
+				JPEGSemanticCase.knownDivergentFields[
+					semanticCase.testDescription] ?? []
+			#expect(
+				divergentFields == expectedDivergentFields,
+				"\(semanticCase.testDescription): observed divergence fields \(divergentFields)"
+			)
+			let expectedCounts =
+				JPEGSemanticCase.knownDivergentActualCounts[
+					semanticCase.testDescription] ?? [:]
+			for field in actualFields {
+				let actualCount: Int
+				switch actualCategory.fields[field]! {
+				case .integers(let values): actualCount = values.count
+				case .floats(let values): actualCount = values.count
+				}
+				let referenceCount: Int
+				switch referenceCategory.fields[field]! {
+				case .integers(let values): referenceCount = values.count
+				case .floats(let values): referenceCount = values.count
+				}
 				#expect(
-					differences.isEmpty,
-					"\(semanticCase.testDescription): \(differences)")
+					actualCount == (expectedCounts[field] ?? referenceCount),
+					"\(semanticCase.testDescription): \(field) count"
+				)
+			}
+			for difference in differences {
+				if let expectedCount = expectedCounts[difference.field] {
+					let referenceCount: Int
+					switch referenceCategory.fields[difference.field]! {
+					case .integers(let values): referenceCount = values.count
+					case .floats(let values): referenceCount = values.count
+					}
+					#expect(
+						difference.kind
+							== .countMismatch(
+								expected: referenceCount,
+								actual: expectedCount),
+						"\(semanticCase.testDescription): \(difference)")
+				} else {
+					if case .valueMismatch = difference.kind {
+					} else {
+						Issue.record(
+							"\(semanticCase.testDescription): unexpected divergence kind \(difference)"
+						)
+					}
+				}
+			}
+			let unaffectedDifferences = actualCategory.differences(
+				from: referenceCategory, excludingFields: expectedDivergentFields)
+			#expect(
+				semanticCase.knownIssues.isEmpty == expectedDivergentFields.isEmpty,
+				"\(semanticCase.testDescription): known issue field map")
+			#expect(
+				unaffectedDifferences.isEmpty,
+				"\(semanticCase.testDescription): \(unaffectedDifferences)")
+			if semanticCase.knownIssues.isEmpty {
+				#expect(differences.isEmpty)
 			} else {
 				withKnownIssue(
 					Comment(
@@ -185,6 +393,7 @@ struct JPEGSemanticFixtureTests {
 				}
 			}
 		}
+
 	}
 
 	@Test(

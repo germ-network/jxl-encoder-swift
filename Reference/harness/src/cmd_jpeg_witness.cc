@@ -60,6 +60,17 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     }
   }
 
+  bool has_subsampling = false;
+  for (size_t c = 0; c < 3; ++c) {
+    has_subsampling |= source_sampling.HShift(c) != 0 ||
+                       source_sampling.VShift(c) != 0;
+  }
+  if (!has_subsampling) {
+    std::fprintf(stderr,
+                 "jpeg-witness: direct source AC is unsupported for 4:4:4\n");
+    return false;
+  }
+
   const auto& shared = *frame.state->shared;
   const auto& block_map = shared.block_ctx_map;
   if (!block_map.dc_thresholds[0].empty() ||
@@ -93,11 +104,11 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     const float inverse_dc_step =
         1.0f / (2040.0f / jpeg.quant[component.quant_idx].values[0]);
     for (int dc = -1024; dc <= 1023; ++dc) {
-      const float recovered =
-          (dc * inverse_dc_step) * shared.quantizer.GetInvDcStep(c);
+      const float fdc = static_cast<float>(dc) * inverse_dc_step;
+      const float stored_dc = fdc * shared.quantizer.GetInvDcStep(c);
       max_roundtrip_error =
-          std::max(max_roundtrip_error, std::abs(recovered - dc));
-      if (std::round(recovered) != dc) {
+          std::max(max_roundtrip_error, std::abs(stored_dc - dc));
+      if (std::round(stored_dc) != dc) {
         std::fprintf(stderr, "jpeg-witness: DC roundtrip failed\n");
         return false;
       }

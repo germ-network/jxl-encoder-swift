@@ -52,6 +52,9 @@ jpeg_dump_supports_observed_frame_configuration() {
   "$harness" encode-jpeg "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/hopper_gray_odd.jpg" "$SCRATCH/gray.jxl"
   "$harness" dump "$SCRATCH/gray.jxl" frame ac_entropy context_map > "$SCRATCH/gray.sem"
   grep -Fx 'frame.encoding i 1 0' "$SCRATCH/gray.sem"
+  local flat="$REFERENCE/../Tests/JXLEncoderTests/Fixtures/semantic/jpeg_flat_444.jpg"
+  "$harness" encode-jpeg "$flat" "$SCRATCH/flat-444.jxl"
+  if "$harness" jpeg-witness "$flat" "$SCRATCH/flat-444.jxl"; then return 1; fi
   "$harness" encode-jpeg "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/hopper_420_restart.jpg" "$SCRATCH/restart.jxl"
   "$harness" dump "$SCRATCH/restart.jxl" frame ac_entropy context_map > "$SCRATCH/restart.sem"
   python3 - "$SCRATCH/restart.jxl" "$SCRATCH" <<'PYCODE'
