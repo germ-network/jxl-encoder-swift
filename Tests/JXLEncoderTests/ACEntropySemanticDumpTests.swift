@@ -154,10 +154,12 @@ struct ACEntropySemanticDumpTests {
 			try dump.recordACEntropyCode(invalid)
 		}
 		#expect(dump == original)
+		dump = original
 		#expect(throws: ACEntropyCaptureError.invalidTableCount) {
 			try dump.recordACEntropyCode(EntropyCode(contextMap: [], prefixCodes: []))
 		}
 		#expect(dump == original)
+		dump = original
 		let invalidOriginalMap = EntropyCode(
 			contextMap: [0],
 			prefixCodes: [
@@ -170,29 +172,34 @@ struct ACEntropySemanticDumpTests {
 			try dump.recordACEntropyCode(invalidOriginalMap)
 		}
 		#expect(dump == original)
+		dump = original
 		let invalidFrequency = ansCode(_tables: [[4097]], reverseMapLengths: [[4097]])
 		#expect(throws: ACEntropyCaptureError.invalidANSTable(0)) {
 			try dump.recordACEntropyCode(invalidFrequency)
 		}
 		#expect(dump == original)
+		dump = original
 		let invalidReverseMap = ansCode(
 			_tables: [[2048, 2048]], reverseMapLengths: [[2048, 2047]])
 		#expect(throws: ACEntropyCaptureError.invalidANSTable(0)) {
 			try dump.recordACEntropyCode(invalidReverseMap)
 		}
 		#expect(dump == original)
+		dump = original
 		let laterInvalidTable = ansCode(
 			_tables: [[2048, 2048], [4096]], reverseMapLengths: [[2048, 2048], [4095]])
 		#expect(throws: ACEntropyCaptureError.invalidANSTable(1)) {
 			try dump.recordACEntropyCode(laterInvalidTable)
 		}
 		#expect(dump == original)
+		dump = original
 		let malformedPrefix = EntropyCode(
 			contextMap: [0], prefixCodes: [PrefixCode(depths: [0], bits: [0])])
 		#expect(throws: ACEntropyCaptureError.invalidPrefixTable(0)) {
 			try dump.recordACEntropyCode(malformedPrefix)
 		}
 		#expect(dump == original)
+		dump = original
 		var invalidDepths = [UInt8](repeating: 0, count: 64)
 		invalidDepths[3] = 16
 		let invalidDepth = prefixCode(invalidDepths)
@@ -200,6 +207,7 @@ struct ACEntropySemanticDumpTests {
 			try dump.recordACEntropyCode(invalidDepth)
 		}
 		#expect(dump == original)
+		dump = original
 		dump.record("ac_entropy.kind", .integers([0]))
 		let collisionSnapshot = dump
 		#expect(throws: ACEntropyCaptureError.duplicateField("ac_entropy.kind")) {
