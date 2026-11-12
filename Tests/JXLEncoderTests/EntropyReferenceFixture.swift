@@ -1,4 +1,5 @@
 import Foundation
+
 @testable import JXLEncoder
 
 struct EntropyReferenceFixture {
@@ -26,7 +27,8 @@ struct EntropyReferenceFixture {
 			parsing: String(contentsOf: expectedURL, encoding: .utf8))
 		func integers(in dump: SemanticDump, field: String) throws -> [Int64] {
 			guard case .integers(let values)? = dump.fields[field] else {
-				throw SemanticDumpError.malformedEntropyFixture(name: name, field: field)
+				throw SemanticDumpError.malformedEntropyFixture(
+					name: name, field: field)
 			}
 			return values
 		}
@@ -39,13 +41,15 @@ struct EntropyReferenceFixture {
 			]
 			expectedFields = [
 				"entropy.histogram.normalized", "entropy.histogram.alphabet_size",
-				"entropy.histogram.serialized_method", "entropy.histogram.serialized_shift",
+				"entropy.histogram.serialized_method",
+				"entropy.histogram.serialized_shift",
 				"entropy.histogram.log_alpha_size", "entropy.histogram.freqs",
 				"entropy.histogram.reverse_map", "entropy.histogram.bit_count",
 				"entropy.histogram.bytes",
 			]
 			let counts = try integers(in: input, field: "input.histogram.counts")
-			let logAlpha = try integers(in: input, field: "input.histogram.log_alpha_size")
+			let logAlpha = try integers(
+				in: input, field: "input.histogram.log_alpha_size")
 			let strategy = try integers(in: input, field: "input.histogram.strategy")
 			guard counts.allSatisfy({ $0 >= 0 && $0 <= Int64(UInt32.max) }),
 				logAlpha.count == 1,
@@ -54,12 +58,14 @@ struct EntropyReferenceFixture {
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("clusters_") {
 			inputFields = [
-				"input.clusters.mode", "input.clusters.limit", "input.clusters.lengths",
+				"input.clusters.mode", "input.clusters.limit",
+				"input.clusters.lengths",
 				"input.clusters.counts",
 			]
 			expectedFields = [
 				"entropy.clusters.count", "entropy.clusters.map",
-				"entropy.clusters.alphabet_lengths", "entropy.clusters.total_counts",
+				"entropy.clusters.alphabet_lengths",
+				"entropy.clusters.total_counts",
 				"entropy.clusters.histogram_counts",
 			]
 			let mode = try integers(in: input, field: "input.clusters.mode")
