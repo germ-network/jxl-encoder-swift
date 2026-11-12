@@ -14,8 +14,8 @@ enum RepositoryLayout {
 			while directory.path != directory.deletingLastPathComponent().path {
 				let markers = [
 					"Package.swift",
-					"Sources/JXLEncoder",
 					"Reference/libjxl.pin",
+					"Reference/provenance.tsv",
 				]
 				if markers.allSatisfy({
 					FileManager.default.fileExists(
