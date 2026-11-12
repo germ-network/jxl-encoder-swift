@@ -5,7 +5,7 @@ import Testing
 /// pin is a deliberate act: it has to change this test too.
 @Suite("libjxl pin record")
 struct PinRecordTests {
-	@Test("pins full libjxl v0.12.0 at a7a9c787")
+	@Test("pins full libjxl v0.12.0 at a7a9c787", .enabled(if: PackageCheckout.isAvailable))
 	func pinsV0_12_0() throws {
 		let pin = try PinRecord(contentsOf: RepositoryLayout.pinRecord)
 		#expect(pin["LIBJXL_TAG"] == "v0.12.0")
@@ -13,7 +13,9 @@ struct PinRecordTests {
 		#expect(pin["LIBJXL_URL"] != nil)
 	}
 
-	@Test("records a full commit for libjxl and every submodule the build fetches")
+	@Test(
+		"records a full commit for libjxl and every submodule the build fetches",
+		.enabled(if: PackageCheckout.isAvailable))
 	func recordsSubmoduleCommits() throws {
 		let pin = try PinRecord(contentsOf: RepositoryLayout.pinRecord)
 		let keys = [

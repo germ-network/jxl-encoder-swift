@@ -6,7 +6,9 @@ import Testing
 /// going to the manifest — and the two can't disagree.
 @Suite("Generated table headers")
 struct GeneratedTableHeaderTests {
-	@Test("every table row's source file header cites its generator, upstream and config")
+	@Test(
+		"every table row's source file header cites its generator, upstream and config",
+		.enabled(if: PackageCheckout.isAvailable))
 	func headersCiteManifestRow() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)

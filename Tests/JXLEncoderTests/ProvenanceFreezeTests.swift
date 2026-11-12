@@ -20,7 +20,9 @@ struct ProvenanceFreezeTests {
 		"Tests/JXLEncoderTests/Fixtures/ac_context.bin",
 	]
 
-	@Test("inherited-tiny fixture rows are a subset of the frozen set")
+	@Test(
+		"inherited-tiny fixture rows are a subset of the frozen set",
+		.enabled(if: PackageCheckout.isAvailable))
 	func noNewInheritedTinyFixtures() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)
@@ -33,7 +35,9 @@ struct ProvenanceFreezeTests {
 		)
 	}
 
-	@Test("full-libjxl fixture rows record their input, invocation and SIMD target")
+	@Test(
+		"full-libjxl fixture rows record their input, invocation and SIMD target",
+		.enabled(if: PackageCheckout.isAvailable))
 	func fullLibjxlRowsAreReproducible() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)

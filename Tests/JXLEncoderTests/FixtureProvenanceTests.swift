@@ -5,7 +5,9 @@ import Testing
 /// can't change without the manifest changing with it.
 @Suite("Fixture provenance")
 struct FixtureProvenanceTests {
-	@Test("every file in both Fixtures directories has exactly one fixture row")
+	@Test(
+		"every file in both Fixtures directories has exactly one fixture row",
+		.enabled(if: PackageCheckout.isAvailable))
 	func everyFixtureHasOneRow() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)
@@ -52,7 +54,9 @@ struct FixtureProvenanceTests {
 		}
 	}
 
-	@Test("every fixture row names a file that exists")
+	@Test(
+		"every fixture row names a file that exists",
+		.enabled(if: PackageCheckout.isAvailable))
 	func noOrphanRows() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)
@@ -65,7 +69,9 @@ struct FixtureProvenanceTests {
 		}
 	}
 
-	@Test("every fixture's bytes match its recorded sha256")
+	@Test(
+		"every fixture's bytes match its recorded sha256",
+		.enabled(if: PackageCheckout.isAvailable))
 	func bytesMatchRecordedDigest() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)
@@ -81,7 +87,9 @@ struct FixtureProvenanceTests {
 		}
 	}
 
-	@Test("full-libjxl rows cite the pinned commit; inherited-tiny rows say unpinned")
+	@Test(
+		"full-libjxl rows cite the pinned commit; inherited-tiny rows say unpinned",
+		.enabled(if: PackageCheckout.isAvailable))
 	func upstreamMatchesOrigin() throws {
 		let pin = try PinRecord(contentsOf: RepositoryLayout.pinRecord)
 		let pinnedCommit = try #require(pin["LIBJXL_COMMIT"])
@@ -154,7 +162,9 @@ struct FixtureProvenanceTests {
 		#expect(throws: Error.self) { try ProvenanceManifest(text: emptyGenerator) }
 	}
 
-	@Test("only fixture rows carry a sha256, and every fixture row does")
+	@Test(
+		"only fixture rows carry a sha256, and every fixture row does",
+		.enabled(if: PackageCheckout.isAvailable))
 	func digestPresenceFollowsKind() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)
@@ -172,7 +182,9 @@ struct FixtureProvenanceTests {
 		}
 	}
 
-	@Test("every inline row names a test file that exists")
+	@Test(
+		"every inline row names a test file that exists",
+		.enabled(if: PackageCheckout.isAvailable))
 	func inlineRowsNameExistingTests() throws {
 		let manifest = try ProvenanceManifest(
 			contentsOf: RepositoryLayout.provenanceManifest)
