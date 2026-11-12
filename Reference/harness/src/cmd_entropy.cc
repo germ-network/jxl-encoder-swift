@@ -293,13 +293,20 @@ int RunContextMap(const std::vector<std::string>& args) {
       (!inspect_candidate(entries, &raw_cost, &raw_token_count) ||
        !inspect_candidate(mtf_entries, &mtf_cost, &mtf_token_count))) return 1;
   int64_t token_count = -1;
+  int64_t token_count_status = 0;
   if (simple == 0) {
     if (use_mtf == 1) {
-      if (measure_mtf) token_count = static_cast<int64_t>(mtf_token_count);
+      if (measure_mtf) {
+        token_count = static_cast<int64_t>(mtf_token_count);
+        token_count_status = 2;
+      } else {
+        token_count_status = 3;
+      }
     } else {
       if (!measure_mtf &&
           !inspect_candidate(entries, &raw_cost, &raw_token_count)) return 1;
       token_count = static_cast<int64_t>(raw_token_count);
+      token_count_status = 1;
     }
   }
   std::vector<int64_t> serialized(bytes.begin(), bytes.end());
@@ -312,11 +319,16 @@ int RunContextMap(const std::vector<std::string>& args) {
   dump.Integers("entropy.context_map.use_mtf", {use_mtf});
   dump.Integers("entropy.context_map.use_prefix_code", {use_prefix_code});
   dump.Integers("entropy.context_map.token_count", {token_count});
+  dump.Integers("entropy.context_map.token_count_status", {token_count_status});
   dump.Integers("entropy.context_map.bit_count", {static_cast<int64_t>(bit_count)});
   dump.Integers("entropy.context_map.bytes", serialized);
   if (measure_mtf) {
     dump.Integers("entropy.context_map.raw_cost", {static_cast<int64_t>(raw_cost)});
     dump.Integers("entropy.context_map.mtf_cost", {static_cast<int64_t>(mtf_cost)});
+    dump.Integers("entropy.context_map.raw_token_count",
+                  {static_cast<int64_t>(raw_token_count)});
+    dump.Integers("entropy.context_map.mtf_token_count",
+                  {static_cast<int64_t>(mtf_token_count)});
     const size_t simple_entry_bits =
         jxl::CeilLog2Nonzero(static_cast<size_t>(num_histograms));
     const int64_t simple_cost = simple_entry_bits < 4

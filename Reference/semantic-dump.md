@@ -87,10 +87,33 @@ other field still fails.
 
 Context-map inputs record entries and `map_length` separately. Expected
 outputs include the selected simple, prefix, or ANS mode and `token_count`
-after libjxl's token construction, including LZ77 processing. The 99/100
-fixtures assert map length and token count independently, so they establish
-the ANS threshold using the actual token stream. A token count of `-1` means
-the selected path's token stream is unavailable through the harness API.
+after libjxl's token construction, including LZ77 processing. This count is a
+source-corresponding probe: the harness builds one context-0 token stream from
+the selected raw or supplied MTF values, then calls `BuildAndEncodeHistograms`
+with the same default `HistogramParams` and context-map uint method used by
+`EncodeContextMap`. The API's mutation of that candidate token list applies
+LZ77 before the count is recorded. It measures the corresponding candidate
+through the pinned API; it does not expose `EncodeContextMap`'s private token
+list. `token_count_status` is 0 for simple coding (not applicable), 1 for a
+measured raw candidate, 2 for a measured MTF candidate, or 3 when a selected
+complex stream is unobserved by that producer. In the pinned harness this
+means MTF was selected without a supplied candidate; the Swift semantic helper
+does not expose this token probe for its complex paths. Status 3 is unknown
+evidence, not a Swift decision difference. Swift decision comparison excludes
+the two probe-only fields; fixture validation checks the pinned observations
+independently.
+
+The 99/100 fixtures assert map length and measured raw token count
+independently, alongside prefix/ANS selection. The MTF fixture supplies
+`[0,1,0,1,…]` and its pinned-source-derived transform `[0,1,1,1,…]`; the initial
+0,1 moves the two-symbol list to `[1,0]`, so subsequent alternating symbols
+both have index 1. The harness measures that supplied MTF candidate through
+the pinned API. A separate raw-selected fixture uses four 20-symbol runs; the
+pinned probe reduces 80 input tokens to 12 and verifies the selected raw path, so
+substituting `map_length` for the measurement fails. The strict-simple fixture
+proves simple is selected only when cheaper; the equality fixture has simple
+cost 96 equal to raw cost 96 and confirms the pinned encoder rejects simple
+coding.
 
 ## Expected divergence
 

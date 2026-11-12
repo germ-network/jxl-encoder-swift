@@ -73,7 +73,8 @@ enum SwiftEntropySemanticEncoding {
 	static func contextMap(
 		entries: [UInt8], numHistograms: Int, allowANS: Bool
 	) throws -> SemanticDump {
-		guard numHistograms > 0,
+		guard (1...255).contains(numHistograms),
+			!entries.isEmpty, entries.count <= 1_000_000,
 			entries.allSatisfy({ Int($0) < numHistograms })
 		else {
 			throw SemanticDumpError.unimplemented
@@ -95,7 +96,10 @@ enum SwiftEntropySemanticEncoding {
 		dump.record("entropy.context_map.use_prefix_code", .integers([Int64(usePrefix)]))
 		dump.record(
 			"entropy.context_map.token_count",
-			.integers([simple ? -1 : Int64(entries.count)]))
+			.integers([-1]))
+		dump.record(
+			"entropy.context_map.token_count_status",
+			.integers([simple ? 0 : 3]))
 		dump.record("entropy.context_map.bit_count", .integers([Int64(writer.bitsWritten)]))
 		dump.record("entropy.context_map.bytes", .integers(writer.bytes.map(Int64.init)))
 		return dump

@@ -124,7 +124,7 @@ generate_context_map_with_candidates() {
 	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
 	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map candidates in generator\t-\tnum_histograms=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
 		"$name" "$input_hash" "$num_histograms" >> "$tmp"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap raw/MTF/simple candidate costs; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap selected mode/bytes; BuildAndEncodeHistograms candidate costs and post-LZ77 token counts with default context-map params; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
@@ -180,7 +180,9 @@ for ((index = 0; index < 300; index++)); do
 	context_alt+=($((index % 2)))
 	context_raw+=($((((index * 73 + 19) ^ (index * 11)) % 16)))
 done
-generate_context_map context_mtf_ans 4 1 "${context_alt[@]}"
+context_alt_mtf=(0)
+for ((index = 1; index < 300; index++)); do context_alt_mtf+=(1); done
+generate_context_map_with_candidates context_mtf_ans 4 "${context_alt[@]}" --mtf "${context_alt_mtf[@]}"
 generate_context_map context_raw_ans 16 1 "${context_raw[@]}"
 context_99=()
 context_100=()
@@ -193,6 +195,17 @@ generate_context_map context_prefix_99 16 1 "${context_99[@]}"
 generate_context_map context_ans_100 16 1 "${context_100[@]}"
 generate_context_map_with_candidates context_simple_profitability 2 0 1 0 1 0 1 --mtf 0 1 1 1 1 1
 generate_context_map_with_candidates context_tie_raw_mtf 16 0 1 --mtf 0 1
+context_simple_tie_entries=(1 1 0 1 1 1 1 1 1 2 2 1 1 2 2 1 2 1 0 1 1 2 1 1 0 0 2 1 1 1 1 0 0 0 1 0 2 2 2 1 0 1 1 0 1 1 0 0)
+context_simple_tie_mtf=(1 0 1 1 0 0 0 0 0 2 0 1 0 1 0 1 1 1 2 1 0 2 1 0 2 0 2 2 0 0 0 2 0 0 1 1 2 0 0 2 2 1 0 1 1 0 1 0)
+generate_context_map_with_candidates context_simple_tie_candidate 3 "${context_simple_tie_entries[@]}" --mtf "${context_simple_tie_mtf[@]}"
+context_rle_entries=()
+context_rle_mtf=()
+for ((symbol = 0; symbol < 4; symbol++)); do
+	for ((repeat = 0; repeat < 20; repeat++)); do context_rle_entries+=($symbol); done
+	context_rle_mtf+=($symbol)
+	for ((repeat = 1; repeat < 20; repeat++)); do context_rle_mtf+=(0); done
+done
+generate_context_map_with_candidates context_raw_rle 4 "${context_rle_entries[@]}" --mtf "${context_rle_mtf[@]}"
 
 { head -n 2 "$tmp"; tail -n +3 "$tmp" | sort -t $'\t' -k1,1; } > "$root/Reference/provenance.tsv"
 "$root/Reference/pin-check.sh" "$linked"
