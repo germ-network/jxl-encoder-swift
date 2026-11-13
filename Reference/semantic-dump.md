@@ -108,6 +108,16 @@ offset 11 maps every tree leaf to the Swift gradient-context LUT, checked over
 the full gradient property range. Values compare exactly after this context
 projection.
 
+AC-token inputs record a prescribed 2×2 DCT8 coefficient group, its explicit
+coefficient order, channel order, QDC/QF planes, and complete 39-entry block
+context map. `TokenizeCoefficients` outputs the raw context and value vectors.
+The tiny-map witness uses four contexts and matches Swift's current token
+stream exactly. The default-map witness retains upstream's 15-context map
+(`Y=0`, `X=7`, `B=7`) beside Swift's four-context compact map (`Y=0`, `X=2`,
+`B=2`): token values and order match, while raw context count and IDs remain a
+GER-3387 known difference. These prescribed witnesses cover DCT8 tokenization;
+they do not assert which context map an e4 image selects.
+
 Context-map inputs record entries and `map_length` separately. Expected
 outputs include the selected simple, prefix, or ANS mode and `token_count`
 after libjxl's token construction, including LZ77 processing. This count is a

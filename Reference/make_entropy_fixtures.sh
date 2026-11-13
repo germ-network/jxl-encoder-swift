@@ -209,6 +209,70 @@ generate_modular() {
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
+generate_ac_tokens() {
+	local name="$1" num_contexts="$2"; shift 2
+	local input="$out/$name.input.sem"
+	local -a context_map=("$@") order=() qdc=(0 0 0 0) qf=(1 1 1 1) coefficients=()
+	local row block channel rank value count
+	for ((row = 0; row < 8; row++)); do
+		for ((block = 0; block < 8; block++)); do
+			order+=("$((block * 8 + row))")
+		done
+	done
+	local -a counts=(0 3 32 2 4 1 5 3 2 4 0 6)
+	for ((channel = 0; channel < 3; channel++)); do
+		for ((block = 0; block < 4; block++)); do
+			local -a values=()
+			for ((rank = 0; rank < 64; rank++)); do values+=(0); done
+			count="${counts[channel * 4 + block]}"
+			case "$count" in
+				0) ;;
+				1) values[${order[1]}]=$((channel + 2)) ;;
+				2) values[${order[1]}]=$((channel + 2)); values[${order[5]}]=$((-channel - 3)) ;;
+				3) values[${order[1]}]=$((channel + 2)); values[${order[4]}]=$((-channel - 3)); values[${order[63]}]=$((channel + 5)) ;;
+				4) values[${order[1]}]=$((channel + 2)); values[${order[3]}]=$((-channel - 3)); values[${order[7]}]=$((channel + 4)); values[${order[63]}]=$((-channel - 5)) ;;
+				5) for ((rank = 1; rank <= 5; rank++)); do values[${order[rank]}]=$((channel + rank + 1)); done ;;
+				6) values[${order[1]}]=$((channel + 2)); values[${order[3]}]=$((-channel - 3)); values[${order[4]}]=$((channel + 4)); values[${order[8]}]=$((-channel - 5)); values[${order[14]}]=$((channel + 6)); values[${order[63]}]=$((-channel - 7)) ;;
+				8) for ((rank = 1; rank <= 8; rank++)); do values[${order[rank]}]=$(((rank % 2 == 0 ? -1 : 1) * (channel + rank + 1))); done ;;
+				32) for ((rank = 1; rank <= 32; rank++)); do values[${order[rank]}]=$(((rank % 2 == 0 ? -1 : 1) * (channel + rank + 1))); done ;;
+			esac
+			coefficients+=("${values[@]}")
+		done
+	done
+	{
+		printf 'jxl-semantic-dump 1\ninput.ac_tokens.width i 1 2\ninput.ac_tokens.height i 1 2\n'
+		printf 'input.ac_tokens.strategy i 1 0\ninput.ac_tokens.dct8_order i 1 0\n'
+		printf 'input.ac_tokens.channel_order i 3 1 0 2\n'
+		printf 'input.ac_tokens.context_count i 1 %s\n' "$num_contexts"
+		printf 'input.ac_tokens.context_map i %s' "${#context_map[@]}"
+		printf ' %s' "${context_map[@]}"
+		printf '\ninput.ac_tokens.order i %s' "${#order[@]}"
+		printf ' %s' "${order[@]}"
+		printf '\ninput.ac_tokens.qdc i %s' "${#qdc[@]}"
+		printf ' %s' "${qdc[@]}"
+		printf '\ninput.ac_tokens.qf i %s' "${#qf[@]}"
+		printf ' %s' "${qf[@]}"
+		printf '\n'
+		for channel in 0 1 2; do
+			printf 'input.ac_tokens.channel%s i %s' "$channel" "$((4 * 64))"
+			for ((block = 0; block < 256; block++)); do
+				printf ' %s' "${coefficients[channel * 256 + block]}"
+			done
+			printf '\n'
+		done
+	} > "$input"
+	"$harness" entropy ac-tokens 2 2 "$num_contexts" \
+		"${context_map[@]}" "${order[@]}" "${qdc[@]}" "${qf[@]}" \
+		"${coefficients[@]}" > "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline DCT8 coefficient groups in generator\t-\t2x2 blocks; strategy=0; order=explicit transpose; contexts=%s; qdc/qf recorded\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" "$num_contexts" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tTokenizeCoefficients DCT8; prescribed context map=%s; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" "$num_contexts" >> "$tmp"
+}
+
 rm -f "$out"/ans_sparse_precise.* "$out"/ans_skewed_approximate.* \
 	"$out"/ans_boundary_fast.* "$out"/ans_threshold48_fast.* \
 	"$out"/ans_threshold64_fast.*
@@ -291,6 +355,13 @@ generate_context_map_with_candidates context_raw_rle 4 "${context_rle_entries[@]
 generate_tree tree_gradient_fixed_8192_dc1 6 8192 8 0 1 2
 generate_tree tree_gradient_fixed_8193_dc2 6 8193 8 0 2 2
 generate_modular
+tiny_context_map=()
+for category in 0 2 2; do
+	for ((index = 0; index < 13; index++)); do tiny_context_map+=("$category"); done
+done
+default_context_map=(0 1 2 2 3 3 4 5 6 6 6 6 6 7 8 9 9 10 11 12 13 14 14 14 14 14 7 8 9 9 10 11 12 13 14 14 14 14 14)
+generate_ac_tokens ac_tokens_tiny_map 4 "${tiny_context_map[@]}"
+generate_ac_tokens ac_tokens_default_map 15 "${default_context_map[@]}"
 
 awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$tmp" | sort -t $'\t' -k1,1 > "$sorted_entropy"

@@ -365,6 +365,71 @@ struct EntropyReferenceFixture {
 				guard simple == [0], useMTF == [1], tokenCountStatus == [2]
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			}
+		} else if name.hasPrefix("ac_tokens_") {
+			inputFields = [
+				"input.ac_tokens.width", "input.ac_tokens.height",
+				"input.ac_tokens.strategy", "input.ac_tokens.dct8_order",
+				"input.ac_tokens.channel_order", "input.ac_tokens.context_count",
+				"input.ac_tokens.context_map", "input.ac_tokens.order",
+				"input.ac_tokens.qdc", "input.ac_tokens.qf",
+				"input.ac_tokens.channel0", "input.ac_tokens.channel1",
+				"input.ac_tokens.channel2",
+			]
+			expectedFields = [
+				"entropy.ac_tokens.context_count", "entropy.ac_tokens.contexts",
+				"entropy.ac_tokens.token_count", "entropy.ac_tokens.values",
+			]
+			let width = try integers(input, "input.ac_tokens.width")
+			let height = try integers(input, "input.ac_tokens.height")
+			let strategy = try integers(input, "input.ac_tokens.strategy")
+			let dct8Order = try integers(input, "input.ac_tokens.dct8_order")
+			let channelOrder = try integers(input, "input.ac_tokens.channel_order")
+			let contextCount = try integers(input, "input.ac_tokens.context_count")
+			let contextMap = try integers(input, "input.ac_tokens.context_map")
+			let order = try integers(input, "input.ac_tokens.order")
+			let qdc = try integers(input, "input.ac_tokens.qdc")
+			let qf = try integers(input, "input.ac_tokens.qf")
+			var expectedTinyMap: [Int64] = []
+			for category in [0, 2, 2] {
+				expectedTinyMap.append(
+					contentsOf: repeatElement(Int64(category), count: 13))
+			}
+			let expectedDefaultMap: [Int64] = [
+				0, 1, 2, 2, 3, 3, 4, 5, 6, 6, 6, 6, 6,
+				7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
+				7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
+			]
+			let requiredContextCount: Int64 =
+				name == "ac_tokens_tiny_map" ? 4 : 15
+			let requiredMap =
+				name == "ac_tokens_tiny_map" ? expectedTinyMap : expectedDefaultMap
+			guard name == "ac_tokens_tiny_map" || name == "ac_tokens_default_map",
+				width == [2], height == [2], strategy == [0], dct8Order == [0],
+				channelOrder == [1, 0, 2], contextCount == [requiredContextCount],
+				contextMap == requiredMap, order.count == 64, order[0] == 0,
+				Set(order) == Set((0..<64).map(Int64.init)),
+				qdc == [0, 0, 0, 0], qf == [1, 1, 1, 1]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			for channel in 0..<3 {
+				let coefficients = try integers(
+					input, "input.ac_tokens.channel\(channel)")
+				guard coefficients.count == 2 * 2 * 64,
+					coefficients.allSatisfy({
+						Int64(Int32.min)...Int64(Int32.max) ~= $0
+					})
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
+			let outputContextCount = try integers(
+				expected, "entropy.ac_tokens.context_count")
+			let contexts = try integers(expected, "entropy.ac_tokens.contexts")
+			let tokenCount = try integers(expected, "entropy.ac_tokens.token_count")
+			let values = try integers(expected, "entropy.ac_tokens.values")
+			guard outputContextCount == contextCount, tokenCount.count == 1,
+				tokenCount[0] > 0, contexts.count == Int(tokenCount[0]),
+				values.count == contexts.count,
+				contexts.allSatisfy({ (0...10_000).contains($0) }),
+				values.allSatisfy({ (0...Int64(UInt32.max)).contains($0) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name == "modular_dc_gradient_rows" {
 			var modularInputFields: Set<String> = [
 				"input.modular.tree_kind", "input.modular.total_pixels",

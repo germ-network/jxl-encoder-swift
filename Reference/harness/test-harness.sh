@@ -185,7 +185,32 @@ entropy_modular_rejects_unsafe_inputs() {
   if "$HARNESS" entropy modular "${samples[@]:0:10}"; then return 1; fi
   if "$HARNESS" entropy modular 3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 40000 -3 -1 2 3 6 10 30 20 10 0 -10 -20; then return 1; fi
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs; do
+entropy_ac_tokens_match_fixtures() {
+  python3 - "$HARNESS" "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy" <<'PYCODE'
+import subprocess,sys
+from pathlib import Path
+harness=sys.argv[1]; fixtures=Path(sys.argv[2])
+for name in ('ac_tokens_tiny_map','ac_tokens_default_map'):
+    fields={}
+    for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+        parts=line.split(); fields[parts[0]]=parts[3:]
+    keys=('width','height','context_count','context_map','order','qdc','qf','channel0','channel1','channel2')
+    args=['entropy','ac-tokens']+[value for key in keys for value in fields[f'input.ac_tokens.{key}']]
+    result=subprocess.run([harness,*args],text=True,capture_output=True)
+    assert result.returncode==0, (name,result.stderr)
+    assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
+    if name=='ac_tokens_tiny_map':
+        cases=[]
+        zero=list(args); zero[2]='0'; cases.append(zero)
+        contexts=list(args); contexts[4]='3'; cases.append(contexts)
+        duplicate=list(args); duplicate[3+3+39+1]=duplicate[3+3+39]; cases.append(duplicate)
+        oversized_qdc=list(args); oversized_qdc[3+3+39+64]= '256'; cases.append(oversized_qdc)
+        oversized_coeff=list(args); oversized_coeff[3+3+39+64+8]='2147483648'; cases.append(oversized_coeff)
+        for case in cases:
+            assert subprocess.run([harness,*case],capture_output=True).returncode!=0
+PYCODE
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures; do
   "$check"
   echo "PASS $check"
 done

@@ -379,6 +379,25 @@ struct EntropyReferenceTests {
 				name: "modular_dc_gradient_rows", input: malformedModularSamples,
 				expected: modular.expected)
 		}
+		let ac = try EntropyReferenceFixture.load("ac_tokens_tiny_map")
+		let invalidACContextCount = try SemanticDump(
+			parsing: ac.input.serialized.replacingOccurrences(
+				of: "input.ac_tokens.context_count i 1 4",
+				with: "input.ac_tokens.context_count i 1 15"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ac_tokens_tiny_map", input: invalidACContextCount,
+				expected: ac.expected)
+		}
+		let invalidACWidth = try SemanticDump(
+			parsing: ac.input.serialized.replacingOccurrences(
+				of: "input.ac_tokens.width i 1 2",
+				with: "input.ac_tokens.width i 1 0"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ac_tokens_tiny_map", input: invalidACWidth,
+				expected: ac.expected)
+		}
 	}
 
 	@Test
@@ -763,11 +782,61 @@ struct EntropyReferenceTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func acTokenContextsAndValuesMatchReference() throws {
-		Issue.record(
-			"Prescribed AC coefficients produce the reference token contexts and values."
-		)
+		for name in ["ac_tokens_tiny_map", "ac_tokens_default_map"] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			func integers(_ field: String) throws -> [Int64] {
+				guard case .integers(let values)? = fixture.input.fields[field]
+				else {
+					throw SemanticDumpError.unimplemented
+				}
+				return values
+			}
+			let width = Int(try integers("input.ac_tokens.width")[0])
+			let height = Int(try integers("input.ac_tokens.height")[0])
+			let order = try integers("input.ac_tokens.order").map(Int.init)
+			let qdc = try integers("input.ac_tokens.qdc").map(Int16.init)
+			let qf = try integers("input.ac_tokens.qf").map(UInt8.init)
+			let coefficients = try (0..<3).map { channel in
+				try integers("input.ac_tokens.channel\(channel)").map(Int32.init)
+			}
+			let group = Encoder.ACGroupCompute(
+				groupX: 0, groupY: 0, widthInBlocks: width,
+				heightInBlocks: height, coefficients: coefficients,
+				quantDC: Array(repeating: qdc, count: 3), quantField: qf)
+			let actual = SwiftEntropySemanticEncoding.acTokens(
+				group: group, order: Array(repeating: order, count: 3))
+			let differences = actual.differences(from: fixture.expected)
+			if name == "ac_tokens_tiny_map" {
+				#expect(differences.isEmpty, "\(name): \(differences)")
+			} else {
+				let knownDifferences: Set<String> = [
+					"entropy.ac_tokens.context_count",
+					"entropy.ac_tokens.contexts",
+				]
+				#expect(Set(differences.map(\.field)) == knownDifferences)
+				withKnownIssue(
+					Comment(
+						rawValue:
+							"GER-3387: Swift's compact AC map differs from upstream's default categories"
+					)
+				) {
+					#expect(
+						differences.isEmpty,
+						"\(name): \(differences)")
+				}
+				#expect(
+					actual.differences(
+						from: fixture.expected,
+						excludingFields: knownDifferences
+					).isEmpty)
+				let contextMap = try integers("input.ac_tokens.context_map")
+				#expect(
+					contextMap[0] == 0 && contextMap[13] == 7
+						&& contextMap[26] == 7)
+			}
+		}
 	}
 
 	@Test(.disabled("Awaiting entropy reference implementation"))

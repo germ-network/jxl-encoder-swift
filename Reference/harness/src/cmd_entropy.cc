@@ -19,6 +19,10 @@
 #include "lib/jxl/fields.h"
 #include "lib/jxl/base/bits.h"
 #include "lib/jxl/enc_aux_out.h"
+#include "lib/jxl/ac_strategy.h"
+#include "lib/jxl/coeff_order.h"
+#include "lib/jxl/enc_entropy_coder.h"
+#include "lib/jxl/frame_header.h"
 #include "lib/jxl/memory_manager_internal.h"
 #include "lib/jxl/modular/encoding/enc_encoding.h"
 #include "lib/jxl/modular/encoding/encoding.h"
@@ -473,6 +477,108 @@ int RunModular(const std::vector<std::string>& args) {
   return 0;
 }
 
+int RunACTokens(const std::vector<std::string>& args) {
+  if (args.size() < 4) return 2;
+  int width = 0;
+  int height = 0;
+  int num_contexts = 0;
+  if (!ParseInt(args[0], &width) || !ParseInt(args[1], &height) ||
+      !ParseInt(args[2], &num_contexts) || width <= 0 || height <= 0 ||
+      width > 16 || height > 16 || width * height > 64 ||
+      (num_contexts != 4 && num_contexts != 15)) return 2;
+  const size_t blocks = static_cast<size_t>(width) * height;
+  constexpr size_t kMapSize = 3 * jxl::kNumOrders;
+  constexpr size_t kOrderSize = 64;
+  const size_t expected = 3 + kMapSize + kOrderSize + blocks * 2 +
+                          blocks * kOrderSize * 3;
+  if (args.size() != expected) return 2;
+  size_t cursor = 3;
+  std::array<uint8_t, kMapSize> context_map{};
+  for (auto& value : context_map) {
+    int parsed = 0;
+    if (!ParseInt(args[cursor++], &parsed) || parsed < 0 ||
+        parsed >= num_contexts) return 2;
+    value = static_cast<uint8_t>(parsed);
+  }
+  std::array<jxl::coeff_order_t, kOrderSize> order{};
+  std::array<bool, kOrderSize> seen{};
+  for (auto& value : order) {
+    int parsed = 0;
+    if (!ParseInt(args[cursor++], &parsed) || parsed < 0 || parsed >= 64 ||
+        seen[parsed]) return 2;
+    seen[parsed] = true;
+    value = static_cast<jxl::coeff_order_t>(parsed);
+  }
+  std::vector<int> qdc(blocks);
+  std::vector<int> qf(blocks);
+  for (size_t i = 0; i < blocks; ++i) {
+    if (!ParseInt(args[cursor++], &qdc[i]) || qdc[i] < 0 || qdc[i] > 255)
+      return 2;
+  }
+  for (size_t i = 0; i < blocks; ++i) {
+    if (!ParseInt(args[cursor++], &qf[i]) || qf[i] < 0) return 2;
+  }
+  std::array<std::vector<int32_t>, 3> coefficients;
+  for (auto& channel : coefficients) {
+    channel.resize(blocks * 64);
+    for (auto& value : channel) {
+      if (!ParseInt(args[cursor++], &value)) return 2;
+    }
+  }
+
+  JxlMemoryManager manager;
+  if (!jxl::MemoryManagerInit(&manager, nullptr)) return 1;
+  auto strategy_or = jxl::AcStrategyImage::Create(&manager, width, height);
+  auto qdc_or = jxl::ImageB::Create(&manager, width, height);
+  auto qf_or = jxl::ImageI::Create(&manager, width, height);
+  auto scratch_or = jxl::Image3I::Create(&manager, width, height);
+  if (!strategy_or.ok() || !qdc_or.ok() || !qf_or.ok() || !scratch_or.ok())
+    return 1;
+  auto strategy = std::move(strategy_or).value_();
+  auto qdc_image = std::move(qdc_or).value_();
+  auto qf_image = std::move(qf_or).value_();
+  auto scratch = std::move(scratch_or).value_();
+  strategy.FillDCT8();
+  for (int y = 0; y < height; ++y) {
+    for (int x = 0; x < width; ++x) {
+      const size_t index = static_cast<size_t>(y) * width + x;
+      qdc_image.Row(y)[x] = static_cast<uint8_t>(qdc[index]);
+      qf_image.Row(y)[x] = qf[index];
+    }
+  }
+  std::vector<jxl::coeff_order_t> orders(jxl::kCoeffOrderMaxSize);
+  for (size_t channel = 0; channel < 3; ++channel) {
+    std::copy(order.begin(), order.end(),
+              orders.begin() + channel * kOrderSize);
+  }
+  jxl::BlockCtxMap block_map;
+  block_map.ctx_map.assign(context_map.begin(), context_map.end());
+  block_map.num_ctxs = num_contexts;
+  block_map.num_dc_ctxs = 1;
+  jxl::Rect rect(0, 0, width, height);
+  jxl::YCbCrChromaSubsampling subsampling;
+  const int32_t* rows[3] = {coefficients[0].data(), coefficients[1].data(),
+                            coefficients[2].data()};
+  std::vector<jxl::Token> tokens;
+  if (!jxl::TokenizeCoefficients(orders.data(), rect, rows, strategy,
+                                 subsampling, &scratch, &tokens, qdc_image,
+                                 qf_image, block_map)) return 1;
+  std::vector<int64_t> contexts;
+  std::vector<int64_t> values;
+  for (const auto& token : tokens) {
+    contexts.push_back(token.context);
+    values.push_back(token.value);
+  }
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.ac_tokens.context_count", {num_contexts});
+  dump.Integers("entropy.ac_tokens.contexts", contexts);
+  dump.Integers("entropy.ac_tokens.token_count",
+                {static_cast<int64_t>(tokens.size())});
+  dump.Integers("entropy.ac_tokens.values", values);
+  dump.Write(stdout);
+  return 0;
+}
+
 int RunEntropy(const std::vector<std::string>& args) {
   if (args.empty()) return 2;
   if (args[0] == "histogram") {
@@ -489,6 +595,9 @@ int RunEntropy(const std::vector<std::string>& args) {
   }
   if (args[0] == "modular") {
     return RunModular(std::vector<std::string>(args.begin() + 1, args.end()));
+  }
+  if (args[0] == "ac-tokens") {
+    return RunACTokens(std::vector<std::string>(args.begin() + 1, args.end()));
   }
   return 2;
 }

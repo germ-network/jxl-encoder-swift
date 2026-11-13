@@ -241,12 +241,13 @@ enum SwiftEntropySemanticEncoding {
 			return Token(context: context, value: value)
 		}
 		var dump = SemanticDump()
-		dump.record("entropy.ac_tokens.group_x", .integers([Int64(group.groupX)]))
-		dump.record("entropy.ac_tokens.group_y", .integers([Int64(group.groupY)]))
-		dump.record("entropy.ac_tokens.count", .integers([Int64(tokens.count)]))
 		dump.record(
-			"entropy.ac_tokens.tokens",
-			.integers(tokens.flatMap { [Int64($0.context), Int64($0.value)] }))
+			"entropy.ac_tokens.context_count",
+			.integers([Int64(ACContext.numBlockCategories)]))
+		dump.record(
+			"entropy.ac_tokens.contexts", .integers(tokens.map { Int64($0.context) }))
+		dump.record("entropy.ac_tokens.token_count", .integers([Int64(tokens.count)]))
+		dump.record("entropy.ac_tokens.values", .integers(tokens.map { Int64($0.value) }))
 		return dump
 	}
 
