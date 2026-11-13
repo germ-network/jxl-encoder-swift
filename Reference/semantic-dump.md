@@ -99,6 +99,15 @@ comparing that same component. The 8193-pixel case is a faithful witness;
 8192 pixels crosses the pinned upstream height threshold and is tracked as
 CT-01 on only the component's node/token fields.
 
+Modular inputs record the predefined tree configuration and each group's
+dimensions, modular stream ID, channel order, and three row-major DC sample
+planes. `ModularCompress` outputs leaf-context/value token pairs per group.
+Reference contexts are local leaf ordinals; `context_offset` records the
+projection into Swift's shared DC context table. For the fixed gradient tree,
+offset 11 maps every tree leaf to the Swift gradient-context LUT, checked over
+the full gradient property range. Values compare exactly after this context
+projection.
+
 Context-map inputs record entries and `map_length` separately. Expected
 outputs include the selected simple, prefix, or ANS mode and `token_count`
 after libjxl's token construction, including LZ77 processing. This count is a

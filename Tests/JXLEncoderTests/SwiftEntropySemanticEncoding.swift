@@ -221,7 +221,7 @@ enum SwiftEntropySemanticEncoding {
 
 	static func modularTokens(data: DCGroupData) -> SemanticDump {
 		var section = SectionWriter(mode: .staging(.staticDC))
-		DCGroupEncoder.write(data: data, writer: &section)
+		DCGroupEncoder.writeDCTokens(data: data, writer: &section)
 		let tokens = section.staged.compactMap { record -> Token? in
 			guard case .token(let context, let value) = record else { return nil }
 			return Token(context: context, value: value)

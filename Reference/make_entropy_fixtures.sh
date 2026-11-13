@@ -16,7 +16,7 @@ mkdir -p "$out"
 pin="$LIBJXL_COMMIT"
 tmp="$(mktemp)"
 sorted_entropy="$tmp.entropy"
-trap 'rm -f "$tmp" "$sorted_entropy"' EXIT
+trap 'rm -f "$tmp" "$sorted_entropy" "$tmp.modular.0" "$tmp.modular.1"' EXIT
 head -n 2 "$root/Reference/provenance.tsv" > "$tmp"
 awk -F '\t' 'NR > 2 && $1 !~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$root/Reference/provenance.tsv" >> "$tmp"
@@ -155,6 +155,60 @@ generate_tree() {
 		"$bitdepth" "$prevprop" >> "$tmp"
 }
 
+generate_modular_group() {
+	local group="$1" width="$2" height="$3" group_id="$4"
+	shift 4
+	local -a channel0=("$1" "$2" "$3" "$4" "$5" "$6")
+	shift 6
+	local -a channel1=("$1" "$2" "$3" "$4" "$5" "$6")
+	shift 6
+	local -a channel2=("$1" "$2" "$3" "$4" "$5" "$6")
+	local generated="$tmp.modular.$group"
+	"$harness" entropy modular "$width" "$height" 8 6 8193 0 \
+		"$group_id" 1 0 2 "${channel0[@]}" "${channel1[@]}" "${channel2[@]}" \
+		> "$generated"
+	awk -v group="$group" 'NR > 1 { sub(/^entropy[.]modular[.]/, "entropy.modular.group" group "."); print }' \
+		"$generated"
+}
+
+generate_modular() {
+	local name="modular_dc_gradient_rows"
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.modular.tree_kind i 1 6\n'
+		printf 'input.modular.total_pixels i 1 8193\n'
+		printf 'input.modular.bitdepth i 1 8\n'
+		printf 'input.modular.prevprop i 1 0\n'
+		printf 'input.modular.context_offset i 1 11\n'
+		printf 'input.modular.dc_group_count i 1 2\n'
+		printf 'input.modular.group0.width i 1 3\ninput.modular.group0.height i 1 2\n'
+		printf 'input.modular.group0.group_id i 1 3\n'
+		printf 'input.modular.group0.channel_order i 3 1 0 2\n'
+		printf 'input.modular.group0.channel0 i 6 4 5 6 7 8 9\n'
+		printf 'input.modular.group0.channel1 i 6 -3 -1 2 3 6 10\n'
+		printf 'input.modular.group0.channel2 i 6 30 20 10 0 -10 -20\n'
+		printf 'input.modular.group1.width i 1 2\ninput.modular.group1.height i 1 3\n'
+		printf 'input.modular.group1.group_id i 1 4\n'
+		printf 'input.modular.group1.channel_order i 3 1 0 2\n'
+		printf 'input.modular.group1.channel0 i 6 7 8 9 10 11 12\n'
+		printf 'input.modular.group1.channel1 i 6 -4 -2 0 2 4 6\n'
+		printf 'input.modular.group1.channel2 i 6 -30 -20 -10 0 10 20\n'
+	} > "$input"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		generate_modular_group 0 3 2 3 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20
+		generate_modular_group 1 2 3 4 7 8 9 10 11 12 -4 -2 0 2 4 6 -30 -20 -10 0 10 20
+	} > "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline modular samples in generator\t-\ttwo 3-channel DC groups; gradient tree kind=6 pixels=8193 bitdepth=8; stream IDs=3,4; channel order=1,0,2\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tModularCompress with PredefinedTree(kGradientFixedDC); raw leaf IDs and packed residuals; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
 rm -f "$out"/ans_sparse_precise.* "$out"/ans_skewed_approximate.* \
 	"$out"/ans_boundary_fast.* "$out"/ans_threshold48_fast.* \
 	"$out"/ans_threshold64_fast.*
@@ -236,6 +290,7 @@ generate_context_map_with_candidates context_raw_rle 4 "${context_rle_entries[@]
 
 generate_tree tree_gradient_fixed_8192_dc1 6 8192 8 0 1 2
 generate_tree tree_gradient_fixed_8193_dc2 6 8193 8 0 2 2
+generate_modular
 
 awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$tmp" | sort -t $'\t' -k1,1 > "$sorted_entropy"

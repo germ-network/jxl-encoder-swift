@@ -1,6 +1,7 @@
 #include "registry.h"
 
 #include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdint>
 #include <limits>
@@ -20,6 +21,7 @@
 #include "lib/jxl/enc_aux_out.h"
 #include "lib/jxl/memory_manager_internal.h"
 #include "lib/jxl/modular/encoding/enc_encoding.h"
+#include "lib/jxl/modular/encoding/encoding.h"
 #include "lib/jxl/modular/encoding/enc_ma.h"
 
 namespace harness {
@@ -385,6 +387,92 @@ int RunTree(const std::vector<std::string>& args) {
   return 0;
 }
 
+int RunModular(const std::vector<std::string>& args) {
+  if (args.size() < 10) return 2;
+  int width = 0, height = 0, bitdepth = 0, kind = 0, total_pixels = 0;
+  int prevprop = 0, group_id = 0;
+  if (!ParseInt(args[0], &width) || width < 1 || width > 32 ||
+      !ParseInt(args[1], &height) || height < 1 || height > 32 ||
+      !ParseInt(args[2], &bitdepth) || bitdepth != 8 ||
+      !ParseInt(args[3], &kind) || kind != 6 ||
+      !ParseInt(args[4], &total_pixels) || total_pixels != 8193 ||
+      !ParseInt(args[5], &prevprop) || prevprop != 0 ||
+      !ParseInt(args[6], &group_id) || group_id < 0 || group_id > 255 ||
+      args.size() != 10 + static_cast<size_t>(3 * width * height)) return 2;
+
+  std::array<int, 3> channel_order{};
+  std::array<bool, 3> seen{};
+  for (size_t i = 0; i < channel_order.size(); ++i) {
+    if (!ParseInt(args[7 + i], &channel_order[i]) || channel_order[i] < 0 ||
+        channel_order[i] >= 3 || seen[channel_order[i]]) return 2;
+    seen[channel_order[i]] = true;
+  }
+  std::array<std::vector<int32_t>, 3> samples;
+  for (auto& channel : samples) channel.resize(width * height);
+  size_t arg_index = 10;
+  for (size_t channel = 0; channel < samples.size(); ++channel) {
+    for (int i = 0; i < width * height; ++i) {
+      int value = 0;
+      if (!ParseInt(args[arg_index++], &value) || value < -32768 ||
+          value > 32767) return 2;
+      samples[channel][i] = value;
+    }
+  }
+
+  JxlMemoryManager manager;
+  if (!jxl::MemoryManagerInit(&manager, nullptr)) return 1;
+  auto image_or = jxl::Image::Create(&manager, width, height, bitdepth, 3);
+  if (!image_or.ok()) return 1;
+  jxl::Image image = std::move(image_or).value_();
+  image.nb_meta_channels = 0;
+  for (size_t channel = 0; channel < channel_order.size(); ++channel) {
+    for (int y = 0; y < height; ++y) {
+      for (int x = 0; x < width; ++x) {
+        image.channel[channel].Row(y)[x] =
+            samples[channel_order[channel]][y * width + x];
+      }
+    }
+  }
+
+  jxl::ModularOptions options;
+  options.max_chan_size = std::max(width, height);
+  const auto predefined_tree = jxl::PredefinedTree(
+      jxl::ModularOptions::TreeKind::kGradientFixedDC, total_pixels,
+      bitdepth, prevprop);
+  std::vector<jxl::Token> tree_tokens;
+  jxl::Tree tree;
+  if (!jxl::TokenizeTree(predefined_tree, &tree_tokens, &tree)) return 1;
+  jxl::GroupHeader header;
+  std::vector<jxl::Token> tokens;
+  size_t image_width = 0;
+  if (!jxl::ModularCompress(image, options, group_id, tree, header, tokens,
+                            &image_width) || image_width != size_t(width)) {
+    return 1;
+  }
+
+  std::vector<int64_t> serialized_tokens;
+  serialized_tokens.reserve(tokens.size() * 2);
+  for (const auto& token : tokens) {
+    serialized_tokens.push_back(token.context);
+    serialized_tokens.push_back(token.value);
+  }
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.modular.bitdepth", {bitdepth});
+  dump.Integers("entropy.modular.group_id", {group_id});
+  dump.Integers("entropy.modular.height", {height});
+  dump.Integers("entropy.modular.token_count",
+                {static_cast<int64_t>(tokens.size())});
+  dump.Integers("entropy.modular.tokens", serialized_tokens);
+  dump.Integers("entropy.modular.total_pixels", {total_pixels});
+  dump.Integers("entropy.modular.tree_kind", {kind});
+  dump.Integers("entropy.modular.channel_order",
+                {channel_order[0], channel_order[1], channel_order[2]});
+  dump.Integers("entropy.modular.prevprop", {prevprop});
+  dump.Integers("entropy.modular.width", {width});
+  dump.Write(stdout);
+  return 0;
+}
+
 int RunEntropy(const std::vector<std::string>& args) {
   if (args.empty()) return 2;
   if (args[0] == "histogram") {
@@ -399,11 +487,14 @@ int RunEntropy(const std::vector<std::string>& args) {
   if (args[0] == "tree") {
     return RunTree(std::vector<std::string>(args.begin() + 1, args.end()));
   }
+  if (args[0] == "modular") {
+    return RunModular(std::vector<std::string>(args.begin() + 1, args.end()));
+  }
   return 2;
 }
 
 const RegisterSubcommand kRegister({
-    "entropy", "histogram|cluster|context-map|tree ...",
+    "entropy", "histogram|cluster|context-map|tree|modular ...",
     RunEntropy});
 
 }  // namespace

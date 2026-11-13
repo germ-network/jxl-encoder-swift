@@ -365,6 +365,103 @@ struct EntropyReferenceFixture {
 				guard simple == [0], useMTF == [1], tokenCountStatus == [2]
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			}
+		} else if name == "modular_dc_gradient_rows" {
+			var modularInputFields: Set<String> = [
+				"input.modular.tree_kind", "input.modular.total_pixels",
+				"input.modular.bitdepth", "input.modular.prevprop",
+				"input.modular.context_offset", "input.modular.dc_group_count",
+			]
+			var modularExpectedFields = Set<String>()
+			for group in 0..<2 {
+				let prefix = "input.modular.group\(group)"
+				modularInputFields.formUnion([
+					"\(prefix).width", "\(prefix).height",
+					"\(prefix).group_id", "\(prefix).channel_order",
+					"\(prefix).channel0", "\(prefix).channel1",
+					"\(prefix).channel2",
+				])
+				modularExpectedFields.formUnion([
+					"entropy.modular.group\(group).bitdepth",
+					"entropy.modular.group\(group).group_id",
+					"entropy.modular.group\(group).height",
+					"entropy.modular.group\(group).token_count",
+					"entropy.modular.group\(group).tokens",
+					"entropy.modular.group\(group).total_pixels",
+					"entropy.modular.group\(group).tree_kind",
+					"entropy.modular.group\(group).channel_order",
+					"entropy.modular.group\(group).prevprop",
+					"entropy.modular.group\(group).width",
+				])
+			}
+			inputFields = modularInputFields
+			expectedFields = modularExpectedFields
+			let treeKind = try integers(input, "input.modular.tree_kind")
+			let totalPixels = try integers(input, "input.modular.total_pixels")
+			let bitdepth = try integers(input, "input.modular.bitdepth")
+			let prevprop = try integers(input, "input.modular.prevprop")
+			let contextOffset = try integers(input, "input.modular.context_offset")
+			let groupCount = try integers(input, "input.modular.dc_group_count")
+			guard treeKind == [6], totalPixels == [8193], bitdepth == [8],
+				prevprop == [0], contextOffset == [11], groupCount == [2]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			for group in 0..<2 {
+				let prefix = "input.modular.group\(group)"
+				let width = try integers(input, "\(prefix).width")
+				let height = try integers(input, "\(prefix).height")
+				let groupID = try integers(input, "\(prefix).group_id")
+				let order = try integers(input, "\(prefix).channel_order")
+				let dimensions =
+					width.count == 1 && height.count == 1
+					&& (1...32).contains(width[0])
+					&& (1...32).contains(height[0])
+				let expectedGroupID = Int64(3 + group)
+				guard dimensions, groupID == [expectedGroupID],
+					order == [1, 0, 2]
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+				for channel in 0..<3 {
+					let samples = try integers(
+						input, "\(prefix).channel\(channel)")
+					guard samples.count == Int(width[0] * height[0]),
+						samples.allSatisfy({
+							Int64(Int16.min)...Int64(Int16.max) ~= $0
+						})
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+				}
+				let outputPrefix = "entropy.modular.group\(group)"
+				let outputTreeKind = try integers(
+					expected, "\(outputPrefix).tree_kind")
+				let outputPixels = try integers(
+					expected, "\(outputPrefix).total_pixels")
+				let outputBitdepth = try integers(
+					expected, "\(outputPrefix).bitdepth")
+				let outputPrevprop = try integers(
+					expected, "\(outputPrefix).prevprop")
+				let outputGroupID = try integers(
+					expected, "\(outputPrefix).group_id")
+				let outputWidth = try integers(expected, "\(outputPrefix).width")
+				let outputHeight = try integers(expected, "\(outputPrefix).height")
+				let outputOrder = try integers(
+					expected, "\(outputPrefix).channel_order")
+				let tokenCount = try integers(
+					expected, "\(outputPrefix).token_count")
+				let tokens = try integers(expected, "\(outputPrefix).tokens")
+				let expectedCount = width[0] * height[0] * 3
+				guard outputTreeKind == treeKind, outputPixels == totalPixels,
+					outputBitdepth == bitdepth, outputPrevprop == prevprop,
+					outputGroupID == groupID, outputWidth == width,
+					outputHeight == height, outputOrder == order,
+					tokenCount == [expectedCount],
+					tokens.count == Int(expectedCount * 2),
+					tokens.enumerated().allSatisfy({ index, value in
+						index.isMultiple(of: 2)
+							? (0...33).contains(value)
+							: (0...Int64(UInt32.max)).contains(value)
+					})
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
 		} else if name.hasPrefix("tree_gradient_fixed_") {
 			inputFields = [
 				"input.tree.kind", "input.tree.total_pixels", "input.tree.bitdepth",

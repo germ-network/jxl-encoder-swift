@@ -156,7 +156,36 @@ entropy_tree_decisions_match_fixtures() {
   cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/tree_gradient_fixed_8193_dc2.expected.sem" "$SCRATCH/tree_8193.sem"
   if "$HARNESS" entropy tree 6 0 8 0; then return 1; fi
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures; do
+entropy_modular_decisions_match_fixtures() {
+  local expected="$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/modular_dc_gradient_rows.expected.sem"
+  local -a first=(3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20)
+  local -a second=(2 3 8 6 8193 0 4 1 0 2 7 8 9 10 11 12 -4 -2 0 2 4 6 -30 -20 -10 0 10 20)
+  "$HARNESS" entropy modular "${first[@]}" > "$SCRATCH/modular0.sem"
+  "$HARNESS" entropy modular "${second[@]}" > "$SCRATCH/modular1.sem"
+  for group in 0 1; do
+    python3 - "$expected" "$SCRATCH/modular$group.sem" "$group" <<'PYCODE'
+import sys
+from pathlib import Path
+expected=Path(sys.argv[1]).read_text().splitlines()
+actual=Path(sys.argv[2]).read_text().splitlines()
+group=sys.argv[3]
+fields=["jxl-semantic-dump 1"]
+prefix=f"entropy.modular.group{group}."
+fields.extend(line.replace(prefix,"entropy.modular.",1) for line in expected[1:] if line.startswith(prefix))
+assert fields==actual
+PYCODE
+  done
+}
+entropy_modular_rejects_unsafe_inputs() {
+  local -a samples=(3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20)
+  local -a zero_width=(0 "${samples[@]:1}")
+  local -a duplicate_order=(3 2 8 6 8193 0 3 1 1 2 "${samples[@]:10}")
+  if "$HARNESS" entropy modular "${zero_width[@]}"; then return 1; fi
+  if "$HARNESS" entropy modular "${duplicate_order[@]}"; then return 1; fi
+  if "$HARNESS" entropy modular "${samples[@]:0:10}"; then return 1; fi
+  if "$HARNESS" entropy modular 3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 40000 -3 -1 2 3 6 10 30 20 10 0 -10 -20; then return 1; fi
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs; do
   "$check"
   echo "PASS $check"
 done

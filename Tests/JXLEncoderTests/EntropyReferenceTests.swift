@@ -360,6 +360,25 @@ struct EntropyReferenceTests {
 				name: "tree_gradient_fixed_8193_dc2", input: tree.input,
 				expected: maximalTreeTokenCount)
 		}
+		let modular = try EntropyReferenceFixture.load("modular_dc_gradient_rows")
+		let malformedModularOrder = try SemanticDump(
+			parsing: modular.input.serialized.replacingOccurrences(
+				of: "input.modular.group0.channel_order i 3 1 0 2",
+				with: "input.modular.group0.channel_order i 3 1 1 2"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "modular_dc_gradient_rows", input: malformedModularOrder,
+				expected: modular.expected)
+		}
+		let malformedModularSamples = try SemanticDump(
+			parsing: modular.input.serialized.replacingOccurrences(
+				of: "input.modular.group1.channel2 i 6 -30 -20 -10 0 10 20",
+				with: "input.modular.group1.channel2 i 5 -30 -20 -10 0 10"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "modular_dc_gradient_rows", input: malformedModularSamples,
+				expected: modular.expected)
+		}
 	}
 
 	@Test
@@ -677,10 +696,71 @@ struct EntropyReferenceTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func modularLeafContextsAndResidualsMatchReference() throws {
-		Issue.record(
-			"Modular leaf contexts and packed residuals match for identical samples.")
+		let fixture = try EntropyReferenceFixture.load("modular_dc_gradient_rows")
+		func integers(_ field: String) throws -> [Int64] {
+			guard case .integers(let values)? = fixture.input.fields[field] else {
+				throw SemanticDumpError.unimplemented
+			}
+			return values
+		}
+		func expectedIntegers(_ field: String) throws -> [Int64] {
+			guard case .integers(let values)? = fixture.expected.fields[field] else {
+				throw SemanticDumpError.unimplemented
+			}
+			return values
+		}
+		let contextOffset = try integers("input.modular.context_offset")[0]
+		let referenceTree = try EntropyReferenceFixture.load(
+			"tree_gradient_fixed_8193_dc2")
+		guard
+			case .integers(let encodedNodes)? = referenceTree.expected.fields[
+				"entropy.tree.nodes"]
+		else { throw SemanticDumpError.unimplemented }
+		for (index, context) in DCPredictor.gradientContextLut.enumerated() {
+			let property = index - DCPredictor.gradRangeMid
+			var nodeIndex = 0
+			while encodedNodes[nodeIndex * 7] >= 0 {
+				let base = nodeIndex * 7
+				nodeIndex =
+					property > Int(encodedNodes[base + 1])
+					? Int(encodedNodes[base + 2])
+					: Int(encodedNodes[base + 3])
+			}
+			#expect(
+				encodedNodes[nodeIndex * 7 + 2] + contextOffset == Int64(context),
+				"gradient property \(property) has a different leaf context")
+		}
+
+		for group in 0..<2 {
+			let prefix = "input.modular.group\(group)"
+			let width = Int(try integers("\(prefix).width")[0])
+			let height = Int(try integers("\(prefix).height")[0])
+			let channelOrder = try integers("\(prefix).channel_order").map(Int.init)
+			var data = DCGroupData(widthInBlocks: width, heightInBlocks: height)
+			for channel in 0..<3 {
+				let samples = try integers("\(prefix).channel\(channel)")
+				data.quantDC[channel] = samples.map(Int16.init)
+			}
+			let actual = SwiftEntropySemanticEncoding.modularTokens(data: data)
+			let referenceTokens = try expectedIntegers(
+				"entropy.modular.group\(group).tokens")
+			let projectedTokens = stride(from: 0, to: referenceTokens.count, by: 2)
+				.flatMap { index in
+					[
+						referenceTokens[index] + contextOffset,
+						referenceTokens[index + 1],
+					]
+				}
+			var expected = SemanticDump()
+			expected.record(
+				"entropy.modular.token_count",
+				.integers([Int64(projectedTokens.count / 2)]))
+			expected.record("entropy.modular.tokens", .integers(projectedTokens))
+			#expect(channelOrder == [1, 0, 2])
+			#expect(actual.differences(from: expected).isEmpty)
+		}
 	}
 
 	@Test(.disabled("Awaiting entropy reference implementation"))
