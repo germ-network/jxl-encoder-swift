@@ -423,6 +423,65 @@ struct EntropyReferenceTests {
 	}
 
 	@Test
+	func malformedPrimitiveFixturesAreRejectedBeforeIntegerConversion() throws {
+		let uint = try EntropyReferenceFixture.load("hybrid_uint_4_2_0")
+		for (old, replacement) in [
+			("input.uint.values i 17 0", "input.uint.values i 17 -1"),
+			("input.uint.config i 3 4 2 0", "input.uint.config i 3 32 2 0"),
+		] {
+			let malformed = try SemanticDump(
+				parsing: uint.input.serialized.replacingOccurrences(
+					of: old, with: replacement))
+			#expect(throws: Error.self) {
+				try EntropyReferenceFixture.validate(
+					name: "hybrid_uint_4_2_0", input: malformed,
+					expected: uint.expected)
+			}
+		}
+		let wideUint = try SemanticDump(
+			parsing: uint.input.serialized.replacingOccurrences(
+				of: "input.uint.values i 17 0",
+				with: "input.uint.values i 17 4294967296"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "hybrid_uint_4_2_0", input: wideUint,
+				expected: uint.expected)
+		}
+
+		let signed = try EntropyReferenceFixture.load("pack_signed_full_reference")
+		let wideSigned = try SemanticDump(
+			parsing: signed.input.serialized.replacingOccurrences(
+				of: "input.signed.values i 11 0",
+				with: "input.signed.values i 11 2147483648"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "pack_signed_full_reference", input: wideSigned,
+				expected: signed.expected)
+		}
+
+		let huffman = try EntropyReferenceFixture.load("huffman_tree_full_reference")
+		for (old, replacement) in [
+			(
+				"input.huffman.lengths i 6 4 5 8 1 3 15",
+				"input.huffman.lengths i 5 4 5 8 1 3"
+			),
+			(
+				"input.huffman.counts i 36 1 1 1 1",
+				"input.huffman.counts i 36 0 0 0 0"
+			),
+		] {
+			let malformed = try SemanticDump(
+				parsing: huffman.input.serialized.replacingOccurrences(
+					of: old, with: replacement))
+			#expect(throws: Error.self) {
+				try EntropyReferenceFixture.validate(
+					name: "huffman_tree_full_reference", input: malformed,
+					expected: huffman.expected)
+			}
+		}
+	}
+
+	@Test
 	func malformedStreamLengthsAndFrequenciesAreRejectedBeforeArithmetic() throws {
 		let ans = try EntropyReferenceFixture.load("stream_shared_ans")
 		for invalidLength in ["-1", "9223372036854775807"] {

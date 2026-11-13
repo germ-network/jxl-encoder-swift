@@ -6,6 +6,14 @@ struct EntropyReferenceFixture {
 	let input: SemanticDump
 	let expected: SemanticDump
 
+	func integers(_ dump: SemanticDump, _ field: String) throws -> [Int64] {
+		guard case .integers(let values)? = dump.fields[field] else {
+			throw SemanticDumpError.malformedEntropyFixture(
+				name: "entropy", field: field)
+		}
+		return values
+	}
+
 	static func load(_ name: String) throws -> Self {
 		guard name.range(of: #"^[a-z0-9_]+$"#, options: .regularExpression) != nil else {
 			throw SemanticDumpError.fixtureNotFound(name)
@@ -811,6 +819,69 @@ struct EntropyReferenceFixture {
 					observedCounts == [4_194_312, 4_194_311],
 					sampledOrder == order
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
+		} else if name == "hybrid_uint_4_2_0" {
+			inputFields = ["input.uint.config", "input.uint.values"]
+			expectedFields = [
+				"entropy.uint.tokens", "entropy.uint.bit_counts",
+				"entropy.uint.bits",
+			]
+			let config = try integers(input, "input.uint.config")
+			let values = try integers(input, "input.uint.values")
+			let tokens = try integers(expected, "entropy.uint.tokens")
+			let bitCounts = try integers(expected, "entropy.uint.bit_counts")
+			let bits = try integers(expected, "entropy.uint.bits")
+			guard config == [4, 2, 0], !values.isEmpty,
+				values.count == tokens.count, values.count == bitCounts.count,
+				values.count == bits.count,
+				values.allSatisfy({ (0...Int64(UInt32.max)).contains($0) }),
+				tokens.allSatisfy({ (0...Int64(UInt32.max)).contains($0) }),
+				bitCounts.allSatisfy({ (0...32).contains($0) }),
+				bits.allSatisfy({ (0...Int64(UInt32.max)).contains($0) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "pack_signed_full_reference" {
+			inputFields = ["input.signed.values"]
+			expectedFields = ["entropy.signed.values"]
+			let values = try integers(input, "input.signed.values")
+			let packed = try integers(expected, "entropy.signed.values")
+			guard !values.isEmpty, values.count == packed.count,
+				values.allSatisfy({ Int64(Int32.min)...Int64(Int32.max) ~= $0 }),
+				packed.allSatisfy({ (0...Int64(UInt32.max)).contains($0) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "huffman_tree_full_reference" {
+			inputFields = [
+				"input.huffman.tree_limit", "input.huffman.lengths",
+				"input.huffman.counts",
+			]
+			expectedFields = [
+				"entropy.huffman.lengths", "entropy.huffman.depths",
+			]
+			let limit = try integers(input, "input.huffman.tree_limit")
+			let lengths = try integers(input, "input.huffman.lengths")
+			let counts = try integers(input, "input.huffman.counts")
+			let outputLengths = try integers(
+				expected, "entropy.huffman.lengths")
+			let depths = try integers(expected, "entropy.huffman.depths")
+			guard limit == [15], !lengths.isEmpty, lengths.count <= 16,
+				lengths.allSatisfy({ (1...256).contains($0) }),
+				checkedSum(lengths, limit: Int64.max) == Int64(counts.count),
+				counts.allSatisfy({ (0...Int64(UInt32.max)).contains($0) }),
+				outputLengths == lengths, depths.count == counts.count
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			var offset = 0
+			for length in lengths {
+				let end = offset + Int(length)
+				let histogram = counts[offset..<end]
+				let tree = depths[offset..<end]
+				let active = histogram.filter { $0 > 0 }.count
+				guard active > 0, active <= (1 << Int(limit[0])),
+					histogram.indices.allSatisfy({ index in
+						histogram[index] == 0
+							? tree[index] == 0
+							: (1...limit[0]).contains(tree[index])
+					})
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+				offset = end
 			}
 		} else {
 			throw SemanticDumpError.unsupportedEntropyFixture(name)

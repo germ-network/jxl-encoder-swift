@@ -47,6 +47,6 @@ The `stripe_*` stage names (`linear`, `dct`, `aq`) are inferred from fixture fil
 | `cjxl_tiny` | `edge_whole.jxl`, `multigroup_whole.jxl` | `cjxl_tiny -d 1.0 <in.pfm> <out.jxl>` | unrecorded |
 | `gencodes.cc` | `Sources/JXLEncoder/StaticEntropyCodes.swift` | `gencodes` | unrecorded |
 | `genctx.cc` | `Tests/JXLEncoderTests/Fixtures/ac_context.bin` | `genctx ac_context.bin` | unrecorded |
-| `genprefix.cc` | `Tests/JXLEncoderTests/Fixtures/prefix_codes.txt` | `genprefix > prefix_codes.txt` | unrecorded |
-| `gentokens.cc` | Expected values inline in `Tests/JXLEncoderTests/EntropyTests.swift` | `gentokens` | unrecorded |
+| `genprefix.cc` | Static prefix-code byte regressions in `Tests/JXLEncoderTests/Fixtures/prefix_codes.txt` | `genprefix > prefix_codes.txt` | unrecorded |
+| `gentokens.cc` | AC context functions and token-writer regressions in `Tests/JXLEncoderTests/EntropyTests.swift` | `gentokens` | unrecorded |
 | `gentree.cc` | `Tests/JXLEncoderTests/Fixtures/context_tree.txt` | `gentree > context_tree.txt` | unrecorded |

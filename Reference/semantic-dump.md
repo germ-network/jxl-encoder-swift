@@ -148,6 +148,14 @@ proves simple is selected only when cheaper; the equality fixture has simple
 cost 96 equal to raw cost 96 and confirms the pinned encoder rejects simple
 coding.
 
+The `hybrid_uint_4_2_0`, `pack_signed_full_reference`, and
+`huffman_tree_full_reference` fixtures replace inherited-tiny primitive
+oracles with outputs from the pinned full-libjxl `HybridUintConfig::Encode`,
+`PackSigned`, and `CreateHuffmanTree` APIs. Their inputs record values,
+configuration, tree limit, and histogram lengths; the portable consumers read
+the recorded inputs and compare each output. Static prefix-code serialization
+remains an inherited-tiny regression.
+
 ## Expected divergence
 
 A fixture for a decision Swift hasn't translated yet still runs. Expected

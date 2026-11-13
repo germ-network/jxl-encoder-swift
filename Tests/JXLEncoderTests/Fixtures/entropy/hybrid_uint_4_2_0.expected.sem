@@ -1,0 +1,4 @@
+jxl-semantic-dump 1
+entropy.uint.bit_counts i 17 0 0 0 2 2 2 2 2 3 3 4 5 6 7 13 14 18
+entropy.uint.bits i 17 0 0 0 0 1 0 0 0 0 7 0 31 0 104 8191 0 0
+entropy.uint.tokens i 17 0 1 15 16 16 17 18 19 20 23 24 31 32 39 63 64 80

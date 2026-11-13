@@ -213,7 +213,44 @@ PYCODE
 independent_entropy_streams_match_swift_bytes() {
   bash "$REFERENCE/entropy-stream-crosscheck.sh"
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures independent_entropy_streams_match_swift_bytes; do
+entropy_primitives_match_fixtures() {
+  python3 - "$HARNESS" "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy" <<'PYCODE'
+import subprocess,sys
+from pathlib import Path
+harness,fixtures=sys.argv[1],Path(sys.argv[2])
+for name,mode,fields in (
+    ('hybrid_uint_4_2_0','uint',('config','values')),
+    ('pack_signed_full_reference','signed',('values',)),
+    ('huffman_tree_full_reference','huffman',('tree_limit',))):
+    values={}
+    for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+        parts=line.split(); values[parts[0]]=parts[3:]
+    prefix={'uint':'input.uint.','signed':'input.signed.','huffman':'input.huffman.'}[mode]
+    args=['entropy-primitives',mode]
+    for field in fields:
+        args.extend(values[prefix+field])
+    if mode=='huffman':
+        lengths=list(map(int,values[prefix+'lengths']))
+        counts=values[prefix+'counts']; offset=0
+        for length in lengths:
+            args.append(','.join(counts[offset:offset+length]))
+            offset+=length
+        assert offset==len(counts)
+    result=subprocess.run([harness,*args],text=True,capture_output=True)
+    assert result.returncode==0, (name,result.stderr)
+    assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
+for args in (
+    ['entropy-primitives','huffman','15','0,0'],
+    ['entropy-primitives','huffman','1','1,1,1'],
+):
+    try:
+        result=subprocess.run([harness,*args],text=True,capture_output=True,timeout=2)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError((args,'unsafe Huffman input timed out')) from error
+    assert result.returncode!=0, args
+PYCODE
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
   "$check"
   echo "PASS $check"
 done

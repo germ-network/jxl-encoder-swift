@@ -490,6 +490,63 @@ boundary_counts[1]=4194312
 boundary_counts[8]=4194311
 generate_coefficient_counts coefficient_sort_boundary "${boundary_counts[@]}"
 
+primitive_uint_values=(0 1 15 16 17 20 24 28 32 63 64 255 256 1000 65535 65536 1048576)
+primitive_signed_values=(0 1 -1 2 -2 100 -100 32767 -32768 1048576 -1048576)
+primitive_histograms=(
+	1,1,1,1
+	5,0,3,0,1
+	100,1,1,1,1,1,1,1
+	1
+	0,0,7
+	1,2,4,8,16,32,64,128,256,512,1024,2048,4096,8192,16384
+)
+uint_input="$out/hybrid_uint_4_2_0.input.sem"
+{
+	printf 'jxl-semantic-dump 1\ninput.uint.config i 3 4 2 0\n'
+	printf 'input.uint.values i %s' "${#primitive_uint_values[@]}"
+	printf ' %s' "${primitive_uint_values[@]}"
+	printf '\n'
+} > "$uint_input"
+"$harness" entropy-primitives uint 4 2 0 "${primitive_uint_values[@]}" \
+	> "$out/hybrid_uint_4_2_0.expected.sem"
+signed_input="$out/pack_signed_full_reference.input.sem"
+{
+	printf 'jxl-semantic-dump 1\ninput.signed.values i %s' "${#primitive_signed_values[@]}"
+	printf ' %s' "${primitive_signed_values[@]}"
+	printf '\n'
+} > "$signed_input"
+"$harness" entropy-primitives signed "${primitive_signed_values[@]}" \
+	> "$out/pack_signed_full_reference.expected.sem"
+huffman_input="$out/huffman_tree_full_reference.input.sem"
+{
+	printf 'jxl-semantic-dump 1\ninput.huffman.tree_limit i 1 15\n'
+	printf 'input.huffman.lengths i %s' "${#primitive_histograms[@]}"
+	printf ' %s' 4 5 8 1 3 15
+	printf '\ninput.huffman.counts i 36'
+	for histogram in "${primitive_histograms[@]}"; do
+		IFS=',' read -r -a counts <<< "$histogram"
+		printf ' %s' "${counts[@]}"
+	done
+	printf '\n'
+} > "$huffman_input"
+"$harness" entropy-primitives huffman 15 "${primitive_histograms[@]}" \
+	> "$out/huffman_tree_full_reference.expected.sem"
+
+for name in hybrid_uint_4_2_0 pack_signed_full_reference huffman_tree_full_reference; do
+	local_input="$out/$name.input.sem"
+	local_expected="$out/$name.expected.sem"
+	input_hash="$(shasum -a 256 "$local_input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$local_expected" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline primitive parameters in generator\t-\tpinned API case inputs\tTests/JXLEncoderTests/EntropyTests.swift,Tests/JXLEncoderTests/PrefixCodeWriterTests.swift\n' \
+		"$name" "$input_hash" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy_primitives.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tpinned primitive outputs; hwy=NEON\tTests/JXLEncoderTests/EntropyTests.swift,Tests/JXLEncoderTests/PrefixCodeWriterTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+done
+
+git -C "$root" show HEAD:Reference/provenance.tsv \
+	| awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\/stream_shared_(ans|prefix)\.(input|expected|receipt)\.sem$/' \
+	>> "$tmp"
+
 awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$tmp" | sort -t $'\t' -k1,1 > "$sorted_entropy"
 {

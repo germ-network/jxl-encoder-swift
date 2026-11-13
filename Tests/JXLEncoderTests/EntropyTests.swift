@@ -1,39 +1,27 @@
+import Foundation
 import Testing
 
 @testable import JXLEncoder
 
-/// Expected values are printed by `Reference/legacy-tiny/tools/gentokens.cc`, which links
-/// libjxl-tiny and calls its own `UintCoder`, `PackSigned`, context functions
-/// and `WriteToken`. These pin the port against the reference implementation
-/// rather than against a reading of the spec.
 @Suite("Hybrid uint coder")
 struct UintCoderTests {
-	@Test(
-		"splits values as libjxl-tiny does",
-		arguments: [
-			(UInt32(0), UInt32(0), UInt32(0), UInt32(0)),
-			(1, 1, 0, 0),
-			(15, 15, 0, 0),
-			(16, 16, 2, 0),
-			(17, 16, 2, 1),
-			(20, 17, 2, 0),
-			(24, 18, 2, 0),
-			(28, 19, 2, 0),
-			(32, 20, 3, 0),
-			(63, 23, 3, 7),
-			(64, 24, 4, 0),
-			(255, 31, 5, 31),
-			(256, 32, 6, 0),
-			(1000, 39, 7, 104),
-			(65535, 63, 13, 8191),
-			(65536, 64, 14, 0),
-			(1_048_576, 80, 18, 0),
-		])
-	func encodes(value: UInt32, token: UInt32, bitCount: UInt32, bits: UInt32) {
-		let result = UintCoder.encode(value)
-		#expect(result.token == token)
-		#expect(result.bitCount == bitCount)
-		#expect(result.bits == bits)
+	@Test("matches pinned HybridUintConfig (4,2,0)")
+	func encodesAgainstReference() throws {
+		let fixture = try EntropyReferenceFixture.load("hybrid_uint_4_2_0")
+		#expect(try fixture.integers(fixture.input, "input.uint.config") == [4, 2, 0])
+		let values = try fixture.integers(fixture.input, "input.uint.values")
+		let tokens = try fixture.integers(fixture.expected, "entropy.uint.tokens")
+		let bitCounts = try fixture.integers(
+			fixture.expected, "entropy.uint.bit_counts")
+		let bits = try fixture.integers(fixture.expected, "entropy.uint.bits")
+		#expect(values.count == tokens.count && values.count == bitCounts.count)
+		#expect(values.count == bits.count)
+		for index in values.indices {
+			let actual = UintCoder.encode(UInt32(values[index]))
+			#expect(actual.token == UInt32(tokens[index]))
+			#expect(actual.bitCount == UInt32(bitCounts[index]))
+			#expect(actual.bits == UInt32(bits[index]))
+		}
 	}
 
 	/// The extra bits plus the token must reconstruct the value, or the decoder
@@ -58,15 +46,16 @@ struct UintCoderTests {
 
 @Suite("Signed packing")
 struct PackSignedTests {
-	@Test(
-		"matches libjxl-tiny",
-		arguments: [
-			(Int32(0), UInt32(0)), (1, 2), (-1, 1), (2, 4), (-2, 3),
-			(100, 200), (-100, 199), (32767, 65534), (-32768, 65535),
-			(1_048_576, 2_097_152), (-1_048_576, 2_097_151),
-		])
-	func packs(value: Int32, expected: UInt32) {
-		#expect(packSigned(value) == expected)
+	@Test("matches pinned libjxl PackSigned")
+	func packsAgainstReference() throws {
+		let fixture = try EntropyReferenceFixture.load("pack_signed_full_reference")
+		let values = try fixture.integers(fixture.input, "input.signed.values")
+		let expected = try fixture.integers(
+			fixture.expected, "entropy.signed.values")
+		#expect(values.count == expected.count)
+		for index in values.indices {
+			#expect(packSigned(Int32(values[index])) == UInt32(expected[index]))
+		}
 	}
 
 	@Test("small magnitudes of either sign stay small")
