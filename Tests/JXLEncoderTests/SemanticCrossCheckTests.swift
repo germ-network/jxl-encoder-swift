@@ -96,9 +96,13 @@ struct SemanticCrossCheckTests {
 				parsing: String(
 					contentsOf: directory.appendingPathComponent(
 						name + ".swift.sem"), encoding: .utf8))
+			let emittedCategories =
+				name == "jpeg_flat_444"
+				? SemanticDump.decoderObservableCategories
+				: SemanticDump.swiftEmittedCategories
 			#expect(
 				Set(actual.fields.keys.map { String($0.split(separator: ".")[0]) })
-					== SemanticDump.swiftEmittedCategories)
+					== emittedCategories)
 			if name == "jpeg_flat_444" { #expect(issues.isEmpty) }
 			#expect(
 				reference.restricted(to: SemanticDump.decoderObservableCategories)

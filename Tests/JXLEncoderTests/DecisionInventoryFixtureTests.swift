@@ -197,18 +197,23 @@ struct DecisionInventoryFixtureTests {
 		#expect(expected.fields.keys.contains { $0.hasPrefix("jpeg_context.") })
 		#expect(!expected.fields.keys.contains { $0.hasPrefix("block_context.") })
 		let path = "Tests/JXLEncoderTests/Fixtures/semantic/\(fixture).sem"
+		let pinnedCommit = Self.pinnedCommit ?? "missing"
 		let row = ProvenanceRow(
 			path: path, kind: .fixture,
 			sha256: String(repeating: "a", count: 64), origin: .fullLibjxl,
 			generator: "generator", invocation: "generate", input: "input",
-			upstream: DecisionInventory.pinnedUpstream, config: "hwy=NEON",
+			upstream: "libjxl \(pinnedCommit)", config: "hwy=NEON",
 			consumers: ["JPEGSemanticFixtureTests.swift"])
 		let validReference = try #require(
 			DecisionInventory.FixtureReference(path + "#jpeg_context"))
 		let invalidReference = try #require(
 			DecisionInventory.FixtureReference(path + "#block_context"))
-		#expect(Self.status(validReference, row: row) == .verifies)
-		#expect(Self.status(invalidReference, row: row) == .notCompared)
+		#expect(
+			Self.status(validReference, row: row, pinnedCommit: pinnedCommit)
+				== .verifies)
+		#expect(
+			Self.status(invalidReference, row: row, pinnedCommit: pinnedCommit)
+				== .notCompared)
 	}
 
 	@Test("a malformed list, or a .sem without a category, is a violation")
