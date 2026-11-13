@@ -1732,12 +1732,18 @@ struct EntropyReferenceTests {
 		#expect(try integers(layout, "entropy_layout.histogram_set_count") == [2])
 		#expect(try integers(layout, "entropy_layout.selector_bits") == [1])
 		let selectors = try integers(layout, "entropy_layout.ac_selectors")
-		#expect(
-			stride(from: 1, to: selectors.count, by: 4).map { selectors[$0] }
-				== Array(0..<18).map(Int64.init))
-		#expect(
-			stride(from: 3, to: selectors.count, by: 4).map { selectors[$0] } == Array(
-				repeating: 0, count: 8) + [1] + Array(repeating: 0, count: 8) + [1])
+		let acGroupIDs: [Int64] = stride(from: 1, to: selectors.count, by: 4).map {
+			selectors[$0]
+		}
+		let expectedACGroupIDs: [Int64] = (0..<18).map { Int64($0) }
+		#expect(acGroupIDs == expectedACGroupIDs)
+		let histogramSelectors: [Int64] = stride(from: 3, to: selectors.count, by: 4).map {
+			selectors[$0]
+		}
+		let expectedHistogramSelectors: [Int64] = [
+			0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+		]
+		#expect(histogramSelectors == expectedHistogramSelectors)
 	}
 
 	@Test

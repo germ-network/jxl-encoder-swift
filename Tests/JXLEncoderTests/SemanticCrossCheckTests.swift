@@ -191,16 +191,18 @@ struct SemanticCrossCheckTests {
 		#expect(try integers(eligible, "entropy_layout.selector_bits") == [1])
 		let selectorRecords = try integers(eligible, "entropy_layout.ac_selectors")
 		#expect(selectorRecords.count == 18 * 4)
-		#expect(
-			stride(from: 1, to: selectorRecords.count, by: 4).map {
-				selectorRecords[$0]
-			} == Array(0..<18).map(Int64.init))
-		#expect(
-			stride(from: 3, to: selectorRecords.count, by: 4).map {
-				selectorRecords[$0]
-			} == Array(repeating: 0, count: 8) + [1] + Array(repeating: 0, count: 8) + [
-				1
-			])
+		let acGroupIDs: [Int64] = stride(from: 1, to: selectorRecords.count, by: 4).map {
+			selectorRecords[$0]
+		}
+		let expectedACGroupIDs: [Int64] = (0..<18).map { Int64($0) }
+		#expect(acGroupIDs == expectedACGroupIDs)
+		let histogramSelectors: [Int64] = stride(
+			from: 3, to: selectorRecords.count, by: 4
+		).map { selectorRecords[$0] }
+		let expectedHistogramSelectors: [Int64] = [
+			0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1,
+		]
+		#expect(histogramSelectors == expectedHistogramSelectors)
 		let eligibleBytes = try Data(
 			contentsOf: directory.appendingPathComponent("reference_2057x257.jxl"))
 		let eligibleIDs = try integers(eligible, "entropy_layout.section_ids")
