@@ -271,18 +271,23 @@ struct SemanticFixtureTests {
 				let dim = ImageDim(width: input.width, height: input.height)
 				let groupSize = Geometry.groupDimInBlocks
 				for group in 0..<dim.groupCount {
-					let x0 = group % dim.widthInGroups * groupSize
-					let y0 = group / dim.widthInGroups * groupSize
+					let groupX = group % dim.widthInGroups
+					let groupY = group / dim.widthInGroups
+					let x0 = groupX * groupSize
+					let y0 = groupY * groupSize
 					let width = min(groupSize, dim.widthInBlocks - x0)
-					decisions.quantFields[group] = decisions.quantFields[group]
-						.indices.map {
-							UInt8(
-								1
-									+ ((y0 + $0 / width)
-										* dim.widthInBlocks
-										+ x0 + $0 % width)
-									% 251)
-						}
+					let source = decisions.quantFields[group]
+					var values: [UInt8] = []
+					values.reserveCapacity(source.count)
+					for localIndex in source.indices {
+						let localY = localIndex / width
+						let localX = localIndex % width
+						let globalIndex =
+							(y0 + localY) * dim.widthInBlocks + x0
+							+ localX
+						values.append(UInt8(1 + globalIndex % 251))
+					}
+					decisions.quantFields[group] = values
 				}
 				let expected = (0..<(dim.widthInBlocks * dim.heightInBlocks)).map {
 					Int64(1 + $0 % 251)

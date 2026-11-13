@@ -368,26 +368,40 @@ struct PixelSemanticFixtureTests {
 	@Test("full-frame coefficient placement preserves channel, group, and block identity")
 	func coefficientPlacementPreservesDistinctValues() {
 		let dimension = ImageDim(width: 513, height: 257)
-		let groups = (0..<dimension.groupCount).map { index -> Encoder.ACGroupCompute in
+		var groups: [Encoder.ACGroupCompute] = []
+		for index in 0..<dimension.groupCount {
 			let gx = index % dimension.widthInGroups
 			let gy = index / dimension.widthInGroups
 			let rect = dimension.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
 			let groupDim = ImageDim(width: rect.width, height: rect.height)
 			let blocks = groupDim.widthInBlocks * groupDim.heightInBlocks
-			return Encoder.ACGroupCompute(
+			var coefficients = [[Int32]](repeating: [], count: 3)
+			var quantDC = [[Int16]](repeating: [], count: 3)
+			for channel in 0..<3 {
+				var channelCoefficients: [Int32] = []
+				channelCoefficients.reserveCapacity(blocks * 64)
+				for offset in 0..<(blocks * 64) {
+					channelCoefficients.append(
+						Int32(channel * 1_000_000 + index * 10_000 + offset)
+					)
+				}
+				coefficients[channel] = channelCoefficients
+
+				var channelDC: [Int16] = []
+				channelDC.reserveCapacity(blocks)
+				for block in 0..<blocks {
+					channelDC.append(
+						Int16(channel * 1000 + index * 100 + block))
+				}
+				quantDC[channel] = channelDC
+			}
+			let group = Encoder.ACGroupCompute(
 				groupX: gx, groupY: gy,
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks,
-				coefficients: (0..<3).map { channel in
-					(0..<(blocks * 64)).map {
-						Int32(channel * 1_000_000 + index * 10_000 + $0)
-					}
-				},
-				quantDC: (0..<3).map { channel in
-					(0..<blocks).map {
-						Int16(channel * 1000 + index * 100 + $0)
-					}
-				}, quantField: [])
+				coefficients: coefficients,
+				quantDC: quantDC, quantField: [])
+			groups.append(group)
 		}
 		let result = SwiftSemanticEncoding.coefficients(from: groups, dimension: dimension)
 		for channel in 0..<3 {
