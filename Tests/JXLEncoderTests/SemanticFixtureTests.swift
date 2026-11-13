@@ -96,6 +96,39 @@ extension SemanticCorpusEntry {
 	}
 }
 
+struct SemanticPrimitiveCase: CustomTestStringConvertible, Sendable {
+	let fixture: String
+	let category: String
+	let knownIssues: Set<String>
+	let inputs: [Int32]
+	let channels: [Int]
+
+	var reference: String {
+		"Tests/JXLEncoderTests/Fixtures/semantic/\(fixture).sem#\(category)"
+	}
+	var testDescription: String { "\(fixture)#\(category)" }
+
+	static let quantBias = SemanticPrimitiveCase(
+		fixture: "quant_bias", category: "quant_bias", knownIssues: [],
+		inputs: [0, 1, -1, 2, -2, 3, -3, 20, -20, 255, -255, 1024, -1024],
+		channels: [0, 1, 2])
+	static let all = [quantBias]
+}
+
+struct StageFixtureCase: Sendable {
+	let inputFixture: String
+	let fixture: String
+	let knownIssues: Set<String>
+
+	var referencePath: String {
+		"Tests/JXLEncoderTests/Fixtures/\(fixture).dump"
+	}
+
+	static let stripeDCT = StageFixtureCase(
+		inputFixture: "stripe_linear", fixture: "stripe_dct", knownIssues: [])
+	static let all = [stripeDCT]
+}
+
 /// One corpus entry compared in one category: the unit of expected divergence.
 struct SemanticCase: CustomTestStringConvertible, Sendable {
 	let entry: SemanticCorpusEntry
@@ -117,12 +150,16 @@ struct SemanticCase: CustomTestStringConvertible, Sendable {
 	/// `<fixture path>#<category>` for every case, the form an inventory
 	/// `fixture` reference takes. A reference outside this set is compared by
 	/// no test.
-	static var references: Set<String> {
+	static var frameReferences: Set<String> {
 		Set(
 			all.map {
 				"Tests/JXLEncoderTests/Fixtures/semantic/" + $0.entry.name + ".sem#"
 					+ $0.category
 			})
+	}
+
+	static var references: Set<String> {
+		frameReferences.union(SemanticPrimitiveCase.all.map(\.reference))
 	}
 
 	/// The subset of `references` whose case runs under a known issue; such a
@@ -132,7 +169,11 @@ struct SemanticCase: CustomTestStringConvertible, Sendable {
 			all.filter { !$0.knownIssues.isEmpty }.map {
 				"Tests/JXLEncoderTests/Fixtures/semantic/" + $0.entry.name + ".sem#"
 					+ $0.category
-			})
+			}
+		)
+		.union(
+			SemanticPrimitiveCase.all.filter { !$0.knownIssues.isEmpty }.map(
+				\.reference))
 	}
 }
 
@@ -143,13 +184,6 @@ enum SemanticFixtureComparison {
 		actual.restricted(to: [category]).differences(
 			from: reference.restricted(to: [category]))
 	}
-}
-
-/// Stage fixtures (`Fixtures/*.dump`) whose consuming test runs under
-/// `withKnownIssue`, by fixture path, with the issue. Kept next to the
-/// wrappers it describes; an inventory row can't cite these as verification.
-enum StageFixtureKnownIssues {
-	static let byFixture: [String: String] = [:]
 }
 
 /// Reads an 8-bit binary PPM; Foundation-only so it runs on Linux CI.
@@ -278,7 +312,10 @@ struct SemanticFixtureTests {
 		#expect(
 			SemanticCase.all.count == SemanticCorpusEntry.all.count
 				* SemanticDump.swiftEmittedCategories.count)
-		#expect(SemanticCase.references.count == SemanticCase.all.count)
+		#expect(SemanticCase.frameReferences.count == SemanticCase.all.count)
+		#expect(
+			SemanticCase.references.count
+				== SemanticCase.all.count + SemanticPrimitiveCase.all.count)
 		for entry in SemanticCorpusEntry.all {
 			for (category, issues) in entry.knownIssues {
 				#expect(SemanticDump.swiftEmittedCategories.contains(category))
@@ -290,13 +327,24 @@ struct SemanticFixtureTests {
 						]))
 			}
 		}
+		for comparison in SemanticPrimitiveCase.all {
+			let reference = try SemanticDump(fixture: comparison.fixture)
+			#expect(!reference.restricted(to: [comparison.category]).fields.isEmpty)
+			#expect(
+				comparison.knownIssues.isSubset(of: [
+					"GER-3386", "GER-3387", "GER-3388", "GER-3419",
+				]))
+		}
 		#expect(
 			SemanticCase.knownIssueReferences
 				== Set(
 					SemanticCase.all.filter { !$0.knownIssues.isEmpty }.map {
 						"Tests/JXLEncoderTests/Fixtures/semantic/"
 							+ $0.entry.name + ".sem#" + $0.category
-					}))
+					}
+				).union(
+					SemanticPrimitiveCase.all.filter { !$0.knownIssues.isEmpty }
+						.map(\.reference)))
 	}
 
 	@Test(

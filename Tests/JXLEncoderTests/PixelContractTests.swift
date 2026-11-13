@@ -498,14 +498,15 @@ extension QuantizerTests {
 extension ReciprocalEstimateTests {
 	@Test("quantization bias matches the pinned upstream NEON routine")
 	func quantBiasMatchesPinnedNEON() throws {
-		let reference = try SemanticDump(fixture: "quant_bias")
-		let expected = reference.restricted(to: ["quant_bias"])
+		let comparison = SemanticPrimitiveCase.quantBias
+		let reference = try SemanticDump(fixture: comparison.fixture)
+		let expected = reference.restricted(to: [comparison.category])
 		#expect(reference.fields["quant_bias.neon_target"] == .integers([1]))
-		let inputs: [Int32] = [0, 1, -1, 2, -2, 3, -3, 20, -20, 255, -255, 1024, -1024]
+		#expect(comparison.knownIssues.isEmpty)
 		var emitted = SemanticDump()
 		emitted.record("quant_bias.neon_target", .integers([1]))
-		for channel in 0..<3 {
-			let bits = inputs.map { quantized in
+		for channel in comparison.channels {
+			let bits = comparison.inputs.map { quantized in
 				Int64(
 					Quantizer.adjustQuantBias(
 						channel: channel, quantized: quantized

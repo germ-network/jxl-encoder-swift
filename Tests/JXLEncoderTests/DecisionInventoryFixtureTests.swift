@@ -8,6 +8,13 @@ import Testing
 struct DecisionInventoryFixtureTests {
 	static let path = "Tests/JXLEncoderTests/Fixtures/semantic/example.sem#frame"
 
+	private static var pinnedCommit: String? {
+		guard let pin = try? PinRecord(contentsOf: RepositoryLayout.pinRecord) else {
+			return nil
+		}
+		return pin["LIBJXL_COMMIT"]
+	}
+
 	static func check(
 		_ overrides: [String: String], status: DecisionInventory.FixtureStatus = .verifies
 	) -> [DecisionInventory.Violation] {
@@ -31,14 +38,18 @@ struct DecisionInventoryFixtureTests {
 			})
 		else { return .missing }
 		guard PackageCheckout.fileExists(reference.path) else { return .missing }
-		return Self.status(reference, row: row)
+		guard let pinnedCommit = Self.pinnedCommit else { return .notFullLibjxl }
+		return Self.status(reference, row: row, pinnedCommit: pinnedCommit)
 	}
 
 	private static func status(
-		_ reference: DecisionInventory.FixtureReference, row: ProvenanceRow
+		_ reference: DecisionInventory.FixtureReference, row: ProvenanceRow,
+		pinnedCommit: String?
 	) -> DecisionInventory.FixtureStatus {
-		guard row.origin == .fullLibjxl else { return .notFullLibjxl }
-		if StageFixtureKnownIssues.byFixture[reference.path] != nil { return .knownIssue }
+		guard row.origin == .fullLibjxl,
+			let pinnedCommit,
+			row.upstream == "libjxl \(pinnedCommit)"
+		else { return .notFullLibjxl }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
 			if JPEGSemanticCase.contextWitnessReferences.contains(key) {
@@ -49,15 +60,20 @@ struct DecisionInventoryFixtureTests {
 						category, fixture: fixture)
 				else { return .notCompared }
 			}
-			let references = SemanticCase.references.union(JPEGSemanticCase.references)
-				.union(
-					JPEGSemanticCase.contextWitnessReferences)
+			let references = SemanticCase.references
+				.union(JPEGSemanticCase.references)
+				.union(JPEGSemanticCase.contextWitnessReferences)
 			guard references.contains(key) else { return .notCompared }
-			let knownIssues = SemanticCase.knownIssueReferences.union(
-				JPEGSemanticCase.knownIssueReferences)
+			let knownIssues = SemanticCase.knownIssueReferences
+				.union(JPEGSemanticCase.knownIssueReferences)
 			if knownIssues.contains(key) { return .knownIssue }
-		} else if row.consumers.isEmpty {
-			return .notCompared
+		} else {
+			guard
+				let comparison = StageFixtureCase.all.first(where: {
+					$0.referencePath == reference.path
+				})
+			else { return .notCompared }
+			if !comparison.knownIssues.isEmpty { return .knownIssue }
 		}
 		return .verifies
 	}
@@ -99,21 +115,76 @@ struct DecisionInventoryFixtureTests {
 			#expect(violations.contains { $0.rule == .fixtureReference })
 			#expect(violations.contains { $0.rule == .replacementRequired })
 		}
-		let path = "Tests/JXLEncoderTests/Fixtures/unconsumed.dump"
-		guard let reference = DecisionInventory.FixtureReference(path) else {
-			Issue.record("invalid stage fixture reference")
+		let pinnedCommit = Self.pinnedCommit ?? "missing"
+		let comparison = SemanticPrimitiveCase.quantBias
+		guard let reference = DecisionInventory.FixtureReference(comparison.reference)
+		else {
+			Issue.record("invalid primitive fixture reference")
+			return
+		}
+		func row(
+			path: String, origin: ProvenanceOrigin = .fullLibjxl,
+			upstream: String? = nil, consumers: [String] = []
+		) -> ProvenanceRow {
+			ProvenanceRow(
+				path: path, kind: .fixture,
+				sha256: String(repeating: "a", count: 64),
+				origin: origin, generator: "generator", invocation: "generate",
+				input: "input", upstream: upstream ?? "libjxl \(pinnedCommit)",
+				config: "hwy=NEON", consumers: consumers)
+		}
+		#expect(
+			Self.status(
+				reference, row: row(path: reference.path),
+				pinnedCommit: pinnedCommit)
+				== .verifies)
+
+		guard
+			let unknownCategory = DecisionInventory.FixtureReference(
+				"Tests/JXLEncoderTests/Fixtures/semantic/quant_bias.sem#unknown")
+		else {
+			Issue.record("invalid unknown-category reference")
+			return
+		}
+		#expect(
+			Self.status(
+				unknownCategory, row: row(path: unknownCategory.path),
+				pinnedCommit: pinnedCommit) == .notCompared)
+
+		guard
+			let knownIssue = DecisionInventory.FixtureReference(
+				"Tests/JXLEncoderTests/Fixtures/semantic/edge.sem#inverse_quant_matrix"
+			)
+		else {
+			Issue.record("invalid known-issue reference")
+			return
+		}
+		#expect(
+			Self.status(
+				knownIssue, row: row(path: knownIssue.path),
+				pinnedCommit: pinnedCommit)
+				== .knownIssue)
+		#expect(
+			Self.status(
+				reference,
+				row: row(path: reference.path, upstream: "libjxl wrong-pin"),
+				pinnedCommit: pinnedCommit) == .notFullLibjxl)
+		#expect(
+			Self.status(
+				reference, row: row(path: reference.path, origin: .handSupplied),
+				pinnedCommit: pinnedCommit) == .notFullLibjxl)
+
+		let unconsumedPath = "Tests/JXLEncoderTests/Fixtures/unconsumed.dump"
+		guard let unconsumed = DecisionInventory.FixtureReference(unconsumedPath) else {
+			Issue.record("invalid unconsumed stage reference")
 			return
 		}
 		for consumers in [[], ["StageTests.swift"]] as [[String]] {
-			let row = ProvenanceRow(
-				path: path, kind: .fixture,
-				sha256: String(repeating: "a", count: 64),
-				origin: .fullLibjxl, generator: "generator", invocation: "generate",
-				input: "input", upstream: DecisionInventory.pinnedUpstream,
-				config: "hwy=NEON", consumers: consumers)
 			#expect(
-				Self.status(reference, row: row)
-					== (consumers.isEmpty ? .notCompared : .verifies))
+				Self.status(
+					unconsumed,
+					row: row(path: unconsumedPath, consumers: consumers),
+					pinnedCommit: pinnedCommit) == .notCompared)
 		}
 	}
 
