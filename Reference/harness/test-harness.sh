@@ -154,6 +154,15 @@ entropy_tree_decisions_match_fixtures() {
   cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/tree_gradient_fixed_8192_dc1.expected.sem" "$SCRATCH/tree_8192.sem"
   "$HARNESS" entropy tree 6 8193 8 0 > "$SCRATCH/tree_8193.sem"
   cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/tree_gradient_fixed_8193_dc2.expected.sem" "$SCRATCH/tree_8193.sem"
+  while read -r kind pixels name; do
+    "$HARNESS" entropy tree "$kind" "$pixels" 8 0 > "$SCRATCH/$name.sem"
+    cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/$name.expected.sem" "$SCRATCH/$name.sem"
+  done <<'EOF'
+5 8192 tree_wp_fixed_8192_dc1
+5 8193 tree_wp_fixed_8193_dc2
+4 280 tree_acmeta_below_1024
+4 1120 tree_acmeta_above_1024
+EOF
   if "$HARNESS" entropy tree 6 0 8 0; then return 1; fi
 }
 entropy_modular_decisions_match_fixtures() {
@@ -175,6 +184,9 @@ fields.extend(line.replace(prefix,"entropy.modular.",1) for line in expected[1:]
 assert fields==actual
 PYCODE
   done
+  local -a wp=(3 2 8 5 8192 0 3 1 0 2 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20)
+  "$HARNESS" entropy modular "${wp[@]}" > "$SCRATCH/modular_wp.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/modular_dc_wp_fixed_8192.expected.sem" "$SCRATCH/modular_wp.sem"
 }
 entropy_modular_rejects_unsafe_inputs() {
   local -a samples=(3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20)
@@ -208,6 +220,32 @@ for name in ('ac_tokens_tiny_map','ac_tokens_default_map'):
         oversized_coeff=list(args); oversized_coeff[3+3+39+64+8]='2147483648'; cases.append(oversized_coeff)
         for case in cases:
             assert subprocess.run([harness,*case],capture_output=True).returncode!=0
+PYCODE
+}
+entropy_ac_metadata_and_tree_entropy_match_fixtures() {
+  python3 - "$HARNESS" "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy" <<'PYCODE'
+import subprocess,sys
+from pathlib import Path
+harness,fixtures=sys.argv[1],Path(sys.argv[2])
+for name in ('acmeta_channels_16x16','acmeta_channels_24x24'):
+    fields={}
+    for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+        parts=line.split(); fields[parts[0]]=parts[3:]
+    width,height=(int(fields[f'input.ac_metadata.{key}'][0]) for key in ('width','height'))
+    args=['entropy','ac-metadata',str(width),str(height),str(width*height)]
+    for key in ('ytox','ytob','acs','raw_quant_field','epf'):
+        args.extend(fields[f'input.ac_metadata.{key}'])
+    result=subprocess.run([harness,*args],text=True,capture_output=True)
+    assert result.returncode==0, (name,result.stderr)
+    assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
+name='tree_entropy_cheetah'; fields={}
+for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+    parts=line.split(); fields[parts[0]]=parts[3:]
+tokens=fields['input.tree_entropy.tokens']
+args=['entropy','tree-entropy','6','0','0','313',*tokens]
+result=subprocess.run([harness,*args],text=True,capture_output=True)
+assert result.returncode==0, result.stderr
+assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
 PYCODE
 }
 independent_entropy_streams_match_swift_bytes() {
@@ -250,7 +288,7 @@ for args in (
     assert result.returncode!=0, args
 PYCODE
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_ac_metadata_and_tree_entropy_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
   "$check"
   echo "PASS $check"
 done

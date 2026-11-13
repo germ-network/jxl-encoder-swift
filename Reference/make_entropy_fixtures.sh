@@ -261,6 +261,96 @@ generate_tree() {
 		"$bitdepth" "$prevprop" >> "$tmp"
 }
 
+generate_tree_entropy() {
+	local name=tree_entropy_cheetah
+	local input="$out/$name.input.sem"
+	local tokens=($(awk '$1 == "input.tree_entropy.tokens" { for (i = 4; i <= NF; i++) print $i }' "$input"))
+	[[ ${#tokens[@]} -eq 626 ]]
+	"$harness" entropy tree-entropy 6 0 0 313 "${tokens[@]}" \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tSources/JXLEncoder/ContextTree.swift\tReference/make_entropy_fixtures.sh\tstaticTokens with token[1] patched for dcGroupCount=2\t-\tCheetah tree token stream; contexts=6\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tCheetah ForModular histogram coding and tree token serialization; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
+generate_acmeta_tree() {
+	local name="$1" rect="$2" first_blocks="$3"
+	local map=$(((rect + 7) / 8))
+	local cfl_area=$((map * map))
+	local ac_area=$((first_blocks * 2))
+	local epf_area=$((rect * rect))
+	local total_pixels=$((cfl_area * 2 + ac_area + epf_area))
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.tree.kind i 1 4\n'
+		printf 'input.tree.total_pixels i 1 %s\n' "$total_pixels"
+		printf 'input.tree.bitdepth i 1 8\n'
+		printf 'input.tree.prevprop i 1 0\n'
+		printf 'input.tree.dc_group_count i 1 1\n'
+		printf 'input.tree.projection_root i 1 1\n'
+		printf 'input.tree.channel_areas i 4 %s %s %s %s\n' \
+			"$cfl_area" "$cfl_area" "$ac_area" "$epf_area"
+	} > "$input"
+	"$harness" entropy tree 4 "$total_pixels" 8 0 > "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline AC metadata channel layout\t-\tAC metadata: 2 CfL channels %sx%s, ACS/QF %s first blocks x2, EPF %sx%s; total_pixels=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" "$map" "$map" "$first_blocks" "$rect" "$rect" "$total_pixels" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tPredefinedTree(kACMeta) from actual AC metadata channel areas; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
+generate_acmeta_channels() {
+	local width="$1" height="$2"
+	local name="acmeta_channels_${width}x${height}"
+	local cmap_width=$(((width + 7) / 8))
+	local cmap_count=$((cmap_width * ((height + 7) / 8)))
+	local block_count=$((width * height))
+	local -a ytox=() ytob=() acs=() qf=() epf=()
+	local index input="$out/$name.input.sem"
+	for ((index = 0; index < cmap_count; index++)); do
+		ytox+=($(((index * 3 + 1) % 7 - 3)))
+		ytob+=($(((index * 5 + 2) % 9 - 4)))
+	done
+	for ((index = 0; index < block_count; index++)); do
+		acs+=(0)
+		case $((index % 5)) in
+			0) qf+=(1) ;;
+			1) qf+=(4) ;;
+			2) qf+=(7) ;;
+			3) qf+=(12) ;;
+			4) qf+=(16) ;;
+		esac
+		epf+=(4)
+	done
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.ac_metadata.width i 1 %s\ninput.ac_metadata.height i 1 %s\n' "$width" "$height"
+		printf 'input.ac_metadata.ytox i %s' "${#ytox[@]}"; printf ' %s' "${ytox[@]}"
+		printf '\ninput.ac_metadata.ytob i %s' "${#ytob[@]}"; printf ' %s' "${ytob[@]}"
+		printf '\ninput.ac_metadata.acs i %s' "${#acs[@]}"; printf ' %s' "${acs[@]}"
+		printf '\ninput.ac_metadata.raw_quant_field i %s' "${#qf[@]}"; printf ' %s' "${qf[@]}"
+		printf '\ninput.ac_metadata.epf i %s' "${#epf[@]}"; printf ' %s' "${epf[@]}"
+		printf '\n'
+	} > "$input"
+	"$harness" entropy ac-metadata "$width" "$height" "$block_count" \
+		"${ytox[@]}" "${ytob[@]}" "${acs[@]}" "${qf[@]}" "${epf[@]}" \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline AC metadata channel samples\t-\tblock grid=%sx%s, DCT8 first blocks; qf edges 1,4,7,12,16; EPF=4\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" "$width" "$height" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tModularCompress with PredefinedTree(kACMeta); per-channel leaf contexts and residuals; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
 generate_modular_group() {
 	local group="$1" width="$2" height="$3" group_id="$4"
 	shift 4
@@ -312,6 +402,38 @@ generate_modular() {
 	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline modular samples in generator\t-\ttwo 3-channel DC groups; gradient tree kind=6 pixels=8193 bitdepth=8; stream IDs=3,4; channel order=1,0,2\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
 		"$name" "$input_hash" >> "$tmp"
 	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tModularCompress with PredefinedTree(kGradientFixedDC); raw leaf IDs and packed residuals; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
+generate_modular_wp() {
+	local name="modular_dc_wp_fixed_8192"
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.modular.tree_kind i 1 5\n'
+		printf 'input.modular.total_pixels i 1 8192\n'
+		printf 'input.modular.bitdepth i 1 8\n'
+		printf 'input.modular.prevprop i 1 0\n'
+		printf 'input.modular.context_offset i 1 11\n'
+		printf 'input.modular.predictor i 1 6\n'
+		printf 'input.modular.wp_tree_mode i 1 1\n'
+		printf 'input.modular.dc_group_count i 1 1\n'
+		printf 'input.modular.group0.width i 1 3\ninput.modular.group0.height i 1 2\n'
+		printf 'input.modular.group0.group_id i 1 3\n'
+		printf 'input.modular.group0.channel_order i 3 1 0 2\n'
+		printf 'input.modular.group0.channel0 i 6 4 5 6 7 8 9\n'
+		printf 'input.modular.group0.channel1 i 6 -3 -1 2 3 6 10\n'
+		printf 'input.modular.group0.channel2 i 6 30 20 10 0 -10 -20\n'
+	} > "$input"
+	"$harness" entropy modular 3 2 8 5 8192 0 3 1 0 2 \
+		4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20 \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\texplicit 3x2 DC group samples\t-\tkind=kWPFixedDC pixels=8192 bitdepth=8 prevprop=0; Weighted/kWPOnly; not frame-derived\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tPredefinedTree(kWPFixedDC) + ModularCompress with Weighted/kWPOnly; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
@@ -460,7 +582,15 @@ generate_context_map_with_candidates context_raw_rle 4 "${context_rle_entries[@]
 
 generate_tree tree_gradient_fixed_8192_dc1 6 8192 8 0 1 2
 generate_tree tree_gradient_fixed_8193_dc2 6 8193 8 0 2 2
+generate_tree tree_wp_fixed_8192_dc1 5 8192 8 0 1 2
+generate_tree tree_wp_fixed_8193_dc2 5 8193 8 0 2 2
+generate_acmeta_tree tree_acmeta_below_1024 16 8
+generate_acmeta_tree tree_acmeta_above_1024 32 32
+generate_tree_entropy
+generate_acmeta_channels 16 16
+generate_acmeta_channels 24 24
 generate_modular
+generate_modular_wp
 tiny_context_map=()
 for category in 0 2 2; do
 	for ((index = 0; index < 13; index++)); do tiny_context_map+=("$category"); done

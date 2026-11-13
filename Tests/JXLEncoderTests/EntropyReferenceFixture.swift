@@ -55,9 +55,60 @@ struct EntropyReferenceFixture {
 			}
 			return values
 		}
-		let inputFields: Set<String>
+		var inputFields: Set<String>
 		let expectedFields: Set<String>
-		if name.hasPrefix("ans_") {
+		if name == "tree_entropy_cheetah" {
+			inputFields = [
+				"input.tree_entropy.speed_tier", "input.tree_entropy.decoding_tier",
+				"input.tree_entropy.extra_dc_precision",
+				"input.tree_entropy.context_count",
+				"input.tree_entropy.tokens",
+			]
+			expectedFields = [
+				"entropy.tree_entropy.speed_tier",
+				"entropy.tree_entropy.decoding_tier",
+				"entropy.tree_entropy.extra_dc_precision",
+				"entropy.tree_entropy.context_count",
+				"entropy.tree_entropy.clustering",
+				"entropy.tree_entropy.ans_strategy",
+				"entropy.tree_entropy.lz77_method",
+				"entropy.tree_entropy.uint_method",
+				"entropy.tree_entropy.use_prefix_code",
+				"entropy.tree_entropy.log_alpha_size",
+				"entropy.tree_entropy.input_token_count",
+				"entropy.tree_entropy.tokens",
+				"entropy.tree_entropy.context_map",
+				"entropy.tree_entropy.uint_configs",
+				"entropy.tree_entropy.table_lengths",
+				"entropy.tree_entropy.table_frequencies",
+				"entropy.tree_entropy.table_reverse_maps",
+				"entropy.tree_entropy.cost",
+				"entropy.tree_entropy.bit_count", "entropy.tree_entropy.bytes",
+			]
+			let speed = try integers(input, "input.tree_entropy.speed_tier")
+			let decoding = try integers(input, "input.tree_entropy.decoding_tier")
+			let precision = try integers(input, "input.tree_entropy.extra_dc_precision")
+			let contexts = try integers(input, "input.tree_entropy.context_count")
+			let tokens = try integers(input, "input.tree_entropy.tokens")
+			let encodedTokens = try integers(expected, "entropy.tree_entropy.tokens")
+			let bitCount = try integers(expected, "entropy.tree_entropy.bit_count")
+			let bytes = try integers(expected, "entropy.tree_entropy.bytes")
+			guard speed == [6], decoding == [0], precision == [0], contexts == [6],
+				tokens.count == 626, tokens == encodedTokens,
+				try integers(expected, "entropy.tree_entropy.input_token_count")
+					== [313],
+				try integers(expected, "entropy.tree_entropy.context_count")
+					== contexts,
+				try integers(expected, "entropy.tree_entropy.speed_tier") == speed,
+				try integers(expected, "entropy.tree_entropy.decoding_tier")
+					== decoding,
+				try integers(expected, "entropy.tree_entropy.extra_dc_precision")
+					== precision,
+				bitCount.count == 1, bitCount[0] > 0,
+				bytes.count == Int((bitCount[0] + 7) / 8),
+				bytes.allSatisfy({ (0...255).contains($0) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name.hasPrefix("ans_") {
 			inputFields = [
 				"input.histogram.counts", "input.histogram.log_alpha_size",
 				"input.histogram.strategy",
@@ -463,6 +514,9 @@ struct EntropyReferenceFixture {
 					"entropy.modular.group\(group).tree_kind",
 					"entropy.modular.group\(group).channel_order",
 					"entropy.modular.group\(group).prevprop",
+					"entropy.modular.group\(group).tree_node_count",
+					"entropy.modular.group\(group).tree_nodes",
+					"entropy.modular.group\(group).tree_tokens",
 					"entropy.modular.group\(group).width",
 				])
 			}
@@ -535,12 +589,159 @@ struct EntropyReferenceFixture {
 					})
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			}
-		} else if name.hasPrefix("tree_gradient_fixed_") {
+		} else if name == "modular_dc_wp_fixed_8192" {
+			inputFields = [
+				"input.modular.tree_kind", "input.modular.total_pixels",
+				"input.modular.bitdepth", "input.modular.prevprop",
+				"input.modular.context_offset", "input.modular.predictor",
+				"input.modular.wp_tree_mode", "input.modular.dc_group_count",
+				"input.modular.group0.width", "input.modular.group0.height",
+				"input.modular.group0.group_id",
+				"input.modular.group0.channel_order",
+				"input.modular.group0.channel0", "input.modular.group0.channel1",
+				"input.modular.group0.channel2",
+			]
+			expectedFields = [
+				"entropy.modular.bitdepth", "entropy.modular.channel_order",
+				"entropy.modular.group_id", "entropy.modular.height",
+				"entropy.modular.prevprop", "entropy.modular.token_count",
+				"entropy.modular.tokens", "entropy.modular.total_pixels",
+				"entropy.modular.tree_kind", "entropy.modular.tree_node_count",
+				"entropy.modular.tree_nodes", "entropy.modular.tree_tokens",
+				"entropy.modular.width",
+			]
+			let treeKind = try integers(input, "input.modular.tree_kind")
+			let totalPixels = try integers(input, "input.modular.total_pixels")
+			let bitdepth = try integers(input, "input.modular.bitdepth")
+			let prevprop = try integers(input, "input.modular.prevprop")
+			let contextOffset = try integers(input, "input.modular.context_offset")
+			let predictor = try integers(input, "input.modular.predictor")
+			let treeMode = try integers(input, "input.modular.wp_tree_mode")
+			let groupCount = try integers(input, "input.modular.dc_group_count")
+			let width = try integers(input, "input.modular.group0.width")
+			let height = try integers(input, "input.modular.group0.height")
+			let groupID = try integers(input, "input.modular.group0.group_id")
+			let order = try integers(input, "input.modular.group0.channel_order")
+			guard treeKind == [5], totalPixels == [8192], bitdepth == [8],
+				prevprop == [0], contextOffset == [11], predictor == [6],
+				treeMode == [1], groupCount == [1], width == [3], height == [2],
+				groupID == [3], order == [1, 0, 2]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			for channel in 0..<3 {
+				let values = try integers(
+					input, "input.modular.group0.channel\(channel)")
+				guard values.count == 6,
+					values.allSatisfy({
+						Int64(Int16.min)...Int64(Int16.max) ~= $0
+					})
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
+			let tokenCount = try integers(expected, "entropy.modular.token_count")
+			let tokens = try integers(expected, "entropy.modular.tokens")
+			let nodeCount = try integers(expected, "entropy.modular.tree_node_count")
+			let nodes = try integers(expected, "entropy.modular.tree_nodes")
+			let treeTokens = try integers(expected, "entropy.modular.tree_tokens")
+			guard
+				try integers(expected, "entropy.modular.tree_kind") == treeKind,
+				try integers(expected, "entropy.modular.total_pixels")
+					== totalPixels,
+				try integers(expected, "entropy.modular.bitdepth") == bitdepth,
+				try integers(expected, "entropy.modular.prevprop") == prevprop,
+				try integers(expected, "entropy.modular.group_id") == groupID,
+				try integers(expected, "entropy.modular.width") == width,
+				try integers(expected, "entropy.modular.height") == height,
+				try integers(expected, "entropy.modular.channel_order") == order,
+				tokenCount == [18], tokens.count == 36,
+				nodeCount == [7], nodes.count == 49, treeTokens.count == 52,
+				tokens.enumerated().allSatisfy({ index, value in
+					index.isMultiple(of: 2)
+						? (0...33).contains(value)
+						: (0...Int64(UInt32.max)).contains(value)
+				}),
+				treeTokens.allSatisfy({ (0...Int64(UInt32.max)).contains($0) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "acmeta_channels_16x16"
+			|| name == "acmeta_channels_24x24"
+		{
+			inputFields = [
+				"input.ac_metadata.width", "input.ac_metadata.height",
+				"input.ac_metadata.ytox", "input.ac_metadata.ytob",
+				"input.ac_metadata.acs", "input.ac_metadata.raw_quant_field",
+				"input.ac_metadata.epf",
+			]
+			expectedFields = [
+				"entropy.ac_metadata.width", "entropy.ac_metadata.height",
+				"entropy.ac_metadata.total_pixels",
+				"entropy.ac_metadata.tree_node_count",
+				"entropy.ac_metadata.tree_nodes",
+				"entropy.ac_metadata.cfl_ytox.tokens",
+				"entropy.ac_metadata.cfl_ytob.tokens",
+				"entropy.ac_metadata.acs.tokens",
+				"entropy.ac_metadata.quant_field.tokens",
+				"entropy.ac_metadata.epf.tokens",
+			]
+			let width = try integers(input, "input.ac_metadata.width")
+			let height = try integers(input, "input.ac_metadata.height")
+			let expectedSize: Int64 = name == "acmeta_channels_16x16" ? 16 : 24
+			guard width == [expectedSize], height == [expectedSize] else {
+				throw SemanticDumpError.unsupportedEntropyFixture(name)
+			}
+			let blockCount = Int(width[0] * height[0])
+			let mapCount = Int(((width[0] + 7) / 8) * ((height[0] + 7) / 8))
+			let maps = [
+				try integers(input, "input.ac_metadata.ytox"),
+				try integers(input, "input.ac_metadata.ytob"),
+			]
+			let acs = try integers(input, "input.ac_metadata.acs")
+			let qf = try integers(input, "input.ac_metadata.raw_quant_field")
+			let epf = try integers(input, "input.ac_metadata.epf")
+			guard maps.allSatisfy({ $0.count == mapCount }),
+				maps.flatMap({ $0 }).allSatisfy({ (-128...127).contains($0) }),
+				acs.count == blockCount, acs.allSatisfy({ $0 == 0 }),
+				qf.count == blockCount, qf.allSatisfy({ (1...255).contains($0) }),
+				epf.count == blockCount, epf.allSatisfy({ $0 == 4 })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			let totalPixels = mapCount * 2 + blockCount * 3
+			let outputNodeCount = try integers(
+				expected, "entropy.ac_metadata.tree_node_count")
+			let outputNodes = try integers(expected, "entropy.ac_metadata.tree_nodes")
+			guard
+				try integers(expected, "entropy.ac_metadata.width") == width,
+				try integers(expected, "entropy.ac_metadata.height") == height,
+				try integers(expected, "entropy.ac_metadata.total_pixels") == [
+					Int64(totalPixels)
+				],
+				outputNodeCount == [totalPixels < 1024 ? 1 : 27],
+				outputNodes.count == Int(outputNodeCount[0] * 7)
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			let channelFields = [
+				("cfl_ytox", mapCount), ("cfl_ytob", mapCount),
+				("acs", blockCount), ("quant_field", blockCount),
+				("epf", blockCount),
+			]
+			for (channel, count) in channelFields {
+				let tokens = try integers(
+					expected, "entropy.ac_metadata.\(channel).tokens")
+				guard tokens.count == count * 2,
+					tokens.enumerated().allSatisfy({ index, value in
+						index.isMultiple(of: 2)
+							? (0...64).contains(value)
+							: (0...Int64(UInt32.max)).contains(value)
+					})
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
+		} else if name.hasPrefix("tree_gradient_fixed_")
+			|| name.hasPrefix("tree_wp_fixed_")
+			|| name.hasPrefix("tree_acmeta_")
+		{
 			inputFields = [
 				"input.tree.kind", "input.tree.total_pixels", "input.tree.bitdepth",
 				"input.tree.prevprop", "input.tree.dc_group_count",
 				"input.tree.projection_root",
 			]
+			if name.hasPrefix("tree_acmeta_") {
+				inputFields.insert("input.tree.channel_areas")
+			}
 			expectedFields = [
 				"entropy.tree.kind", "entropy.tree.total_pixels",
 				"entropy.tree.bitdepth", "entropy.tree.prevprop",
@@ -553,6 +754,9 @@ struct EntropyReferenceFixture {
 			let prevprop = try integers(input, "input.tree.prevprop")
 			let dcGroupCount = try integers(input, "input.tree.dc_group_count")
 			let projectionRoot = try integers(input, "input.tree.projection_root")
+			let channelAreas =
+				name.hasPrefix("tree_acmeta_")
+				? try integers(input, "input.tree.channel_areas") : []
 			let outputKind = try integers(expected, "entropy.tree.kind")
 			let outputPixels = try integers(expected, "entropy.tree.total_pixels")
 			let outputBitdepth = try integers(expected, "entropy.tree.bitdepth")
@@ -565,15 +769,29 @@ struct EntropyReferenceFixture {
 				switch name {
 				case "tree_gradient_fixed_8192_dc1": (8192, 1)
 				case "tree_gradient_fixed_8193_dc2": (8193, 2)
+				case "tree_wp_fixed_8192_dc1": (8192, 1)
+				case "tree_wp_fixed_8193_dc2": (8193, 2)
+				case "tree_acmeta_below_1024": (280, 1)
+				case "tree_acmeta_above_1024": (1120, 1)
 				default: nil
 				}
-			guard kind == [6], totalPixels.count == 1,
-				[8192, 8193].contains(totalPixels[0]), bitdepth == [8],
+			let expectedKind: Int64 =
+				name.hasPrefix("tree_wp_fixed_")
+				? 5 : (name.hasPrefix("tree_acmeta_") ? 4 : 6)
+			let expectedAreas: [Int64] =
+				name == "tree_acmeta_below_1024"
+				? [4, 4, 16, 256]
+				: (name == "tree_acmeta_above_1024" ? [16, 16, 64, 1024] : [])
+			guard kind == [expectedKind], totalPixels.count == 1,
+				caseConfig.map({ totalPixels[0] == $0.0 }) == true, bitdepth == [8],
 				prevprop == [0], dcGroupCount.count == 1,
-				(1...2).contains(dcGroupCount[0]), projectionRoot == [2],
+				(1...2).contains(dcGroupCount[0]),
+				projectionRoot == (name.hasPrefix("tree_acmeta_") ? [1] : [2]),
 				caseConfig.map({ totalPixels[0] == $0.0 && dcGroupCount[0] == $0.1 }
 				)
 					== true,
+				channelAreas == expectedAreas,
+				channelAreas.isEmpty || channelAreas.reduce(0, +) == totalPixels[0],
 				outputKind == kind, outputPixels == totalPixels,
 				outputBitdepth == bitdepth, outputPrevprop == prevprop,
 				nodeCount.count == 1, nodeCount[0] > 0,

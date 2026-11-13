@@ -174,8 +174,34 @@ enum SwiftEntropySemanticEncoding {
 		var tokens = ContextTree.staticTokens
 		tokens[1] = Token(
 			context: tokens[1].context, value: packSigned(Int32(1 + dcGroupCount)))
-		let (nodes, chunks) = decodeTree(tokens)
+		let (nodes, _) = decodeTree(tokens)
 		let root = 2
+		let fullTokens = tokens.flatMap { [Int64($0.context), Int64($0.value)] }
+		let projected = projectedTree(fullTokens: fullTokens, root: root)
+		var dump = SemanticDump()
+		dump.record("entropy.tree.dc_group_count", .integers([Int64(dcGroupCount)]))
+		for field in ["node_count", "nodes", "token_count", "tokens"] {
+			if let value = projected.fields["entropy.tree.\(field)"] {
+				dump.record("entropy.tree.\(field)", value)
+			}
+		}
+		dump.record("entropy.tree.full_token_count", .integers([Int64(tokens.count)]))
+		dump.record(
+			"entropy.tree.full_tokens",
+			.integers(tokens.flatMap { [Int64($0.context), Int64($0.value)] }))
+		dump.record("entropy.tree.full_node_count", .integers([Int64(nodes.count)]))
+		dump.record("entropy.tree.full_nodes", .integers(nodes.flatMap { $0 }))
+		dump.record("entropy.tree.component_root", .integers([Int64(root)]))
+		return dump
+	}
+
+	static func projectedTree(fullTokens: [Int64], root: Int) -> SemanticDump {
+		precondition(fullTokens.count.isMultiple(of: 2))
+		let tokens = stride(from: 0, to: fullTokens.count, by: 2).map {
+			Token(context: UInt32(fullTokens[$0]), value: UInt32(fullTokens[$0 + 1]))
+		}
+		let (nodes, chunks) = decodeTree(tokens)
+		precondition(nodes.indices.contains(root))
 		var subtree = [root]
 		var cursor = 0
 		while cursor < subtree.count {
@@ -187,35 +213,101 @@ enum SwiftEntropySemanticEncoding {
 			cursor += 1
 		}
 		let rebase = Dictionary(uniqueKeysWithValues: subtree.enumerated().map { ($1, $0) })
-		var componentLeafCount = 0
-		let componentNodes = subtree.flatMap { original -> [Int64] in
+		var leafCount = 0
+		let projectedNodes = subtree.flatMap { original -> [Int64] in
 			var fields = nodes[original]
 			if fields[0] >= 0 {
 				fields[2] = Int64(rebase[Int(fields[2])]!)
 				fields[3] = Int64(rebase[Int(fields[3])]!)
 			} else {
-				fields[2] = Int64(componentLeafCount)
-				componentLeafCount += 1
+				fields[2] = Int64(leafCount)
+				leafCount += 1
 			}
 			return fields
 		}
-		let componentTokens = subtree.flatMap { chunks[$0] }.flatMap {
+		let projectedTokens = subtree.flatMap { chunks[$0] }.flatMap {
 			[Int64($0.context), Int64($0.value)]
 		}
 		var dump = SemanticDump()
-		dump.record("entropy.tree.dc_group_count", .integers([Int64(dcGroupCount)]))
-		dump.record(
-			"entropy.tree.token_count", .integers([Int64(componentTokens.count / 2)]))
-		dump.record("entropy.tree.tokens", .integers(componentTokens))
 		dump.record("entropy.tree.node_count", .integers([Int64(subtree.count)]))
-		dump.record("entropy.tree.nodes", .integers(componentNodes))
-		dump.record("entropy.tree.full_token_count", .integers([Int64(tokens.count)]))
+		dump.record("entropy.tree.nodes", .integers(projectedNodes))
 		dump.record(
-			"entropy.tree.full_tokens",
+			"entropy.tree.token_count", .integers([Int64(projectedTokens.count / 2)]))
+		dump.record("entropy.tree.tokens", .integers(projectedTokens))
+		return dump
+	}
+
+	static func treeEntropy(
+		dcGroupCount: Int, tokens override: [Token]? = nil,
+		contextMapOverride: [UInt8]? = nil
+	) -> SemanticDump {
+		var tokens = override ?? ContextTree.staticTokens
+		if override == nil {
+			tokens[1] = Token(
+				context: tokens[1].context,
+				value: packSigned(Int32(1 + dcGroupCount)))
+		}
+		let histograms = HistogramCluster.buildHistograms(
+			tokens: tokens, contextMap: nil, contextCount: ContextTree.treeContextCount)
+		let optimizedCode = HistogramCluster.optimizeEntropyCode(
+			tokens: tokens, contextCount: ContextTree.treeContextCount)
+		let code =
+			contextMapOverride.map {
+				EntropyCode(contextMap: $0, prefixCodes: optimizedCode.prefixCodes)
+			} ?? optimizedCode
+		var codeWriter = BitWriter()
+		EntropyCodeWriter.write(code, writer: &codeWriter)
+		var streamWriter = BitWriter()
+		EntropyCodeWriter.write(code, writer: &streamWriter)
+		for token in tokens { streamWriter.write(token: token, code: code) }
+		var fullWriter = BitWriter()
+		fullWriter.write(1, 1)
+		fullWriter.write(1, 0)
+		EntropyCodeWriter.write(code, writer: &fullWriter)
+		for token in tokens { fullWriter.write(token: token, code: code) }
+		var dump = SemanticDump()
+		dump.record(
+			"entropy.tree_entropy.context_map",
+			.integers(code.contextMap.map(Int64.init)))
+		dump.record(
+			"entropy.tree_entropy.histogram_counts",
+			.integers(histograms.flatMap { $0.counts.map(Int64.init) }))
+		dump.record(
+			"entropy.tree_entropy.tokens",
 			.integers(tokens.flatMap { [Int64($0.context), Int64($0.value)] }))
-		dump.record("entropy.tree.full_node_count", .integers([Int64(nodes.count)]))
-		dump.record("entropy.tree.full_nodes", .integers(nodes.flatMap { $0 }))
-		dump.record("entropy.tree.component_root", .integers([Int64(root)]))
+		dump.record(
+			"entropy.tree_entropy.prefix_code_count",
+			.integers([Int64(code.prefixCodes.count)]))
+		dump.record(
+			"entropy.tree_entropy.prefix_depths",
+			.integers(code.prefixCodes.flatMap { $0.depths.map(Int64.init) }))
+		dump.record(
+			"entropy.tree_entropy.prefix_bits",
+			.integers(code.prefixCodes.flatMap { $0.bits.map(Int64.init) }))
+		dump.record("entropy.tree_entropy.use_prefix_code", .integers([1]))
+		dump.record(
+			"entropy.tree_entropy.code_bit_count",
+			.integers([Int64(codeWriter.bitsWritten)]))
+		dump.record(
+			"entropy.tree_entropy.code_bytes",
+			.integers(codeWriter.bytes.map(Int64.init)))
+		dump.record(
+			"entropy.tree_entropy.bit_count",
+			.integers([Int64(streamWriter.bitsWritten)]))
+		dump.record(
+			"entropy.tree_entropy.bytes", .integers(streamWriter.bytes.map(Int64.init)))
+		dump.record(
+			"entropy.tree_entropy.stream_bit_count",
+			.integers([Int64(streamWriter.bitsWritten)]))
+		dump.record(
+			"entropy.tree_entropy.stream_bytes",
+			.integers(streamWriter.bytes.map(Int64.init)))
+		dump.record(
+			"entropy.tree_entropy.full_bit_count",
+			.integers([Int64(fullWriter.bitsWritten)]))
+		dump.record(
+			"entropy.tree_entropy.full_bytes",
+			.integers(fullWriter.bytes.map(Int64.init)))
 		return dump
 	}
 
@@ -230,6 +322,21 @@ enum SwiftEntropySemanticEncoding {
 		dump.record("entropy.modular.token_count", .integers([Int64(tokens.count)]))
 		dump.record(
 			"entropy.modular.tokens",
+			.integers(tokens.flatMap { [Int64($0.context), Int64($0.value)] }))
+		return dump
+	}
+
+	static func acMetadataTokens(data: DCGroupData) -> SemanticDump {
+		var section = SectionWriter(mode: .staging(.staticDC))
+		DCGroupEncoder.writeACMetadataTokens(data: data, writer: &section)
+		let tokens = section.staged.compactMap { record -> Token? in
+			guard case .token(let context, let value) = record else { return nil }
+			return Token(context: context, value: value)
+		}
+		var dump = SemanticDump()
+		dump.record("entropy.ac_metadata.token_count", .integers([Int64(tokens.count)]))
+		dump.record(
+			"entropy.ac_metadata.tokens",
 			.integers(tokens.flatMap { [Int64($0.context), Int64($0.value)] }))
 		return dump
 	}

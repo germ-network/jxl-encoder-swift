@@ -112,6 +112,7 @@ struct EntropyReferenceTests {
 				}
 			}
 		}
+
 	}
 
 	@Test
@@ -419,6 +420,16 @@ struct EntropyReferenceTests {
 			try EntropyReferenceFixture.validate(
 				name: "ac_tokens_tiny_map", input: invalidACWidth,
 				expected: ac.expected)
+		}
+		let acMetadata = try EntropyReferenceFixture.load("acmeta_channels_16x16")
+		let invalidQuantField = try SemanticDump(
+			parsing: acMetadata.input.serialized.replacingOccurrences(
+				of: "input.ac_metadata.raw_quant_field i 256 1 ",
+				with: "input.ac_metadata.raw_quant_field i 256 256 "))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "acmeta_channels_16x16", input: invalidQuantField,
+				expected: acMetadata.expected)
 		}
 	}
 
@@ -739,7 +750,146 @@ struct EntropyReferenceTests {
 	}
 
 	@Test
+	func treeTokenEntropyMatchesPinnedReference() throws {
+		let fixture = try EntropyReferenceFixture.load("tree_entropy_cheetah")
+		let actual = SwiftEntropySemanticEncoding.treeEntropy(dcGroupCount: 2)
+		let swiftTree = SwiftEntropySemanticEncoding.tree(dcGroupCount: 2)
+		var productionWriter = BitWriter()
+		ContextTree.write(dcGroupCount: 2, writer: &productionWriter)
+		guard
+			case .integers(let swiftTokens)? = swiftTree.fields[
+				"entropy.tree.full_tokens"],
+			case .integers(let inputTokens)? = fixture.input.fields[
+				"input.tree_entropy.tokens"],
+			case .integers(let encodedTokens)? = fixture.expected.fields[
+				"entropy.tree_entropy.tokens"]
+		else { throw SemanticDumpError.unimplemented }
+		#expect(swiftTokens == inputTokens)
+		#expect(inputTokens == encodedTokens)
+		let tokens = ContextTree.staticTokens.enumerated().map { index, token in
+			index == 1
+				? Token(context: token.context, value: packSigned(3)) : token
+		}
+		let histogramCounts = tokens.reduce(
+			into: Array(repeating: 0, count: 6 * StaticEntropyCodes.alphabetSize)
+		) { counts, token in
+			let (symbol, _, _) = UintCoder.encode(token.value)
+			counts[
+				Int(token.context) * StaticEntropyCodes.alphabetSize + Int(symbol)] +=
+				1
+		}
+		#expect(
+			actual.fields["entropy.tree_entropy.histogram_counts"]
+				== .integers(histogramCounts.map(Int64.init)))
+		#expect(
+			actual.fields["entropy.tree_entropy.context_map"]
+				== .integers([0, 1, 0, 1, 1, 1]))
+		#expect(actual.fields["entropy.tree_entropy.prefix_code_count"] == .integers([2]))
+		#expect(actual.fields["entropy.tree_entropy.use_prefix_code"] == .integers([1]))
+		#expect(actual.fields["entropy.tree_entropy.code_bit_count"] == .integers([202]))
+		#expect(actual.fields["entropy.tree_entropy.stream_bit_count"] == .integers([908]))
+		#expect(actual.fields["entropy.tree_entropy.full_bit_count"] == .integers([910]))
+		#expect(
+			actual.fields["entropy.tree_entropy.full_bit_count"]
+				== .integers([Int64(productionWriter.bitsWritten)]))
+		#expect(
+			actual.fields["entropy.tree_entropy.full_bytes"]
+				== .integers(productionWriter.bytes.map(Int64.init)))
+		guard
+			case .integers(let prefixDepths)? = actual.fields[
+				"entropy.tree_entropy.prefix_depths"],
+			case .integers(let prefixBits)? = actual.fields[
+				"entropy.tree_entropy.prefix_bits"]
+		else { throw SemanticDumpError.unimplemented }
+		#expect(prefixDepths.count == 128, "invalid Swift prefix table size")
+		#expect(prefixBits.count == 128, "invalid Swift canonical-code table size")
+		var comparableSwift = SemanticDump()
+		for field in ["context_map", "use_prefix_code", "bit_count", "bytes"] {
+			guard let value = actual.fields["entropy.tree_entropy.\(field)"] else {
+				throw SemanticDumpError.unimplemented
+			}
+			comparableSwift.record("entropy.tree_entropy.\(field)", value)
+		}
+		var comparableReference = SemanticDump()
+		for field in ["context_map", "use_prefix_code", "bit_count", "bytes"] {
+			guard let value = fixture.expected.fields["entropy.tree_entropy.\(field)"]
+			else {
+				throw SemanticDumpError.unimplemented
+			}
+			comparableReference.record("entropy.tree_entropy.\(field)", value)
+		}
+		let differences = comparableSwift.differences(from: comparableReference)
+		let knownDifferences: Set<String> = [
+			"entropy.tree_entropy.context_map",
+			"entropy.tree_entropy.use_prefix_code",
+			"entropy.tree_entropy.bit_count",
+			"entropy.tree_entropy.bytes",
+		]
+		#expect(Set(differences.map(\.field)) == knownDifferences, "\(differences)")
+		#expect(
+			fixture.expected.fields["entropy.tree_entropy.ans_strategy"]
+				== .integers([1]))
+		#expect(
+			fixture.expected.fields["entropy.tree_entropy.table_lengths"]
+				== .integers([40, 11, 6]))
+		#expect(
+			fixture.expected.fields["entropy.tree_entropy.clustering"] == .integers([1])
+		)
+		#expect(
+			fixture.expected.fields["entropy.tree_entropy.ans_strategy"]
+				== .integers([1]))
+		#expect(
+			fixture.expected.fields["entropy.tree_entropy.lz77_method"]
+				== .integers([0]))
+		#expect(
+			fixture.expected.fields["entropy.tree_entropy.uint_method"]
+				== .integers([0]))
+		let changedCoding = SwiftEntropySemanticEncoding.treeEntropy(
+			dcGroupCount: 2, tokens: tokens,
+			contextMapOverride: Array(repeating: 0, count: 6))
+		#expect(
+			changedCoding.fields["entropy.tree_entropy.tokens"]
+				== actual.fields[
+					"entropy.tree_entropy.tokens"])
+		#expect(
+			changedCoding.fields["entropy.tree_entropy.histogram_counts"]
+				== actual.fields["entropy.tree_entropy.histogram_counts"])
+		let changedFields = Set(changedCoding.differences(from: actual).map(\.field))
+		#expect(changedFields.contains("entropy.tree_entropy.context_map"))
+		#expect(changedFields.contains("entropy.tree_entropy.bytes"))
+		#expect(changedFields.contains("entropy.tree_entropy.bit_count"))
+	}
+
+	@Test
+	func projectedTreeNodeMutationStaysVisible() throws {
+		let tree = SwiftEntropySemanticEncoding.tree(dcGroupCount: 1)
+		guard case .integers(var tokens)? = tree.fields["entropy.tree.full_tokens"] else {
+			throw SemanticDumpError.unimplemented
+		}
+		let original = SwiftEntropySemanticEncoding.projectedTree(
+			fullTokens: tokens, root: 1)
+		tokens[7] = 4
+		let mutated = SwiftEntropySemanticEncoding.projectedTree(
+			fullTokens: tokens, root: 1)
+		let differences = mutated.differences(from: original)
+		#expect(
+			Set(differences.map(\.field)) == [
+				"entropy.tree.nodes", "entropy.tree.tokens",
+			])
+	}
+
+	@Test
 	func predefinedMATreeMatchesReference() throws {
+		func leafConfigurations(_ dump: SemanticDump) -> Set<[Int64]> {
+			guard case .integers(let nodes)? = dump.fields["entropy.tree.nodes"] else {
+				return []
+			}
+			return Set(
+				stride(from: 0, to: nodes.count, by: 7).compactMap { base in
+					guard nodes[base] == -1 else { return nil }
+					return Array(nodes[(base + 4)..<(base + 7)])
+				})
+		}
 		for (name, knownDifferences) in [
 			(
 				"tree_gradient_fixed_8192_dc1",
@@ -819,6 +969,326 @@ struct EntropyReferenceTests {
 					from: expected, excludingFields: knownDifferences
 				).isEmpty)
 		}
+
+		for (name, groupCount) in [
+			("tree_wp_fixed_8192_dc1", 1),
+			("tree_wp_fixed_8193_dc2", 2),
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let kind)? = fixture.input.fields["input.tree.kind"],
+				case .integers(let pixels)? = fixture.input.fields[
+					"input.tree.total_pixels"],
+				case .integers(let projectionRoot)? = fixture.input.fields[
+					"input.tree.projection_root"],
+				case .integers(let expectedNodes)? = fixture.expected.fields[
+					"entropy.tree.nodes"],
+				case .integers(let expectedTokens)? = fixture.expected.fields[
+					"entropy.tree.tokens"],
+				case .integers(let swiftFullTokens)? =
+					SwiftEntropySemanticEncoding.tree(
+						dcGroupCount: groupCount
+					).fields["entropy.tree.full_tokens"]
+			else { throw SemanticDumpError.unimplemented }
+			#expect(kind == [5])
+			#expect(pixels == (groupCount == 1 ? [8192] : [8193]))
+			var referenceProjection = SemanticDump()
+			for field in ["node_count", "nodes", "token_count", "tokens"] {
+				guard let value = fixture.expected.fields["entropy.tree.\(field)"]
+				else {
+					throw SemanticDumpError.unimplemented
+				}
+				referenceProjection.record("entropy.tree.\(field)", value)
+			}
+			let swiftProjection = SwiftEntropySemanticEncoding.projectedTree(
+				fullTokens: swiftFullTokens, root: Int(projectionRoot[0]))
+			let differences = swiftProjection.differences(from: referenceProjection)
+			let expectedDifferences: Set<String> =
+				groupCount == 1
+				? [
+					"entropy.tree.node_count", "entropy.tree.nodes",
+					"entropy.tree.token_count", "entropy.tree.tokens",
+				]
+				: ["entropy.tree.nodes", "entropy.tree.tokens"]
+			#expect(expectedNodes.count % 7 == 0, "\(name): malformed node tuples")
+			#expect(expectedTokens.count % 2 == 0, "\(name): malformed tree tokens")
+			#expect(
+				Set(differences.map(\.field)) == expectedDifferences,
+				"\(name): \(differences)")
+			for field in expectedDifferences {
+				let fieldDifferences = differences.filter { $0.field == field }
+				withKnownIssue(Comment(rawValue: "GER-3386: \(field)")) {
+					#expect(
+						fieldDifferences.isEmpty,
+						"\(name): \(fieldDifferences)")
+				}
+			}
+		}
+
+		for name in ["tree_acmeta_below_1024", "tree_acmeta_above_1024"] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let totalPixels)? = fixture.input.fields[
+					"input.tree.total_pixels"],
+				case .integers(let channelAreas)? = fixture.input.fields[
+					"input.tree.channel_areas"],
+				case .integers(let projectionRoot)? = fixture.input.fields[
+					"input.tree.projection_root"],
+				case .integers(let expectedNodeCount)? = fixture.expected.fields[
+					"entropy.tree.node_count"],
+				case .integers(let swiftTokens)? =
+					SwiftEntropySemanticEncoding.tree(
+						dcGroupCount: 1
+					).fields["entropy.tree.full_tokens"]
+			else { throw SemanticDumpError.unimplemented }
+			#expect(channelAreas.reduce(0, +) == totalPixels[0])
+			#expect(expectedNodeCount == (totalPixels[0] < 1024 ? [1] : [27]))
+			let actual = SwiftEntropySemanticEncoding.projectedTree(
+				fullTokens: swiftTokens, root: Int(projectionRoot[0]))
+			var expected = SemanticDump()
+			for field in ["node_count", "nodes", "token_count", "tokens"] {
+				guard let value = fixture.expected.fields["entropy.tree.\(field)"]
+				else {
+					throw SemanticDumpError.unimplemented
+				}
+				expected.record("entropy.tree.\(field)", value)
+			}
+			let differences = actual.differences(from: expected)
+			#expect(
+				!leafConfigurations(actual).isDisjoint(
+					with: leafConfigurations(expected)))
+			let knownDifferences: Set<String> = [
+				"entropy.tree.node_count", "entropy.tree.nodes",
+				"entropy.tree.token_count", "entropy.tree.tokens",
+			]
+			if name == "tree_acmeta_above_1024",
+				case .integers(let actualNodes)? = actual.fields[
+					"entropy.tree.nodes"],
+				case .integers(let expectedNodes)? = expected.fields[
+					"entropy.tree.nodes"]
+			{
+				#expect(actualNodes.prefix(21) == expectedNodes.prefix(21))
+			}
+			#expect(
+				Set(differences.map(\.field)) == knownDifferences,
+				"\(name): \(differences)")
+			for field in knownDifferences {
+				let fieldDifferences = differences.filter { $0.field == field }
+				withKnownIssue(Comment(rawValue: "GER-3386: \(field)")) {
+					#expect(
+						fieldDifferences.isEmpty,
+						"\(name): \(fieldDifferences)")
+				}
+			}
+		}
+	}
+
+	@Test
+	func acMetadataContextsAndResidualsMatchReference() throws {
+		for name in ["acmeta_channels_16x16", "acmeta_channels_24x24"] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			func integers(_ fields: [String: SemanticDump.Values], _ key: String) throws
+				-> [Int64]
+			{
+				guard case .integers(let values)? = fields[key] else {
+					throw SemanticDumpError.unimplemented
+				}
+				return values
+			}
+			let width = Int(
+				try integers(fixture.input.fields, "input.ac_metadata.width")[0])
+			let height = Int(
+				try integers(fixture.input.fields, "input.ac_metadata.height")[0])
+			var data = DCGroupData(widthInBlocks: width, heightInBlocks: height)
+			data.ytoxMap = try integers(fixture.input.fields, "input.ac_metadata.ytox")
+				.map(Int8.init)
+			data.ytobMap = try integers(fixture.input.fields, "input.ac_metadata.ytob")
+				.map(Int8.init)
+			data.rawQuantField = try integers(
+				fixture.input.fields, "input.ac_metadata.raw_quant_field"
+			).map(UInt8.init)
+			let actual = SwiftEntropySemanticEncoding.acMetadataTokens(data: data)
+			guard
+				case .integers(let actualTokens)? = actual.fields[
+					"entropy.ac_metadata.tokens"]
+			else { throw SemanticDumpError.unimplemented }
+			let mapCount = data.cmapWidth * data.cmapHeight
+			let blockCount = width * height
+			let channels = [
+				("cfl_ytox", mapCount), ("cfl_ytob", mapCount),
+				("acs", blockCount), ("quant_field", blockCount),
+				("epf", blockCount),
+			]
+			var offset = 0
+			var observedDifferences = Set<String>()
+			let belowThreshold = name == "acmeta_channels_16x16"
+			for (channel, count) in channels {
+				let key = "entropy.ac_metadata.\(channel).tokens"
+				guard case .integers(let expected)? = fixture.expected.fields[key]
+				else {
+					throw SemanticDumpError.unimplemented
+				}
+				let range = offset..<(offset + count * 2)
+				let actualChannel = Array(actualTokens[range])
+				let actualContexts = stride(from: 0, to: actualChannel.count, by: 2)
+					.map { actualChannel[$0] }
+				let actualValues = stride(from: 1, to: actualChannel.count, by: 2)
+					.map { actualChannel[$0] }
+				let expectedContexts = stride(from: 0, to: expected.count, by: 2)
+					.map { expected[$0] }
+				let expectedValues = stride(from: 1, to: expected.count, by: 2)
+					.map { expected[$0] }
+				let contextsMatch = actualContexts.elementsEqual(expectedContexts)
+				let valuesMatch = actualValues.elementsEqual(expectedValues)
+				let contextDiffers = channel != "epf" || !belowThreshold
+				let valuesDiffer =
+					belowThreshold
+					&& ["cfl_ytox", "cfl_ytob", "epf"].contains(channel)
+				if contextDiffers {
+					observedDifferences.insert("\(channel).contexts")
+					withKnownIssue(
+						Comment(
+							rawValue:
+								"GER-3386: entropy.ac_metadata.\(channel).contexts"
+						)
+					) {
+						#expect(
+							contextsMatch,
+							"\(name) \(channel) context mismatch")
+					}
+				} else {
+					#expect(
+						contextsMatch, "\(name) \(channel) context mismatch"
+					)
+				}
+				if valuesDiffer {
+					observedDifferences.insert("\(channel).values")
+					withKnownIssue(
+						Comment(
+							rawValue:
+								"GER-3386: entropy.ac_metadata.\(channel).values"
+						)
+					) {
+						#expect(
+							valuesMatch,
+							"\(name) \(channel) residual mismatch")
+					}
+				} else {
+					#expect(valuesMatch, "\(name) \(channel) residual mismatch")
+				}
+				offset += count * 2
+			}
+			#expect(offset == actualTokens.count)
+			let expectedDifferences: Set<String> =
+				belowThreshold
+				? [
+					"cfl_ytox.contexts", "cfl_ytob.contexts", "acs.contexts",
+					"quant_field.contexts", "cfl_ytox.values",
+					"cfl_ytob.values",
+					"epf.values",
+				]
+				: [
+					"cfl_ytox.contexts", "cfl_ytob.contexts", "acs.contexts",
+					"quant_field.contexts", "epf.contexts",
+				]
+			#expect(observedDifferences == expectedDifferences)
+		}
+	}
+
+	@Test
+	func modularAndMetadataTokenMutationsStayVisible() throws {
+		func values(_ fixture: EntropyReferenceFixture, _ field: String) throws -> [Int64] {
+			guard case .integers(let result)? = fixture.input.fields[field] else {
+				throw SemanticDumpError.unimplemented
+			}
+			return result
+		}
+		func tokenParts(_ dump: SemanticDump) throws -> (contexts: [Int64], values: [Int64])
+		{
+			guard case .integers(let tokens)? = dump.fields["entropy.modular.tokens"]
+			else {
+				throw SemanticDumpError.unimplemented
+			}
+			return (
+				stride(from: 0, to: tokens.count, by: 2).map { tokens[$0] },
+				stride(from: 1, to: tokens.count, by: 2).map { tokens[$0] }
+			)
+		}
+		let wp = try EntropyReferenceFixture.load("modular_dc_wp_fixed_8192")
+		var wpData = DCGroupData(
+			widthInBlocks: Int(try values(wp, "input.modular.group0.width")[0]),
+			heightInBlocks: Int(try values(wp, "input.modular.group0.height")[0]))
+		for channel in 0..<3 {
+			wpData.quantDC[channel] = try values(
+				wp, "input.modular.group0.channel\(channel)"
+			).map(Int16.init)
+		}
+		let wpBaseline = SwiftEntropySemanticEncoding.modularTokens(data: wpData)
+		let wpBaselineParts = try tokenParts(wpBaseline)
+		var wpContextMutation = wpData
+		wpContextMutation.quantDC[0][1] += 30
+		let changedWPContext = SwiftEntropySemanticEncoding.modularTokens(
+			data: wpContextMutation)
+		let changedWPContextParts = try tokenParts(changedWPContext)
+		#expect(changedWPContextParts.contexts != wpBaselineParts.contexts)
+		var wpResidualMutation = wpData
+		wpResidualMutation.quantDC[2][5] += 1
+		let changedWPResidual = SwiftEntropySemanticEncoding.modularTokens(
+			data: wpResidualMutation)
+		let changedWPResidualParts = try tokenParts(changedWPResidual)
+		#expect(changedWPResidualParts.contexts == wpBaselineParts.contexts)
+		#expect(changedWPResidualParts.values != wpBaselineParts.values)
+
+		let ac = try EntropyReferenceFixture.load("acmeta_channels_16x16")
+		let width = Int(try values(ac, "input.ac_metadata.width")[0])
+		let height = Int(try values(ac, "input.ac_metadata.height")[0])
+		var acData = DCGroupData(widthInBlocks: width, heightInBlocks: height)
+		acData.ytoxMap = try values(ac, "input.ac_metadata.ytox").map(Int8.init)
+		acData.ytobMap = try values(ac, "input.ac_metadata.ytob").map(Int8.init)
+		acData.rawQuantField = try values(ac, "input.ac_metadata.raw_quant_field").map(
+			UInt8.init)
+		let acBaseline = SwiftEntropySemanticEncoding.acMetadataTokens(data: acData)
+		guard
+			case .integers(let baselineTokens)? = acBaseline.fields[
+				"entropy.ac_metadata.tokens"]
+		else { throw SemanticDumpError.unimplemented }
+		var cflMutation = acData
+		cflMutation.ytoxMap[0] += 1
+		let changedCFL = try integersFromAC(
+			SwiftEntropySemanticEncoding.acMetadataTokens(data: cflMutation))
+		let mapWidth = acData.cmapWidth * acData.cmapHeight * 2
+		#expect(Array(changedCFL[..<mapWidth]) != Array(baselineTokens[..<mapWidth]))
+		#expect(Array(changedCFL[mapWidth...]) == Array(baselineTokens[mapWidth...]))
+		var qfMutation = acData
+		qfMutation.rawQuantField[0] = 16
+		let changedQF = try integersFromAC(
+			SwiftEntropySemanticEncoding.acMetadataTokens(data: qfMutation))
+		let qfStart = (2 * acData.cmapWidth * acData.cmapHeight + width * height) * 2
+		let qfEnd = qfStart + width * height * 2
+		let baselineQF = Array(baselineTokens[qfStart..<qfEnd])
+		let changedQFChannel = Array(changedQF[qfStart..<qfEnd])
+		let baselineQFContexts = stride(from: 0, to: baselineQF.count, by: 2).map {
+			baselineQF[$0]
+		}
+		#expect(Array(baselineQFContexts.prefix(6)) == [6, 6, 6, 4, 4, 3])
+		let changedQFContexts = stride(from: 0, to: changedQFChannel.count, by: 2).map {
+			changedQFChannel[$0]
+		}
+		let baselineQFValues = stride(from: 1, to: baselineQF.count, by: 2).map {
+			baselineQF[$0]
+		}
+		let changedQFValues = stride(from: 1, to: changedQFChannel.count, by: 2).map {
+			changedQFChannel[$0]
+		}
+		#expect(changedQFContexts != baselineQFContexts)
+		#expect(changedQFValues != baselineQFValues)
+	}
+
+	private func integersFromAC(_ dump: SemanticDump) throws -> [Int64] {
+		guard case .integers(let values)? = dump.fields["entropy.ac_metadata.tokens"] else {
+			throw SemanticDumpError.unimplemented
+		}
+		return values
 	}
 
 	@Test
@@ -885,6 +1355,52 @@ struct EntropyReferenceTests {
 			expected.record("entropy.modular.tokens", .integers(projectedTokens))
 			#expect(channelOrder == [1, 0, 2])
 			#expect(actual.differences(from: expected).isEmpty)
+		}
+
+		let wpFixture = try EntropyReferenceFixture.load("modular_dc_wp_fixed_8192")
+		func wpIntegers(_ field: String) throws -> [Int64] {
+			guard case .integers(let values)? = wpFixture.input.fields[field] else {
+				throw SemanticDumpError.unimplemented
+			}
+			return values
+		}
+		let firstGroup = "input.modular.group0"
+		let width = Int(try wpIntegers("\(firstGroup).width")[0])
+		let height = Int(try wpIntegers("\(firstGroup).height")[0])
+		var data = DCGroupData(widthInBlocks: width, heightInBlocks: height)
+		for channel in 0..<3 {
+			data.quantDC[channel] = try wpIntegers("\(firstGroup).channel\(channel)")
+				.map(
+					Int16.init)
+		}
+		let wpActual = SwiftEntropySemanticEncoding.modularTokens(data: data)
+		guard
+			case .integers(let wpOffset)? = wpFixture.input.fields[
+				"input.modular.context_offset"],
+			case .integers(let wpTokens)? = wpFixture.expected.fields[
+				"entropy.modular.tokens"]
+		else { throw SemanticDumpError.unimplemented }
+		let wpProjected = stride(from: 0, to: wpTokens.count, by: 2).flatMap { index in
+			[wpTokens[index] + wpOffset[0], wpTokens[index + 1]]
+		}
+		var wpExpected = SemanticDump()
+		wpExpected.record(
+			"entropy.modular.token_count", .integers([Int64(wpProjected.count / 2)]))
+		wpExpected.record("entropy.modular.tokens", .integers(wpProjected))
+		let wpDifferences = wpActual.differences(from: wpExpected)
+		#expect(
+			wpDifferences == [
+				SemanticDifference(
+					field: "entropy.modular.tokens",
+					kind: .valueMismatch(index: 0, expected: "13", actual: "26")
+				)
+			])
+		#expect(Set(wpDifferences.map(\.field)) == ["entropy.modular.tokens"])
+		let tokenDifferences = wpDifferences.filter { $0.field == "entropy.modular.tokens" }
+		withKnownIssue(Comment(rawValue: "GER-3386: entropy.modular.tokens")) {
+			#expect(
+				tokenDifferences.isEmpty,
+				"same explicit DC samples under WP fixed-DC: \(tokenDifferences)")
 		}
 	}
 
