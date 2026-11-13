@@ -291,16 +291,18 @@ struct EntropyReferenceFixture {
 							name)
 					}
 				} else if name == "context_raw_rle" {
-					let expectedEntries =
-						Array(repeating: 0, count: 20)
-						+ Array(repeating: 1, count: 20)
-						+ Array(repeating: 2, count: 20)
-						+ Array(repeating: 3, count: 20)
-					let expectedMTF =
-						Array(repeating: 0, count: 20)
-						+ [1] + Array(repeating: 0, count: 19)
-						+ [2] + Array(repeating: 0, count: 19)
-						+ [3] + Array(repeating: 0, count: 19)
+					var expectedEntries = [Int]()
+					expectedEntries.reserveCapacity(80)
+					for value in 0..<4 {
+						expectedEntries.append(
+							contentsOf: repeatElement(value, count: 20))
+					}
+					var expectedMTF = [Int](repeating: 0, count: 20)
+					for value in 1...3 {
+						expectedMTF.append(value)
+						expectedMTF.append(
+							contentsOf: repeatElement(0, count: 19))
+					}
 					guard entries.map(Int.init) == expectedEntries,
 						candidateMTF?.map(Int.init) == expectedMTF,
 						histograms == [4], rawCost[0] < mtfCost[0],
