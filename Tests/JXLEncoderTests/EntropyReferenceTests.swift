@@ -342,6 +342,24 @@ struct EntropyReferenceTests {
 				name: "tree_gradient_fixed_8193_dc2", input: tree.input,
 				expected: mismatchedTreeNodeCount)
 		}
+		let maximalTreeNodeCount = try SemanticDump(
+			parsing: tree.expected.serialized.replacingOccurrences(
+				of: "entropy.tree.node_count i 1 67",
+				with: "entropy.tree.node_count i 1 \(Int64.max)"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "tree_gradient_fixed_8193_dc2", input: tree.input,
+				expected: maximalTreeNodeCount)
+		}
+		let maximalTreeTokenCount = try SemanticDump(
+			parsing: tree.expected.serialized.replacingOccurrences(
+				of: "entropy.tree.token_count i 1 236",
+				with: "entropy.tree.token_count i 1 \(Int64.max)"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "tree_gradient_fixed_8193_dc2", input: tree.input,
+				expected: maximalTreeTokenCount)
+		}
 	}
 
 	@Test

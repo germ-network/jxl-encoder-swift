@@ -407,9 +407,13 @@ struct EntropyReferenceFixture {
 				outputKind == kind, outputPixels == totalPixels,
 				outputBitdepth == bitdepth, outputPrevprop == prevprop,
 				nodeCount.count == 1, nodeCount[0] > 0,
-				nodes.count == nodeCount[0] * 7,
+				nodeCount[0] <= Int64(nodes.count / 7),
+				nodes.count.isMultiple(of: 7),
+				nodes.count / 7 == Int(nodeCount[0]),
 				tokenCount.count == 1, tokenCount[0] > 0,
-				tokens.count == tokenCount[0] * 2,
+				tokenCount[0] <= Int64(tokens.count / 2),
+				tokens.count.isMultiple(of: 2),
+				tokens.count / 2 == Int(tokenCount[0]),
 				tokens.allSatisfy({ $0 >= 0 && $0 <= Int64(UInt32.max) })
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			var leafCount: Int64 = 0
