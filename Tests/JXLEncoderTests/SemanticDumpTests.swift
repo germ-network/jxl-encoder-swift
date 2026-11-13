@@ -177,13 +177,11 @@ struct SemanticDumpTests {
 
 	@Test("every documented tolerance names a float field some committed fixture carries")
 	func documentedTolerancesAreUsed() throws {
-		let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-			.appendingPathComponent("Fixtures/semantic")
-		let urls =
-			(try? FileManager.default.contentsOfDirectory(
-				at: directory, includingPropertiesForKeys: nil)) ?? []
-		let dumps = try urls.filter { $0.pathExtension == "sem" }.map {
-			try SemanticDump(parsing: String(contentsOf: $0, encoding: .utf8))
+		var fixtureNames = SemanticCorpusEntry.all.map(\.name)
+		fixtureNames.append("distance_params")
+		var dumps: [SemanticDump] = []
+		for fixtureName in fixtureNames {
+			dumps.append(try SemanticDump(fixture: fixtureName))
 		}
 		for name in FloatTolerance.documented.keys {
 			#expect(

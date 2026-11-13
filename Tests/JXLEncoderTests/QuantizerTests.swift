@@ -2,35 +2,42 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Differential tests against libjxl-tiny's `QuantizeBlockAC`, reached through
-/// the test hook in `Reference/legacy-tiny/patches`. Quant and scale are fixed here so the
-/// quantizer is verified independently of the adaptive quant field.
+/// Quantizer invariants with fixed parameters, independently of the adaptive
+/// quant field. This suite retains the full edge experiment and tie invariants;
+/// `PixelContractTests` keeps a separate bounded primitive check.
 @Suite("Quantizer")
 struct QuantizerTests {
 	/// Matches the constants baked into the `quant` stage of dump_stages.cc.
 	static let scale: Float = 0.112_075_805_664_062_5
 	static let quant: Int32 = 5
 
-	@Test("matches libjxl-tiny exactly on the edge-case fixture")
+	@Test("matches the pinned upstream primitive on every edge block and channel")
 	func matchesReference() throws {
-		let input = try StageDump(fixture: "edge_linear")
-		let xyb = XYB.toXYB(linearRGB: input.interleaved, pixelCount: input.pixelCount)
-		let planes = [xyb.x, xyb.y, xyb.b]
-		let expected = try StageDump(fixture: "edge_quant")
-
-		var mismatches = 0
-		for channel in 0..<3 {
-			let coeffs = DCT.forwardBlocks(
-				plane: planes[channel], width: input.width, height: input.height)
-			let actual = Quantizer.quantizePlane(
-				coefficients: coeffs, channel: channel, quant: Self.quant,
-				scale: Self.scale)
-			for i in 0..<actual.count
-			where actual[i] != Int32(expected.planes[channel][i]) {
-				mismatches += 1
-			}
+		let input = try StageDump(fixture: "edge_dct")
+		let expected = try SemanticDump(fixture: "edge_fixed_quantized")
+		#expect(expected.fields["quantized_edge.neon_target"] == .integers([1]))
+		guard case .integers(let counts)? = expected.fields["quantized_edge.block_count"]
+		else {
+			Issue.record("missing edge block count")
+			return
 		}
-		#expect(mismatches == 0)
+		let count = try #require(counts.first)
+		#expect(count == Int64(input.width / DCT.blockSize))
+		let multipliers: [Float] = [1.25, 1, 1]
+		for channel in 0..<3 {
+			guard
+				case .integers(let field)? = expected.fields[
+					"quantized_edge.c\(channel)"]
+			else {
+				Issue.record("missing channel \(channel) reference")
+				continue
+			}
+			let actual = Quantizer.quantizePlane(
+				coefficients: input.planes[channel], channel: channel,
+				quant: Self.quant, scale: Self.scale,
+				matrixMultiplier: multipliers[channel])
+			#expect(actual.map(Int64.init) == field, "channel \(channel)")
+		}
 	}
 
 	/// Real coefficients never land exactly on a half, so the corpus above

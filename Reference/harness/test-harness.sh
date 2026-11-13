@@ -65,16 +65,21 @@ for p in output.glob('*'):
  assert hashlib.sha256(p.read_bytes()).hexdigest()==rows[path][2], path
 for name in expected-{'ac_entropy_flat_singleton','ac_entropy_static_prefix'}:
  fields={line.split()[0]:line.split()[1:] for line in (output/(name+'.sem')).read_text().splitlines()[1:]}
- required={'frame.size','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame.xyb','frame.qm_scales','frame.loop_filter.gab','frame.loop_filter.epf_iters','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc','ac_entropy.kind','ac_entropy.table_count','ac_entropy.uint_config','ac_entropy.lz77_enabled','ac_entropy_alphabet.ans_log_alpha_size'}
+ required={'image_header.size','image_header.transfer_function','image_header.color_space','image_header.white_point','image_header.primaries','image_header.rendering_intent','image_header.xyb','image_header.num_extra_channels','image_sample_format.floating_point','image_sample_format.bits_per_sample','image_sample_format.exponent_bits_per_sample','frame.encoding','frame.groups','frame.dc_groups','frame.passes','frame_flags.flags','gaborish.enabled','epf.iterations','x_matrix_scale.value','b_matrix_scale.value','quant_matrix.dct8.c0','quant_matrix.dct8.c1','quant_matrix.dct8.c2','inverse_quant_matrix.dct8.c0','inverse_quant_matrix.dct8.c1','inverse_quant_matrix.dct8.c2','dc_quant_matrix.values','inverse_dc_quant_matrix.values','coeff_order.nondefault_orders','coeff_order.dct8.c0','coeff_order.dct8.c1','coeff_order.dct8.c2','block_context.dc_thresholds.c0','block_context.dc_thresholds.c1','block_context.dc_thresholds.c2','block_context.qf_thresholds','block_context.ctx_map','block_context.num_ctxs','context_map.num_histograms','context_map.ac','quant_field.raw','quant_field.global_scale','quant_field.quant_dc','ac_entropy.kind','ac_entropy.table_count','ac_entropy.uint_config','ac_entropy.lz77_enabled','ac_entropy_alphabet.ans_log_alpha_size'}
+ size={'edge':(32,32),'multigroup':(301,301),'flower_512_d1':(512,512),'flower_512_d3':(512,512),'flower_1024':(1024,1024)}[name]
+ assert list(map(int,fields['image_header.size'][2:]))==list(size)
+ assert int(fields['quant_field.raw'][1])==((size[0]+7)//8)*((size[1]+7)//8)
+ assert fields['frame.encoding']==['i','1','0'] and fields['image_header.xyb']==['i','1','1']
+ assert fields['frame.passes']==['i','1','1']
+ assert fields['epf.iterations']==['i','1','2' if name=='flower_512_d3' else '1']
+ for channel in range(3):
+  assert fields[f'quant_matrix.dct8.c{channel}'][:2]==['f','64']
+  assert fields[f'inverse_quant_matrix.dct8.c{channel}'][:2]==['f','64']
+ assert fields['dc_quant_matrix.values'][:2]==['f','3']
+ assert fields['inverse_dc_quant_matrix.values'][:2]==['f','3']
  if fields['ac_entropy.kind'][2]=='1': required|={'ac_entropy.ans.alphabet_lengths','ac_entropy.ans.frequencies'}
  else: required|={'ac_entropy.prefix.alphabet_lengths','ac_entropy.prefix.singleton_symbols','ac_entropy.prefix.depths'}
  assert set(fields)==required, name
- size={'edge':(32,32),'multigroup':(301,301),'flower_512_d1':(512,512),'flower_512_d3':(512,512),'flower_1024':(1024,1024)}[name]
- assert list(map(int,fields['frame.size'][2:]))==list(size)
- assert int(fields['quant_field.raw'][1])==((size[0]+7)//8)*((size[1]+7)//8)
- assert fields['frame.encoding']==['i','1','0'] and fields['frame.xyb']==['i','1','1']
- assert fields['frame.passes']==['i','1','1']
- assert fields['frame.loop_filter.epf_iters']==['i','1','2' if name=='flower_512_d3' else '1']
  for channel in range(3): assert sorted(map(int,fields[f'coeff_order.dct8.c{channel}'][2:]))==list(range(64))
  assert fields['frame.groups']==['i','1',str(((size[0]+255)//256)*((size[1]+255)//256))]
 PYCODE
@@ -127,7 +132,24 @@ entropy_context_map_decisions_match_fixtures() {
   "$HARNESS" entropy context-map 16 0 1 --mtf 0 1 > "$SCRATCH/context_tie.sem"
   cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/context_tie_raw_mtf.expected.sem" "$SCRATCH/context_tie.sem"
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures; do
+stage2_fixtures_reproduce() {
+  bash "$REFERENCE/make_stage2_fixtures.sh" "$SCRATCH/stage2"
+  python3 - "$REFERENCE/.." "$SCRATCH/stage2" <<'PYCODE'
+import hashlib,sys
+from pathlib import Path
+root=Path(sys.argv[1]); output=Path(sys.argv[2])
+manifest={line.split('\t')[0]:line.split('\t') for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#')}
+fixtures=sorted(p for p in output.iterdir() if p.is_file())
+names={'bounded_quantized.sem','edge_fixed_quantized.sem','coded_dimensions.sem','distance_params.sem','distance_filters.sem','dc_boundary.sem','dc_boundary.ppm','quant_bias.sem'}
+for stem in ('flower_1024','pixel_lifecycle_2057x521'):
+ names.update({stem+'.ppm',stem+'.ac.bin',stem+'.dc.bin',stem+'.stages.sem'})
+expected={name:manifest['Tests/JXLEncoderTests/Fixtures/semantic/'+name][2] for name in names}
+assert {p.name for p in fixtures}==names
+for fixture in fixtures:
+ assert hashlib.sha256(fixture.read_bytes()).hexdigest()==expected[fixture.name], fixture.name
+PYCODE
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures; do
   "$check"
   echo "PASS $check"
 done

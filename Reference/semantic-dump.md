@@ -1,7 +1,7 @@
 # Semantic dump (I-3)
 
 A semantic dump lists the encoder decisions a JPEG XL codestream carries, as
-named integer and float fields. Two sides write one:
+named integer and float fields. Decoder dumps are joined by a small set of explicitly documented encoder-stage observations, all using the same format.
 
 - **Reference:** `jxl-harness dump <file.jxl>` decodes any bare codestream with
   the pinned libjxl (`Reference/libjxl.pin`) and records what the decoder state
@@ -212,19 +212,27 @@ The actual encoder stores a one-bit placeholder for a prefix singleton; the
 decoder consumes zero bits. The semantic dump records the decoder form. AC
 LZ77 is unsupported and a reference frame with it enabled is rejected.
 
-All fields below are `i` (signed decimal integers); no float tolerance is
-needed for these categories. The supported first frame is single-pass VarDCT,
+Integer fields are `i` (signed decimal integers). Matrix and DC-constant
+fields are `f` (float32) with strict zero-ULP comparisons. The supported first
+frame is single-pass VarDCT,
 with DCT8 only and no preview, as produced by the corpus's e4 pixel path.
 Other frame configurations are rejected rather than partially dumped.
 
 | category | field suffix | layout |
 |---|---|---|
-| `frame` | `size` | width, height in pixels |
+| `ac_entropy` | `kind`, `table_count`, `uint_config`, `lz77_enabled`, `ans.*` or `prefix.*` | decoded AC code-table type and transmitted table contents; ANS frequencies or prefix depths, in table order |
+| `ac_entropy_alphabet` | `ans_log_alpha_size` | one ANS alphabet precision value, empty for prefix coding |
 | `frame` | `encoding` | scalar; 0 = VarDCT |
 | `frame` | `groups`, `dc_groups`, `passes` | one scalar each |
-| `frame` | `xyb` | scalar boolean, XYB color transform |
-| `frame` | `qm_scales` | X scale, B scale |
-| `frame` | `loop_filter.gab`, `loop_filter.epf_iters` | boolean and iteration count, one scalar each |
+| `image_header` | `size` | width, height in pixels |
+| `image_header` | `transfer_function`, `color_space`, `white_point`, `primaries`, `rendering_intent`, `xyb`, `num_extra_channels` | one decoded metadata value each |
+| `image_sample_format` | `floating_point`, `bits_per_sample`, `exponent_bits_per_sample` | one decoded source-sample metadata value each |
+| `frame_flags` | `flags` | scalar frame-header flags |
+| `gaborish` | `enabled` | scalar boolean |
+| `epf` | `iterations` | scalar iteration count |
+| `x_matrix_scale`, `b_matrix_scale` | `value` | scalar scale index, independent per channel |
+| `quant_matrix`, `inverse_quant_matrix` | `dct8.c0`, `dct8.c1`, `dct8.c2` | 64 float32 values per X/Y/B channel in transform row order |
+| `dc_quant_matrix`, `inverse_dc_quant_matrix` | `values` | three float32 constants in X/Y/B order |
 | `coeff_order` | `nondefault_orders` | scalar derived bitmask: bucket bit is set iff any channel's decoded permutation differs from its natural order; only bit 0 (DCT8) can be set here |
 | `coeff_order` | `dct8.c0`, `dct8.c1`, `dct8.c2` | 64 decoded coefficient indices per channel, in scan order |
 | `block_context` | `dc_thresholds.c0`, `dc_thresholds.c1`, `dc_thresholds.c2` | ordered DC thresholds per channel, possibly empty |
@@ -235,6 +243,32 @@ Other frame configurations are rejected rather than partially dumped.
 | `context_map` | `ac` | first pass's AC map, trimmed to `num_histograms * NumACContexts()`; no decoder padding |
 | `quant_field` | `raw` | integer raw quantizer per block, whole-frame block raster order |
 | `quant_field` | `global_scale`, `quant_dc` | one scalar each, exact integer `QuantizerParams` values |
+| `quantized_ac` | `c0`, `c1`, `c2` | 64 fixed-DCT primitive outputs per X/Y/B channel from actual pinned NEON `QuantizeBlockAC`; input, thresholds, multiplier, quant and scale are fixed by the generator |
+| `quantized_ac` | `neon_target` | scalar marker, 1 only when the harness is compiled for NEON |
+| `quantized_edge` | `c0`, `c1`, `c2` | Every fixed-parameter `QuantizeBlockAC` result for all 16 edge DCT blocks and X/Y/B channels, generated directly by the pinned NEON primitive |
+| `quantized_edge` | `block_count`, `neon_target` | Raster block count and NEON-target marker for the fixed edge experiment |
+| `quant_bias` | `c0`, `c1`, `c2` | 13 float32 output bit patterns from actual NEON `AdjustQuantBias` inputs, stored as unsigned integer values |
+| `quant_bias` | `neon_target` | scalar marker, 1 only when the harness is compiled for NEON |
+| `distance_params` | `inputs`, `effective_distance`, `global_scale`, `quant_dc`, `quant_field`, `neon_target` | predecessor/exact/successor float32 inputs at the listed transitions; values from actual `InitialQuantDC`, `ComputeGlobalScaleAndQuant`, and `SetQuantFieldRect` |
+| `distance_filters` | `inputs`, `gaborish_effort4`, `epf_iterations_effort4`, `x_matrix_scale_effort4`, `b_matrix_scale_effort4` | Public e4 encode/decode observations at the same float32 boundaries; decoded Gaborish, EPF, and matrix decisions are compared per distance and field |
+| `dc_boundary` | `inputs`, `blocks_per_distance`, `c0`, `c1`, `c2`, `neon_target` | Fixed 32×32 image encoded at each boundary, then source-corresponding ToXYB/padding/resampling, actual `AddVarDCTDC`, public modular stream encode/decode; channel arrays retain upstream coded block counts |
+| `coded_blocks` | `dimensions`, `widths`, `heights`, `width_blocks.h0v0` … `width_blocks.h1v1`, `height_blocks.h0v0` … `height_blocks.h1v1` | explicit small/asymmetric dimensions and independent axis block counts from upstream `FrameDimensions::Set`, varying maximum horizontal and vertical chroma shifts |
+| `pixel_stages` | `dimensions`, `streaming_mode`, `resampling`, `ac_group_block_dims`, `dc_group_lifecycle`, `quant_field_mismatches` | full-frame dimensions; public Cheetah streaming/resampling state; absolute AC group ids and block extents; per-DC-group crop, padding, origin and global-state lifecycle; zero when the recomputed raw quant field matches the decoded frame |
+
+The corresponding `.ac.bin` and `.dc.bin` fixtures preserve actual upstream
+coefficient-stage observations as absolute-group/channel-major AC and
+full-frame channel-major DC arrays. Pixel semantic tests compare every Swift
+AC and DC integer against these observations after sorting lifecycle metadata
+by absolute group ID and mapping AC groups into full-frame coordinates.
+Expected per-channel divergences are isolated under GER-3387 and, for
+`flower_1024` AC, GER-3419. Separate synthetic values continue to verify
+placement of channel, group, and block identity; metadata checks full-frame
+group extents and lifecycle.
+
+The eight matrix and DC-constant float fields use `ulps(0)`, preserving
+signed-zero differences. The inverse AC matrix's demonstrated one-ULP entries
+remain a GER-3387 known issue; forward AC matrices and both DC constant sets
+are compared independently.
 
 `coeff_order.nondefault_orders` describes the decoded permutation, not the
 signaling syntax. At the pinned e4 configuration upstream clears the signaled
@@ -277,3 +311,8 @@ simple cost is strictly below both entropy candidates. `context_tie_raw_mtf`
 uses sixteen possible histograms, which makes the simple form unavailable; its
 identical raw/MTF candidate arrays have equal costs, so the strict MTF
 comparison keeps the raw map.
+
+The `quantized_ac` stage fixture is not decoded from a codestream. It exercises
+a bounded, explicit fixed-parameter input to the pinned upstream primitive; it
+does not establish conversion safety for unrestricted floats or equality with
+ordinary-image e4 coefficients.

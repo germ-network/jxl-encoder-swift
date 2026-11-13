@@ -403,15 +403,26 @@ extension SemanticDump {
 			throw JPEGSemanticCaptureError.invalidReference(
 				"JPEG AC context map shape or label range")
 		}
-		record("frame.size", .integers([Int64(t.width), Int64(t.height)]))
+		record("image_header.size", .integers([Int64(t.width), Int64(t.height)]))
+		record("image_header.transfer_function", .integers([13]))
+		record("image_header.color_space", .integers([t.isGrayscale ? 1 : 0]))
+		record("image_header.white_point", .integers([1]))
+		record("image_header.primaries", .integers([1]))
+		record("image_header.rendering_intent", .integers([1]))
+		record("image_header.xyb", .integers([0]))
+		record("image_header.num_extra_channels", .integers([0]))
+		record("image_sample_format.floating_point", .integers([0]))
+		record("image_sample_format.bits_per_sample", .integers([8]))
+		record("image_sample_format.exponent_bits_per_sample", .integers([0]))
 		record("frame.encoding", .integers([0]))
 		record("frame.groups", .integers([Int64(dim.groupCount)]))
 		record("frame.dc_groups", .integers([Int64(dim.dcGroupCount)]))
 		record("frame.passes", .integers([1]))
-		record("frame.xyb", .integers([0]))
-		record("frame.qm_scales", .integers([2, 2]))
-		record("frame.loop_filter.gab", .integers([0]))
-		record("frame.loop_filter.epf_iters", .integers([0]))
+		record("frame_flags.flags", .integers([128]))
+		record("gaborish.enabled", .integers([0]))
+		record("epf.iterations", .integers([0]))
+		record("x_matrix_scale.value", .integers([2]))
+		record("b_matrix_scale.value", .integers([2]))
 		for c in 0..<3 {
 			record(
 				"coeff_order.dct8.c\(c)",

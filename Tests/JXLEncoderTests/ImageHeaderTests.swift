@@ -8,6 +8,26 @@ import Testing
 /// the 13-bit size selector (600) and 10 bytes when 9 bits suffice (200, 512).
 @Suite("ImageHeader")
 struct ImageHeaderTests {
+	struct HeaderBits {
+		let bytes: [UInt8]
+		var offset = 0
+
+		mutating func read(_ count: Int) -> Int {
+			var value = 0
+			for bit in 0..<count {
+				value |= Int((bytes[offset / 8] >> (offset % 8)) & 1) << bit
+				offset += 1
+			}
+			return value
+		}
+
+		mutating func size() -> (selector: Int, value: Int, bitCount: Int) {
+			let selector = read(2)
+			let bits = [9, 13, 18, 30][selector]
+			return (selector, read(bits) + 1, bits)
+		}
+	}
+
 	func header(
 		width: Int,
 		height: Int,
@@ -60,9 +80,45 @@ struct ImageHeaderTests {
 		}
 	}
 
-	@Test("size selector widens with dimension", arguments: [1, 512, 513, 8192, 8193, 262_144])
+	@Test(
+		"size selectors, header length and zero padding match each dimension",
+		arguments: [
+			1, 7, 8, 9, 15, 16, 17, 255, 256, 257, 512, 513, 8192, 8193, 262_144,
+			262_145, ImageHeader.maxDimension,
+		])
 	func sizeSelectors(dimension: Int) throws {
 		let bytes = try header(width: dimension, height: dimension)
 		#expect(bytes.starts(with: [0xFF, 0x0A]))
+		var bits = HeaderBits(bytes: bytes)
+		#expect(bits.read(16) == 0x0AFF)
+		#expect(bits.read(1) == 0)
+		let height = bits.size()
+		#expect(height.value == dimension)
+		let expectedSelector =
+			dimension <= 512 ? 0 : dimension <= 8192 ? 1 : dimension <= 262_144 ? 2 : 3
+		#expect(height.selector == expectedSelector)
+		#expect(bits.read(3) == 0)
+		let width = bits.size()
+		#expect(width.value == dimension)
+		#expect(width.selector == expectedSelector)
+		let contentBits = 57 + height.bitCount + width.bitCount
+		#expect(bytes.count == (contentBits + 7) / 8)
+		let usedInLastByte = contentBits % 8
+		if usedInLastByte != 0 {
+			let paddingMask = UInt8(truncatingIfNeeded: 0xFF << usedInLastByte)
+			#expect(bytes.last! & paddingMask == 0)
+		}
+		let asymmetric = try header(width: dimension, height: 513)
+		var asymmetricBits = HeaderBits(bytes: asymmetric)
+		_ = asymmetricBits.read(16)
+		_ = asymmetricBits.read(1)
+		let asymmetricHeight = asymmetricBits.size()
+		#expect(asymmetricHeight.value == 513)
+		#expect(asymmetricHeight.selector == 1)
+		_ = asymmetricBits.read(3)
+		let asymmetricWidth = asymmetricBits.size()
+		#expect(asymmetricWidth.value == dimension)
+		#expect(asymmetricWidth.selector == expectedSelector)
 	}
+
 }

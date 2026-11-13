@@ -61,8 +61,10 @@ struct StripePipelineTests {
 
 	@Test("padded stripes match full-libjxl whole-frame XYB and DCT")
 	func matchesReference() throws {
-		let input = try StageDump(fixture: "stripe_linear")
-		let expected = try StageDump(fixture: "stripe_dct")
+		let comparison = StageFixtureCase.stripeDCT
+		#expect(comparison.knownIssues.isEmpty)
+		let input = try StageDump(fixture: comparison.inputFixture)
+		let expected = try StageDump(fixture: comparison.fixture)
 
 		let dim = ImageDim(width: input.width, height: input.height)
 		let source = input.interleaved

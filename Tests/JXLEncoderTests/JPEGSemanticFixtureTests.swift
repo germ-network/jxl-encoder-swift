@@ -10,8 +10,10 @@ struct JPEGSemanticCorpusEntry: Sendable, CustomTestStringConvertible {
 
 	var testDescription: String { name }
 	static let categories = [
-		"frame", "coeff_order", "block_context", "context_map",
-		"quant_field", "ac_entropy", "ac_entropy_alphabet",
+		"image_header", "image_sample_format", "frame", "frame_flags",
+		"gaborish", "epf", "x_matrix_scale", "b_matrix_scale", "coeff_order",
+		"block_context", "context_map", "quant_field", "ac_entropy",
+		"ac_entropy_alphabet",
 	]
 	var applicableCategories: [String] {
 		name == "ac_entropy_jpeg_2x1"
@@ -492,7 +494,10 @@ struct JPEGSemanticFixtureTests {
 		"known JPEG issues name applicable categories and cannot verify inventory rows",
 	)
 	func jpegKnownIssuesWellFormed() throws {
-		#expect(JPEGSemanticCase.references.count == 79)
+		#expect(JPEGSemanticCase.references.count == 156)
+		#expect(
+			Set(JPEGSemanticCorpusEntry.categories)
+				== SemanticDump.decoderObservableCategories)
 		#expect(
 			JPEGSemanticCorpusEntry.all.allSatisfy {
 				Set($0.knownIssues.keys).isSubset(

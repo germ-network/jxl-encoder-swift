@@ -67,44 +67,6 @@ struct ACGroupTests {
 		#expect(firstDifference == nil, "first differing byte at \(firstDifference ?? -1)")
 	}
 
-	/// `WriteACGroup` has two outputs — the token stream and the DC image. The
-	/// bitstream test above covers only the first, so this gates the second.
-	@Test("DC image matches libjxl-tiny")
-	func dcImageMatchesReference() throws {
-		let input = try StageDump(fixture: "edge_linear")
-		let expected = try StageDump(fixture: "edge_dcextract")
-
-		let dim = ImageDim(width: input.width, height: input.height)
-		let rect = Rect(
-			x0: 0, y0: 0, maxWidth: Geometry.groupDim, maxHeight: Geometry.groupDim,
-			xEnd: input.width, yEnd: input.height)
-		let padded = PlaneBuffer.copyAndPad(
-			source: input.interleaved, sourceWidth: input.width, rect: rect)
-		let xyb = AdaptiveQuantPipeline.toXYB(padded)
-		let quantField = [UInt8](
-			repeating: Self.quant, count: dim.widthInBlocks * dim.heightInBlocks)
-
-		var quantDC = [[Int16]](
-			repeating: [Int16](
-				repeating: 0, count: dim.widthInBlocks * dim.heightInBlocks),
-			count: 3)
-		_ = ACGroupEncoder.computeGroup(
-			xyb: xyb, widthInBlocks: dim.widthInBlocks,
-			heightInBlocks: dim.heightInBlocks, quantField: quantField,
-			scale: Self.scale, scaleDC: Self.scaleDC,
-			xQuantMatrixScale: Self.xQuantMatrixScale,
-			quantDC: &quantDC)
-
-		for channel in 0..<3 {
-			var mismatches = 0
-			for i in 0..<quantDC[channel].count
-			where quantDC[channel][i] != Int16(expected.planes[channel][i]) {
-				mismatches += 1
-			}
-			#expect(mismatches == 0, "channel \(channel)")
-		}
-	}
-
 	/// 0.5 isn't a chosen constant — `AddVarDCTDC`'s scale terms cancel down to
 	/// `DCQuant(1) * InvDCQuant(2)`, which is exactly this value, applied at
 	/// the default color correlation `-e 4` always uses. See

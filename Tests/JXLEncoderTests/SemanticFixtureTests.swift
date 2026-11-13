@@ -32,43 +32,53 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 		SemanticCorpusEntry(
 			name: "edge", input: .linear(file: "edge_linear"), distance: 1,
 			knownIssues: [
-				"frame": ["GER-3387"], "block_context": ["GER-3387"],
-				"context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
+				"block_context": ["GER-3387"],
+				"context_map": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
 			name: "multigroup", input: .linear(file: "multigroup_linear"), distance: 1,
 			knownIssues: [
-				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
-				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
+				"coeff_order": ["GER-3386", "GER-3387"],
+				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"x_matrix_scale": ["GER-3387"], "frame_flags": ["GER-3387"],
+				"inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_512_d1", input: .srgb8(file: "flower_512"), distance: 1,
 			knownIssues: [
-				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
-				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
+				"coeff_order": ["GER-3386", "GER-3387"],
+				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"image_sample_format": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_512_d3", input: .srgb8(file: "flower_512"), distance: 3,
 			knownIssues: [
-				"coeff_order": ["GER-3386", "GER-3387"], "frame": ["GER-3387"],
-				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
+				"coeff_order": ["GER-3386", "GER-3387"],
+				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"image_sample_format": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"gaborish": ["GER-3387"], "frame_flags": ["GER-3387"],
+				"inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_1024", input: .srgb8(file: "flower_1024"), distance: 1,
 			knownIssues: [
-				"coeff_order": ["GER-3386", "GER-3387", "GER-3419"],
-				"frame": ["GER-3387"], "block_context": ["GER-3387"],
-				"context_map": ["GER-3387", "GER-3419"],
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
+				"coeff_order": ["GER-3386", "GER-3387", "GER-3419"],
+				"block_context": ["GER-3387"],
+				"context_map": ["GER-3387", "GER-3419"],
+				"image_sample_format": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
 	]
 }
@@ -84,6 +94,39 @@ extension SemanticCorpusEntry {
 				linear: StageDump(fixture: file), distance: distance)
 		}
 	}
+}
+
+struct SemanticPrimitiveCase: CustomTestStringConvertible, Sendable {
+	let fixture: String
+	let category: String
+	let knownIssues: Set<String>
+	let inputs: [Int32]
+	let channels: [Int]
+
+	var reference: String {
+		"Tests/JXLEncoderTests/Fixtures/semantic/\(fixture).sem#\(category)"
+	}
+	var testDescription: String { "\(fixture)#\(category)" }
+
+	static let quantBias = SemanticPrimitiveCase(
+		fixture: "quant_bias", category: "quant_bias", knownIssues: [],
+		inputs: [0, 1, -1, 2, -2, 3, -3, 20, -20, 255, -255, 1024, -1024],
+		channels: [0, 1, 2])
+	static let all = [quantBias]
+}
+
+struct StageFixtureCase: Sendable {
+	let inputFixture: String
+	let fixture: String
+	let knownIssues: Set<String>
+
+	var referencePath: String {
+		"Tests/JXLEncoderTests/Fixtures/\(fixture).dump"
+	}
+
+	static let stripeDCT = StageFixtureCase(
+		inputFixture: "stripe_linear", fixture: "stripe_dct", knownIssues: [])
+	static let all = [stripeDCT]
 }
 
 /// One corpus entry compared in one category: the unit of expected divergence.
@@ -107,12 +150,16 @@ struct SemanticCase: CustomTestStringConvertible, Sendable {
 	/// `<fixture path>#<category>` for every case, the form an inventory
 	/// `fixture` reference takes. A reference outside this set is compared by
 	/// no test.
-	static var references: Set<String> {
+	static var frameReferences: Set<String> {
 		Set(
 			all.map {
 				"Tests/JXLEncoderTests/Fixtures/semantic/" + $0.entry.name + ".sem#"
 					+ $0.category
 			})
+	}
+
+	static var references: Set<String> {
+		frameReferences.union(SemanticPrimitiveCase.all.map(\.reference))
 	}
 
 	/// The subset of `references` whose case runs under a known issue; such a
@@ -122,7 +169,11 @@ struct SemanticCase: CustomTestStringConvertible, Sendable {
 			all.filter { !$0.knownIssues.isEmpty }.map {
 				"Tests/JXLEncoderTests/Fixtures/semantic/" + $0.entry.name + ".sem#"
 					+ $0.category
-			})
+			}
+		)
+		.union(
+			SemanticPrimitiveCase.all.filter { !$0.knownIssues.isEmpty }.map(
+				\.reference))
 	}
 }
 
@@ -133,14 +184,6 @@ enum SemanticFixtureComparison {
 		actual.restricted(to: [category]).differences(
 			from: reference.restricted(to: [category]))
 	}
-
-}
-
-/// Stage fixtures (`Fixtures/*.dump`) whose consuming test runs under
-/// `withKnownIssue`, by fixture path, with the issue. Kept next to the
-/// wrappers it describes; an inventory row can't cite these as verification.
-enum StageFixtureKnownIssues {
-	static let byFixture: [String: String] = [:]
 }
 
 /// Reads an 8-bit binary PPM; Foundation-only so it runs on Linux CI.
@@ -228,29 +271,30 @@ struct SemanticFixtureTests {
 				let dim = ImageDim(width: input.width, height: input.height)
 				let groupSize = Geometry.groupDimInBlocks
 				for group in 0..<dim.groupCount {
-					let x0 = group % dim.widthInGroups * groupSize
-					let y0 = group / dim.widthInGroups * groupSize
+					let groupX = group % dim.widthInGroups
+					let groupY = group / dim.widthInGroups
+					let x0 = groupX * groupSize
+					let y0 = groupY * groupSize
 					let width = min(groupSize, dim.widthInBlocks - x0)
-					let blockCount: Int = decisions.quantFields[group].count
-					var field = [UInt8]()
-					field.reserveCapacity(blockCount)
-					for localIndex in 0..<blockCount {
-						let localY: Int = localIndex / width
-						let localX: Int = localIndex % width
-						let absoluteY: Int = y0 + localY
-						let absoluteX: Int = x0 + localX
-						let rasterIndex: Int =
-							absoluteY * dim.widthInBlocks + absoluteX
-						let rawValue: Int = 1 + rasterIndex % 251
-						field.append(UInt8(rawValue))
+					let source = decisions.quantFields[group]
+					var values: [UInt8] = []
+					values.reserveCapacity(source.count)
+					for localIndex in source.indices {
+						let localY = localIndex / width
+						let localX = localIndex % width
+						let globalIndex =
+							(y0 + localY) * dim.widthInBlocks + x0
+							+ localX
+						values.append(UInt8(1 + globalIndex % 251))
 					}
-					decisions.quantFields[group] = field
+					decisions.quantFields[group] = values
 				}
 				let expected = (0..<(dim.widthInBlocks * dim.heightInBlocks)).map {
 					Int64(1 + $0 % 251)
 				}
-				let dump = try SemanticDump(swiftDecisions: decisions)
-				#expect(dump.fields["quant_field.raw"] == .integers(expected))
+				#expect(
+					try SemanticDump(swiftDecisions: decisions).fields[
+						"quant_field.raw"] == .integers(expected))
 			}
 		}
 	}
@@ -270,8 +314,13 @@ struct SemanticFixtureTests {
 	@Test("every known issue names an emitted category and an accepted issue")
 	func knownIssuesWellFormed() throws {
 		#expect(Set(SemanticCorpusEntry.all.map(\.name)).count == 5)
-		#expect(SemanticCase.all.count == 35)
-		#expect(SemanticCase.references.count == 35)
+		#expect(
+			SemanticCase.all.count == SemanticCorpusEntry.all.count
+				* SemanticDump.swiftEmittedCategories.count)
+		#expect(SemanticCase.frameReferences.count == SemanticCase.all.count)
+		#expect(
+			SemanticCase.references.count
+				== SemanticCase.all.count + SemanticPrimitiveCase.all.count)
 		for entry in SemanticCorpusEntry.all {
 			for (category, issues) in entry.knownIssues {
 				#expect(SemanticDump.swiftEmittedCategories.contains(category))
@@ -283,13 +332,24 @@ struct SemanticFixtureTests {
 						]))
 			}
 		}
+		for comparison in SemanticPrimitiveCase.all {
+			let reference = try SemanticDump(fixture: comparison.fixture)
+			#expect(!reference.restricted(to: [comparison.category]).fields.isEmpty)
+			#expect(
+				comparison.knownIssues.isSubset(of: [
+					"GER-3386", "GER-3387", "GER-3388", "GER-3419",
+				]))
+		}
 		#expect(
 			SemanticCase.knownIssueReferences
 				== Set(
 					SemanticCase.all.filter { !$0.knownIssues.isEmpty }.map {
 						"Tests/JXLEncoderTests/Fixtures/semantic/"
 							+ $0.entry.name + ".sem#" + $0.category
-					}))
+					}
+				).union(
+					SemanticPrimitiveCase.all.filter { !$0.knownIssues.isEmpty }
+						.map(\.reference)))
 	}
 
 	@Test(
@@ -316,8 +376,7 @@ struct SemanticFixtureTests {
 			semanticCase.category
 		])
 		#expect(!actual.fields.isEmpty && !reference.fields.isEmpty)
-		let differences = SemanticFixtureComparison.differences(
-			actual: actual, reference: reference, category: semanticCase.category)
+		let differences = actual.differences(from: reference)
 		if semanticCase.knownIssues.isEmpty {
 			#expect(
 				differences.isEmpty,
@@ -382,7 +441,9 @@ struct SemanticFixtureTests {
 		let mutationOnlyDifferences = SemanticFixtureComparison.differences(
 			actual: entropyMutation, reference: actual, category: "ac_entropy")
 		#expect(
-			mutationOnlyDifferences.map(\.field) == ["ac_entropy.ans.frequencies"])
+			mutationOnlyDifferences.map(\.field) == [
+				"ac_entropy.ans.frequencies"
+			])
 	}
 }
 
@@ -488,9 +549,10 @@ struct SemanticMutationTests {
 	func flippedContextMapEntryCaught() throws {
 		let pair = try Self.encodings(contextFlip: true)
 		#expect(pair.actual.codestream != pair.baseline.codestream)
-		let differences = try SemanticDump(swiftDecisions: pair.actual.decisions)
-			.differences(
-				from: SemanticDump(swiftDecisions: pair.baseline.decisions))
+		let differences = try SemanticDump(
+			swiftDecisions: pair.actual.decisions
+		).differences(
+			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
 		#expect(differences.map(\.field) == ["context_map.ac"])
 		#expect(differences.first?.kind == pair.expected)
 	}
@@ -501,9 +563,10 @@ struct SemanticMutationTests {
 	func swappedCoeffOrderCaught() throws {
 		let pair = try Self.encodings(contextFlip: false)
 		#expect(pair.actual.codestream != pair.baseline.codestream)
-		let differences = try SemanticDump(swiftDecisions: pair.actual.decisions)
-			.differences(
-				from: SemanticDump(swiftDecisions: pair.baseline.decisions))
+		let differences = try SemanticDump(
+			swiftDecisions: pair.actual.decisions
+		).differences(
+			from: SemanticDump(swiftDecisions: pair.baseline.decisions))
 		#expect(differences.map(\.field) == [pair.field])
 		#expect(differences.first?.kind == pair.expected)
 	}
