@@ -1,0 +1,9 @@
+jxl-semantic-dump 1
+entropy.coefficient_sampling.blocks i 2 33 32
+entropy.coefficient_sampling.group_count i 1 2
+entropy.coefficient_sampling.order i 64 0 16 9 2 3 10 17 24 32 25 18 11 4 5 12 19 26 33 40 48 41 34 27 20 13 6 7 14 21 28 35 42 49 56 57 50 43 36 29 22 15 23 30 37 44 51 58 59 52 45 38 31 39 46 53 60 61 54 47 55 62 63 8 1
+entropy.coefficient_sampling.rejected_blocks i 1 512
+entropy.coefficient_sampling.selected_blocks i 1 544
+entropy.coefficient_sampling.selected_counts i 2 544 543
+entropy.coefficient_sampling.zero_false i 1 101187
+entropy.coefficient_sampling.zero_true i 1 3261

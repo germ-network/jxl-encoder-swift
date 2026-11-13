@@ -4,6 +4,14 @@ import Testing
 
 @Suite("Entropy reference contracts")
 struct EntropyReferenceTests {
+	private func integers(_ dump: SemanticDump, _ field: String) throws -> [Int64] {
+		guard case .integers(let values)? = dump.fields[field] else {
+			throw SemanticDumpError.malformedEntropyFixture(
+				name: "coefficient", field: field)
+		}
+		return values
+	}
+
 	@Test
 	func normalizedTablesAndPrecisionMatchReference() throws {
 		for (name, knownDifferences) in [
@@ -839,28 +847,131 @@ struct EntropyReferenceTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func sampledCoefficientStatisticsMatchReference() throws {
-		Issue.record(
-			"Observed coefficient statistics preserve group-boundary sampling behavior."
-		)
+		let fixture = try EntropyReferenceFixture.load(
+			"coefficient_sampled_group_boundary")
+		#expect(
+			fixture.expected.fields["entropy.coefficient_sampling.blocks"]
+				== .integers([33, 32]))
+		#expect(
+			fixture.expected.fields["entropy.coefficient_sampling.group_count"]
+				== .integers([2]))
+		#expect(
+			fixture.expected.fields["entropy.coefficient_sampling.selected_blocks"]
+				== .integers([544]))
+		#expect(
+			fixture.expected.fields["entropy.coefficient_sampling.rejected_blocks"]
+				== .integers([512]))
+		#expect(
+			fixture.expected.fields["entropy.coefficient_sampling.selected_counts"]
+				== .integers([544, 543]))
+		let selectedCounts = try integers(
+			fixture.expected, "entropy.coefficient_sampling.selected_counts")
+		var counts = [Int64](repeating: 0, count: DCT.blockSize)
+		counts[1] = selectedCounts[0]
+		counts[8] = selectedCounts[1]
+		let swiftOrder = SwiftEntropySemanticEncoding.coefficientOrder(
+			counts: counts)
+		#expect(
+			swiftOrder.fields["entropy.coefficient_order.order"]
+				== fixture.expected.fields["entropy.coefficient_sampling.order"])
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func coefficientSortKeysMatchReferenceBelowRoundingBoundary() throws {
-		Issue.record("Counts below 2^22 preserve reference ordering at bucket transitions.")
+		let fixture = try EntropyReferenceFixture.load("coefficient_sort_bounded")
+		let counts = try integers(fixture.input, "input.coefficient_order.counts")
+		let actual = SwiftEntropySemanticEncoding.coefficientOrder(counts: counts)
+		#expect(
+			actual.fields["entropy.coefficient_order.order"]
+				== fixture.expected.fields[
+					"entropy.coefficient_order.reference_order"])
+		#expect(
+			actual.fields["entropy.coefficient_order.counts"]
+				== fixture.expected.fields["entropy.coefficient_order.counts"])
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func coefficientSortKeysExposeRoundingBoundaryDivergence() throws {
-		Issue.record(
-			"The observed coefficient boundary retains its isolated GER-3386 divergence."
-		)
+		let fixture = try EntropyReferenceFixture.load("coefficient_sort_boundary")
+		let counts = try integers(fixture.input, "input.coefficient_order.counts")
+		let actual = SwiftEntropySemanticEncoding.coefficientOrder(counts: counts)
+		let swiftOrder = try integers(actual, "entropy.coefficient_order.order")
+		let sourceOrder = try integers(
+			fixture.expected,
+			"entropy.coefficient_order.reference_order")
+		#expect(sourceOrder.suffix(2) == [1, 8])
+		#expect(swiftOrder.suffix(2) == [8, 1])
+		#expect(swiftOrder.dropLast(2) == sourceOrder.dropLast(2))
+		#expect(
+			fixture.expected.fields["entropy.coefficient_order.sampled_counts"]
+				== .integers([4_194_312, 4_194_311]))
+		#expect(
+			fixture.expected.fields["entropy.coefficient_order.sampled_order"]
+				== fixture.expected.fields[
+					"entropy.coefficient_order.reference_order"])
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func naturalDCT8OrderMatchesReference() throws {
-		Issue.record("The natural DCT8 order equals the pinned upstream order.")
+		let fixture = try EntropyReferenceFixture.load("coefficient_natural_dct8")
+		#expect(
+			fixture.expected.fields["entropy.coefficient_natural.order"]
+				== .integers(CoeffOrder.natural.map(Int64.init)))
+	}
+
+	@Test
+	func coefficientFixtureShapeRejectsInconsistentObservations() throws {
+		let sampled = try EntropyReferenceFixture.load(
+			"coefficient_sampled_group_boundary")
+		let wrongSelected = try SemanticDump(
+			parsing: sampled.expected.serialized.replacingOccurrences(
+				of: "entropy.coefficient_sampling.selected_blocks i 1 544",
+				with: "entropy.coefficient_sampling.selected_blocks i 1 545"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "coefficient_sampled_group_boundary", input: sampled.input,
+				expected: wrongSelected)
+		}
+		let wrongSpeed = try SemanticDump(
+			parsing: sampled.input.serialized.replacingOccurrences(
+				of: "input.coefficient_sampling.speed_tier i 1 6",
+				with: "input.coefficient_sampling.speed_tier i 1 5"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "coefficient_sampled_group_boundary", input: wrongSpeed,
+				expected: sampled.expected)
+		}
+		let wrongPattern = try SemanticDump(
+			parsing: sampled.input.serialized.replacingOccurrences(
+				of: "input.coefficient_sampling.zero_positions i 2 1 8",
+				with: "input.coefficient_sampling.zero_positions i 2 1 9"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "coefficient_sampled_group_boundary", input: wrongPattern,
+				expected: sampled.expected)
+		}
+		let overflowingDimensions = try SemanticDump(
+			parsing: sampled.input.serialized.replacingOccurrences(
+				of: "input.coefficient_sampling.blocks i 2 33 32",
+				with: "input.coefficient_sampling.blocks i 2 \(Int64.max) 32"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "coefficient_sampled_group_boundary",
+				input: overflowingDimensions, expected: sampled.expected)
+		}
+
+		let boundary = try EntropyReferenceFixture.load("coefficient_sort_boundary")
+		let wrongCount = try SemanticDump(
+			parsing: boundary.input.serialized.replacingOccurrences(
+				of: "input.coefficient_order.counts i 64 0 4194312",
+				with: "input.coefficient_order.counts i 64 0 4194311"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "coefficient_sort_boundary", input: wrongCount,
+				expected: boundary.expected)
+		}
 	}
 
 	@Test(.disabled("Awaiting entropy reference implementation"))

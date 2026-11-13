@@ -45,6 +45,112 @@ generate() {
 		"$name" "$expected_hash" "$name" "$pin" "$strategy" "$log_alpha" >> "$tmp"
 }
 
+generate_coefficient_natural() {
+	local name=coefficient_natural_dct8
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.coefficient_natural.strategy i 1 0\n'
+	} > "$input"
+	"$harness" coefficient-order natural > "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tDCT8 strategy=0\t-\tDCT8 natural-order API input\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_coeff_order.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tAcStrategy::ComputeNaturalCoeffOrder; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
+generate_coefficient_sample() {
+	local name=coefficient_sampled_group_boundary width=33 height=32
+	local speed=6 zero0=1 zero1=8 exception_group=0 exception_slot=0 exception_position=8
+	local input="$out/$name.input.sem" raw="$tmp.coeff"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.coefficient_sampling.blocks i 2 %s %s\n' "$width" "$height"
+		printf 'input.coefficient_sampling.speed_tier i 1 %s\n' "$speed"
+		printf 'input.coefficient_sampling.zero_positions i 2 %s %s\n' "$zero0" "$zero1"
+		printf 'input.coefficient_sampling.first_exception i 3 %s %s %s\n' \
+			"$exception_group" "$exception_slot" "$exception_position"
+	} > "$input"
+	"$harness" coefficient-order sample "$width" "$height" "$speed" \
+		"$zero0" "$zero1" "$exception_group" "$exception_slot" \
+		"$exception_position" > "$raw"
+	local observed groups rejected selected zero_true zero_false count1 count8
+	observed="$(awk -F '\t' -v fixture="$name" '$1 == fixture { print $4, $5, $6, $7, $8, $9, $10 }' \
+		"$root/Reference/coefficient_sampling_observations.tsv")"
+	read -r groups rejected selected zero_true zero_false count1 count8 <<< "$observed"
+	{
+		head -n 1 "$raw"
+		tail -n +2 "$raw"
+		printf 'entropy.coefficient_sampling.rejected_blocks i 1 %s\n' "$rejected"
+		printf 'entropy.coefficient_sampling.selected_blocks i 1 %s\n' "$selected"
+		printf 'entropy.coefficient_sampling.selected_counts i 2 %s %s\n' "$count1" "$count8"
+		printf 'entropy.coefficient_sampling.zero_false i 1 %s\n' "$zero_false"
+		printf 'entropy.coefficient_sampling.zero_true i 1 %s\n' "$zero_true"
+	} > "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\t33x32 DCT8 blocks; zeros at positions 1,8; group0/block0/position8 exception\t-\tSpeedTier::kCheetah=6; 2 groups\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_coeff_order.cc,Reference/coefficient_sampling_observations.tsv\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tComputeCoeffOrder and unchanged-source LLVM coverage counters; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
+generate_coefficient_counts() {
+	local name="$1"; shift
+	local input="$out/$name.input.sem" counts=() max_count=0 value csv raw="$tmp.coeff"
+	local sample_width=8392231 sample_height=1 sample_speed=6
+	local zero0=1 zero1=8 exception_group=0 exception_slot=0 exception_position=8
+	counts=("$@")
+	for value in "${counts[@]}"; do ((value > max_count)) && max_count="$value"; done
+	csv="$(IFS=,; printf '%s' "${counts[*]}")"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.coefficient_order.blocks i 1 %s\n' "$max_count"
+		printf 'input.coefficient_order.counts i %s' "${#counts[@]}"
+		printf ' %s' "${counts[@]}"
+		printf '\n'
+		if [[ "$name" == coefficient_sort_boundary ]]; then
+			printf 'input.coefficient_sampling.blocks i 2 %s %s\n' "$sample_width" "$sample_height"
+			printf 'input.coefficient_sampling.speed_tier i 1 %s\n' "$sample_speed"
+			printf 'input.coefficient_sampling.zero_positions i 2 %s %s\n' "$zero0" "$zero1"
+			printf 'input.coefficient_sampling.first_exception i 3 %s %s %s\n' \
+				"$exception_group" "$exception_slot" "$exception_position"
+		fi
+	} > "$input"
+	"$harness" coefficient-order counts "$max_count" "$csv" > "$raw"
+	if [[ "$name" == coefficient_sort_boundary ]]; then
+		local sampled_raw="$tmp.coeff.sampled" sampled_order observed
+		"$harness" coefficient-order sample "$sample_width" "$sample_height" \
+			"$sample_speed" "$zero0" "$zero1" "$exception_group" \
+			"$exception_slot" "$exception_position" > "$sampled_raw"
+		sampled_order="$(sed -n 's/^entropy.coefficient_sampling.order i 64 //p' "$sampled_raw")"
+		observed="$(awk -F '\t' -v fixture="$name" '$1 == fixture { print $6, $9, $10 }' \
+			"$root/Reference/coefficient_sampling_observations.tsv")"
+		local selected count1 count8
+		read -r selected count1 count8 <<< "$observed"
+		{
+			head -n 1 "$raw"
+			tail -n +2 "$raw"
+			printf 'entropy.coefficient_order.sampled_blocks i 1 %s\n' "$selected"
+			printf 'entropy.coefficient_order.sampled_counts i 2 %s %s\n' "$count1" "$count8"
+			printf 'entropy.coefficient_order.sampled_order i 64 %s\n' "$sampled_order"
+		} > "$out/$name.expected.sem"
+	else
+		cp "$raw" "$out/$name.expected.sem"
+	fi
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline raster zero-count inputs\t-\tactual source count-to-order input; block count=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" "$max_count" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_coeff_order.cc,Reference/coefficient_sampling_observations.tsv\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tComputeCoeffOrder SpeedTier::kWombat over prescribed zero counts; sampled boundary adds unchanged-source LLVM coverage; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
 generate_cluster() {
 	local name="$1" mode="$2" limit="$3"; shift 3
 	local input="$out/$name.input.sem" encoded_mode
@@ -362,6 +468,27 @@ done
 default_context_map=(0 1 2 2 3 3 4 5 6 6 6 6 6 7 8 9 9 10 11 12 13 14 14 14 14 14 7 8 9 9 10 11 12 13 14 14 14 14 14)
 generate_ac_tokens ac_tokens_tiny_map 4 "${tiny_context_map[@]}"
 generate_ac_tokens ac_tokens_default_map 15 "${default_context_map[@]}"
+
+generate_coefficient_natural
+generate_coefficient_sample
+bounded_counts=()
+for ((index = 0; index < 64; index++)); do bounded_counts+=(0); done
+bounded_counts[1]=$(((1 << 22) - 1))
+bounded_counts[8]=$(((1 << 22) - 2))
+bounded_counts[16]=7
+bounded_counts[9]=8
+bounded_counts[2]=15
+bounded_counts[3]=16
+bounded_counts[10]=23
+bounded_counts[17]=24
+bounded_counts[24]=31
+bounded_counts[25]=32
+generate_coefficient_counts coefficient_sort_bounded "${bounded_counts[@]}"
+boundary_counts=()
+for ((index = 0; index < 64; index++)); do boundary_counts+=(0); done
+boundary_counts[1]=4194312
+boundary_counts[8]=4194311
+generate_coefficient_counts coefficient_sort_boundary "${boundary_counts[@]}"
 
 awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$tmp" | sort -t $'\t' -k1,1 > "$sorted_entropy"

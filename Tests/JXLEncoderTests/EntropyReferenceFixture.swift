@@ -599,6 +599,141 @@ struct EntropyReferenceFixture {
 					}
 				}
 			}
+		} else if name == "coefficient_sampled_group_boundary" {
+			inputFields = [
+				"input.coefficient_sampling.blocks",
+				"input.coefficient_sampling.speed_tier",
+				"input.coefficient_sampling.zero_positions",
+				"input.coefficient_sampling.first_exception",
+			]
+			expectedFields = [
+				"entropy.coefficient_sampling.blocks",
+				"entropy.coefficient_sampling.group_count",
+				"entropy.coefficient_sampling.order",
+				"entropy.coefficient_sampling.rejected_blocks",
+				"entropy.coefficient_sampling.selected_blocks",
+				"entropy.coefficient_sampling.selected_counts",
+				"entropy.coefficient_sampling.zero_false",
+				"entropy.coefficient_sampling.zero_true",
+			]
+			let blocks = try integers(input, "input.coefficient_sampling.blocks")
+			let speed = try integers(input, "input.coefficient_sampling.speed_tier")
+			let zeros = try integers(input, "input.coefficient_sampling.zero_positions")
+			let exception = try integers(
+				input, "input.coefficient_sampling.first_exception")
+			let outputBlocks = try integers(
+				expected, "entropy.coefficient_sampling.blocks")
+			let groups = try integers(
+				expected, "entropy.coefficient_sampling.group_count")
+			let order = try integers(expected, "entropy.coefficient_sampling.order")
+			let rejected = try integers(
+				expected, "entropy.coefficient_sampling.rejected_blocks")
+			let selected = try integers(
+				expected, "entropy.coefficient_sampling.selected_blocks")
+			let selectedCounts = try integers(
+				expected, "entropy.coefficient_sampling.selected_counts")
+			let zeroFalse = try integers(
+				expected, "entropy.coefficient_sampling.zero_false")
+			let zeroTrue = try integers(
+				expected, "entropy.coefficient_sampling.zero_true")
+			guard blocks == [33, 32] else {
+				throw SemanticDumpError.unsupportedEntropyFixture(name)
+			}
+			let groupCount = ((blocks[0] + 31) / 32) * ((blocks[1] + 31) / 32)
+			guard speed == [6], zeros == [1, 8],
+				exception == [0, 0, 8], outputBlocks == blocks,
+				groups == [groupCount], order.count == 64,
+				Set(order) == Set((0..<64).map(Int64.init)),
+				rejected == [512], selected == [544], selectedCounts == [544, 543],
+				zeroTrue == [3261], zeroFalse == [101187],
+				selected[0] + rejected[0] == blocks[0] * blocks[1],
+				zeroTrue[0] + zeroFalse[0] == selected[0] * 3 * 64,
+				zeroTrue[0] == 3 * (selectedCounts[0] + selectedCounts[1])
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "coefficient_natural_dct8" {
+			inputFields = ["input.coefficient_natural.strategy"]
+			expectedFields = ["entropy.coefficient_natural.order"]
+			let strategy = try integers(input, "input.coefficient_natural.strategy")
+			let order = try integers(expected, "entropy.coefficient_natural.order")
+			guard strategy == [0], order.count == 64,
+				Set(order) == Set((0..<64).map(Int64.init))
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name.hasPrefix("coefficient_sort_") {
+			guard
+				["coefficient_sort_bounded", "coefficient_sort_boundary"].contains(
+					name)
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			var requiredInputFields: Set<String> = [
+				"input.coefficient_order.blocks", "input.coefficient_order.counts",
+			]
+			var requiredExpectedFields: Set<String> = [
+				"entropy.coefficient_order.counts",
+				"entropy.coefficient_order.reference_order",
+			]
+			if name == "coefficient_sort_boundary" {
+				requiredInputFields.formUnion([
+					"input.coefficient_sampling.blocks",
+					"input.coefficient_sampling.speed_tier",
+					"input.coefficient_sampling.zero_positions",
+					"input.coefficient_sampling.first_exception",
+				])
+				requiredExpectedFields.formUnion([
+					"entropy.coefficient_order.sampled_blocks",
+					"entropy.coefficient_order.sampled_counts",
+					"entropy.coefficient_order.sampled_order",
+				])
+			}
+			inputFields = requiredInputFields
+			expectedFields = requiredExpectedFields
+			let blocks = try integers(input, "input.coefficient_order.blocks")
+			let counts = try integers(input, "input.coefficient_order.counts")
+			let sampleDimensions =
+				name == "coefficient_sort_boundary"
+				? try integers(input, "input.coefficient_sampling.blocks")
+				: nil
+			let sampleSpeed =
+				name == "coefficient_sort_boundary"
+				? try integers(input, "input.coefficient_sampling.speed_tier") : nil
+			let sampleZeros =
+				name == "coefficient_sort_boundary"
+				? try integers(input, "input.coefficient_sampling.zero_positions")
+				: nil
+			let sampleException =
+				name == "coefficient_sort_boundary"
+				? try integers(input, "input.coefficient_sampling.first_exception")
+				: nil
+			let outputCounts = try integers(
+				expected, "entropy.coefficient_order.counts")
+			let order = try integers(
+				expected, "entropy.coefficient_order.reference_order")
+			let maximum: Int64 =
+				name == "coefficient_sort_boundary"
+				? 4_194_312 : (1 << 22) - 1
+			guard counts.count == 64, counts.allSatisfy({ (0...maximum).contains($0) }),
+				blocks == [max(1, counts.max() ?? 0)], outputCounts == counts,
+				order.count == 64, Set(order) == Set((0..<64).map(Int64.init))
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			if name == "coefficient_sort_bounded" {
+				guard
+					[7, 8, 15, 16, 23, 24, 31, 32, maximum].allSatisfy(
+						{ counts.contains($0) })
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			} else if name == "coefficient_sort_boundary" {
+				let observedBlocks = try integers(
+					expected, "entropy.coefficient_order.sampled_blocks")
+				let observedCounts = try integers(
+					expected, "entropy.coefficient_order.sampled_counts")
+				let sampledOrder = try integers(
+					expected, "entropy.coefficient_order.sampled_order")
+				guard counts[1] == 4_194_312, counts[8] == 4_194_311,
+					sampleDimensions == [8_392_231, 1], sampleSpeed == [6],
+					sampleZeros == [1, 8], sampleException == [0, 0, 8],
+					order.suffix(2) == [1, 8],
+					observedBlocks == [4_194_312],
+					observedCounts == [4_194_312, 4_194_311],
+					sampledOrder == order
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
 		} else {
 			throw SemanticDumpError.unsupportedEntropyFixture(name)
 		}

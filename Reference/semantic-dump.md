@@ -349,3 +349,16 @@ The `quantized_ac` stage fixture is not decoded from a codestream. It exercises
 a bounded, explicit fixed-parameter input to the pinned upstream primitive; it
 does not establish conversion safety for unrestricted floats or equality with
 ordinary-image e4 coefficients.
+
+The `coefficient_sampled_group_boundary` fixture records actual upstream
+`ComputeCoeffOrder` output for a 33×32 DCT8-block image spanning two groups.
+Its accepted/rejected block and per-position zero counters come from coverage
+of the unchanged upstream sampling source. The `coefficient_sort_bounded`
+fixture calls the same upstream API without sampling for explicit counts from
+bucket transitions through `2^22 - 1`; Swift's direct count-to-order helper
+must match its order. `coefficient_sort_boundary` preserves the separate
+synthetic sampled witness at and above `2^22`: the sampled source order and the
+unsampled source order agree, while Swift's `Double` sort keys reverse the
+final two positions. `coefficient_natural_dct8` records the upstream natural
+order primitive. The boundary does not establish end-to-end encoder
+reachability.
