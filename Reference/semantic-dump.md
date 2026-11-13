@@ -250,11 +250,24 @@ fields are `f` (float32) with strict zero-ULP comparisons. The supported first
 frame is single-pass VarDCT,
 with DCT8 only and no preview, as produced by the corpus's e4 pixel path.
 Other frame configurations are rejected rather than partially dumped.
+The layout category retains the actual `FrameDecoder` TOC mapping and reads
+selector bits only from each identified AC section start after decoding the
+AC-global histogram count. It does not infer selectors from image group count.
 
 | category | field suffix | layout |
 |---|---|---|
 | `ac_entropy` | `kind`, `table_count`, `uint_config`, `lz77_enabled`, `ans.*` or `prefix.*` | decoded AC code-table type and transmitted table contents; ANS frequencies or prefix depths, in table order |
 | `ac_entropy_alphabet` | `ans_log_alpha_size` | one ANS alphabet precision value, empty for prefix coding |
+| `entropy_layout` | `group_grid`, `group_count`, `dc_group_count`, `pass_count`, `histogram_set_count`, `selector_bits` | decoded frame dimensions and actual AC histogram selection state |
+| `entropy_layout` | `section_ids`, `section_indices`, `section_offsets`, `section_sizes` | TOC logical IDs and physical stream order, with offsets/sizes in codestream bytes |
+| `entropy_layout` | `ac_selectors` | repeated pass, group, logical section ID, selector tuples read from each AC section |
+
+The opt-in `jxl-harness entropy-verify-streams <expected.sem>` consumer reads
+the shared serialized code with pinned `DecodeHistograms`, then creates a fresh
+upstream symbol reader for every prescribed stream in both visitation orders.
+Its receipt binds the exact code and stream bytes/bit counts and decoded token count,
+reader consumption, ANS final-state checks, and whether the stream selected
+ANS or prefix coding.
 | `frame` | `encoding` | scalar; 0 = VarDCT |
 | `frame` | `groups`, `dc_groups`, `passes` | one scalar each |
 | `image_header` | `size` | width, height in pixels |

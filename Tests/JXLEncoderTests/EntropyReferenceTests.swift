@@ -1,9 +1,23 @@
+import Foundation
 import Testing
 
 @testable import JXLEncoder
 
 @Suite("Entropy reference contracts")
 struct EntropyReferenceTests {
+	private func exportCurrentStreamDump(_ dump: SemanticDump, name: String) throws {
+		guard
+			let path = ProcessInfo.processInfo.environment[
+				"JXL_ENTROPY_STREAM_EXPORT_DIR"]
+		else { return }
+		let directory = URL(fileURLWithPath: path, isDirectory: true)
+		try FileManager.default.createDirectory(
+			at: directory, withIntermediateDirectories: true)
+		try dump.serialized.write(
+			to: directory.appendingPathComponent(name + ".current.sem"),
+			atomically: true, encoding: .utf8)
+	}
+
 	private func integers(_ dump: SemanticDump, _ field: String) throws -> [Int64] {
 		guard case .integers(let values)? = dump.fields[field] else {
 			throw SemanticDumpError.malformedEntropyFixture(
@@ -974,22 +988,167 @@ struct EntropyReferenceTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func smallFrameSharesOneACCodeAcrossIndependentGroupStreams() throws {
-		Issue.record(
-			"Small multigroup frames share one code across independently decodable streams."
-		)
+		let fixture = try EntropyReferenceFixture.load("stream_shared_ans")
+		guard
+			case .integers(let contextMap)? = fixture.input.fields[
+				"input.streams.context_map"],
+			case .integers(let logAlpha)? = fixture.input.fields[
+				"input.streams.log_alpha_size"],
+			case .integers(let frequencies)? = fixture.input.fields[
+				"input.streams.frequencies"],
+			case .integers(let lengths)? = fixture.input.fields[
+				"input.streams.lengths"],
+			case .integers(let tokenValues)? = fixture.input.fields[
+				"input.streams.tokens"]
+		else { throw SemanticDumpError.unimplemented }
+		var offset = 0
+		let streams = lengths.map { length in
+			let stream = (0..<Int(length)).map { _ -> Token in
+				defer { offset += 2 }
+				return Token(
+					context: UInt32(tokenValues[offset]),
+					value: UInt32(tokenValues[offset + 1]))
+			}
+			return stream
+		}
+		let info = ANSInfoTable.build(
+			distribution: frequencies.map(Int.init), alphabetSize: frequencies.count,
+			logAlphaSize: Int(logAlpha[0]))
+		let code = EntropyCode(
+			contextMap: contextMap.map(UInt8.init), prefixCodes: [],
+			ansInfoTables: [info])
+		let actual = SwiftEntropySemanticEncoding.tokenStreams(
+			tokens: streams, code: code)
+		try exportCurrentStreamDump(actual, name: "stream_shared_ans")
+		#expect(actual.differences(from: fixture.expected).isEmpty)
+		guard
+			let receiptURL = Bundle.module.url(
+				forResource: "stream_shared_ans.receipt", withExtension: "sem",
+				subdirectory: "Fixtures/entropy")
+		else { throw SemanticDumpError.fixtureNotFound("stream_shared_ans.receipt") }
+		let receipt = try SemanticDump(
+			parsing: String(contentsOf: receiptURL, encoding: .utf8))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.code_bit_count")
+				== integers(fixture.expected, "entropy.streams.code_bit_count"))
+		#expect(try integers(receipt, "entropy.stream_receipt.code_is_ans") == [1])
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.code_bytes")
+				== integers(fixture.expected, "entropy.streams.code_bytes"))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.stream_bit_counts")
+				== integers(fixture.expected, "entropy.streams.bit_counts"))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.stream_bytes")
+				== integers(fixture.expected, "entropy.streams.bytes"))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.order_passes") == [
+				0, 1, 1, 0,
+			])
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.readers") == [
+				32, 1, 32, 1, 32, 1, 32, 1,
+			])
+		#expect(try integers(receipt, "entropy.stream_receipt.code_bytes_consumed") == [34])
+		#expect(try integers(receipt, "entropy.stream_receipt.decoded_token_count") == [16])
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
+	func smallFrameSharesOnePrefixCodeAcrossIndependentGroupStreams() throws {
+		let fixture = try EntropyReferenceFixture.load("stream_shared_prefix")
+		guard
+			case .integers(let contextMap)? = fixture.input.fields[
+				"input.streams.context_map"],
+			case .integers(let lengths)? = fixture.input.fields[
+				"input.streams.lengths"],
+			case .integers(let tokenValues)? = fixture.input.fields[
+				"input.streams.tokens"]
+		else { throw SemanticDumpError.unimplemented }
+		var offset = 0
+		let streams = lengths.map { length in
+			(0..<Int(length)).map { _ -> Token in
+				defer { offset += 2 }
+				return Token(
+					context: UInt32(tokenValues[offset]),
+					value: UInt32(tokenValues[offset + 1]))
+			}
+		}
+		var histogram = Histogram()
+		for token in streams.flatMap({ $0 }) {
+			histogram.add(UintCoder.encode(token.value).token)
+		}
+		let prefix = HistogramCluster.buildPrefixCodes([histogram])
+		let code = EntropyCode(contextMap: contextMap.map(UInt8.init), prefixCodes: prefix)
+		let actual = SwiftEntropySemanticEncoding.tokenStreams(tokens: streams, code: code)
+		try exportCurrentStreamDump(actual, name: "stream_shared_prefix")
+		#expect(actual.differences(from: fixture.expected).isEmpty)
+		guard
+			let receiptURL = Bundle.module.url(
+				forResource: "stream_shared_prefix.receipt", withExtension: "sem",
+				subdirectory: "Fixtures/entropy")
+		else { throw SemanticDumpError.fixtureNotFound("stream_shared_prefix.receipt") }
+		let receipt = try SemanticDump(
+			parsing: String(contentsOf: receiptURL, encoding: .utf8))
+		#expect(try integers(receipt, "entropy.stream_receipt.code_is_ans") == [0])
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.code_bytes")
+				== integers(fixture.expected, "entropy.streams.code_bytes"))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.stream_bytes")
+				== integers(fixture.expected, "entropy.streams.bytes"))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.code_bit_count")
+				== integers(fixture.expected, "entropy.streams.code_bit_count"))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.stream_bit_counts")
+				== integers(fixture.expected, "entropy.streams.bit_counts"))
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.order_passes") == [
+				0, 1, 1, 0,
+			])
+		#expect(
+			try integers(receipt, "entropy.stream_receipt.readers") == [
+				8, 1, 8, 1, 8, 1, 8, 1,
+			])
+		#expect(try integers(receipt, "entropy.stream_receipt.code_bytes_consumed") == [25])
+		#expect(try integers(receipt, "entropy.stream_receipt.decoded_token_count") == [16])
+	}
+
+	@Test(.enabled(if: ProcessInfo.processInfo.environment["JXL_CROSSCHECK_DIR"] != nil))
 	func streamingLayoutMatchesReferenceAboveEightGroups() throws {
-		Issue.record(
-			"Eligible large reference frames expose their streaming histogram partition."
-		)
+		let directory = try #require(
+			ProcessInfo.processInfo.environment["JXL_CROSSCHECK_DIR"])
+		let layout = try SemanticDump(
+			parsing: String(
+				contentsOf: URL(
+					fileURLWithPath: directory
+				).appendingPathComponent(
+					"reference_2057x257.layout.sem"), encoding: .utf8))
+		#expect(try integers(layout, "entropy_layout.group_grid") == [9, 2])
+		#expect(try integers(layout, "entropy_layout.group_count") == [18])
+		#expect(try integers(layout, "entropy_layout.dc_group_count") == [2])
+		#expect(try integers(layout, "entropy_layout.histogram_set_count") == [2])
+		#expect(try integers(layout, "entropy_layout.selector_bits") == [1])
+		let selectors = try integers(layout, "entropy_layout.ac_selectors")
+		#expect(
+			stride(from: 1, to: selectors.count, by: 4).map { selectors[$0] }
+				== Array(0..<18).map(Int64.init))
+		#expect(
+			stride(from: 3, to: selectors.count, by: 4).map { selectors[$0] } == Array(
+				repeating: 0, count: 8) + [1] + Array(repeating: 0, count: 8) + [1])
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func entropyMutationIsReportedByItsExactField() throws {
-		Issue.record("An entropy mutation is reported only by its changed semantic field.")
+		let fixture = try EntropyReferenceFixture.load("stream_shared_ans")
+		let baseline = fixture.expected.serialized
+		let mutated = try SemanticDump(
+			parsing: baseline.replacingOccurrences(
+				of: "entropy.streams.bytes i 8 64 81 1 19 192 152 0 19",
+				with: "entropy.streams.bytes i 8 64 81 1 19 192 152 0 18"))
+		let differences = mutated.differences(from: fixture.expected)
+		#expect(differences.map(\.field) == ["entropy.streams.bytes"])
 	}
 }

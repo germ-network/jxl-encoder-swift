@@ -4,9 +4,11 @@
 #include <cstring>
 #include <utility>
 #include "lib/jxl/dec_frame.h"
+#include "lib/jxl/base/bits.h"
 #include "lib/jxl/headers.h"
 #include "lib/jxl/icc_codec.h"
 #include "lib/jxl/memory_manager_internal.h"
+#include "lib/jxl/toc.h"
 namespace harness {
 namespace {
 
@@ -79,6 +81,10 @@ bool ExtractCodestream(const std::vector<uint8_t>& input,
     return true;
   }
   if (fragments.empty()) return false;
+  std::sort(fragments.begin(), fragments.end(), [](const auto& left,
+                                                    const auto& right) {
+    return (left.first & 0x7FFFFFFFu) < (right.first & 0x7FFFFFFFu);
+  });
   bool final = false;
   for (size_t i = 0; i < fragments.size(); ++i) {
     const uint32_t index = fragments[i].first;
@@ -121,9 +127,94 @@ jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame) {
         frame->state->output_encoding_info.SetFromMetadata(frame->metadata));
   }
   jxl::ImageBundle image(&manager, &frame->metadata.m);
-  JXL_RETURN_IF_ERROR(jxl::DecodeFrame(frame->state.get(), nullptr, bytes.data()+offset, bytes.size()-offset, &frame->header, &image, frame->metadata));
+  jxl::FrameDecoder decoder(frame->state.get(), frame->metadata, nullptr,
+                            /*use_slow_rendering_pipeline=*/false);
+  jxl::BitReader reader(
+      jxl::Bytes(bytes.data() + offset, bytes.size() - offset));
+  jxl::Status frame_reader_closed = true;
+  size_t header_bytes = 0;
+  jxl::Status frame_header_result = [&]() -> jxl::Status {
+    jxl::BitReaderScopedCloser closer(reader, frame_reader_closed);
+    JXL_RETURN_IF_ERROR(
+        decoder.InitFrame(&reader, &image, /*is_preview=*/false));
+    JXL_RETURN_IF_ERROR(decoder.InitFrameOutput());
+    frame->header = decoder.GetFrameHeader();
+    JXL_RETURN_IF_ERROR(reader.AllReadsWithinBounds());
+    header_bytes = reader.TotalBitsConsumed() / jxl::kBitsPerByte;
+    return true;
+  }();
+  JXL_RETURN_IF_ERROR(frame_reader_closed);
+  JXL_RETURN_IF_ERROR(frame_header_result);
+
+  auto &layout = frame->entropy_layout;
+  const jxl::FrameDimensions dimensions = frame->header.ToFrameDimensions();
+  layout.groups_x = dimensions.xsize_groups;
+  layout.groups_y = dimensions.ysize_groups;
+  layout.num_groups = dimensions.num_groups;
+  layout.num_dc_groups = dimensions.num_dc_groups;
+  layout.num_passes = frame->header.passes.num_passes;
+  size_t position = header_bytes;
+  jxl::Status section_result = [&]() -> jxl::Status {
+    std::vector<std::unique_ptr<jxl::BitReader>> section_readers;
+    std::vector<std::unique_ptr<jxl::BitReaderScopedCloser>> section_closers;
+    std::vector<jxl::FrameDecoder::SectionInfo> section_info;
+    std::vector<jxl::FrameDecoder::SectionStatus> section_status;
+    const auto &toc = decoder.Toc();
+    section_readers.reserve(toc.size());
+    section_closers.reserve(toc.size());
+    section_info.reserve(toc.size());
+    for (size_t index = 0; index < toc.size(); ++index) {
+      const auto &entry = toc[index];
+      if (position > bytes.size() - offset ||
+          entry.size > bytes.size() - offset - position)
+        return false;
+      layout.sections.push_back(
+          LayoutSection{entry.id, index, offset + position, entry.size});
+      auto section_reader = jxl::make_unique<jxl::BitReader>(
+          jxl::Bytes(bytes.data() + offset + position, entry.size));
+      section_closers.emplace_back(jxl::make_unique<jxl::BitReaderScopedCloser>(
+          *section_reader, closed));
+      section_info.emplace_back(jxl::FrameDecoder::SectionInfo{
+          section_reader.get(), entry.id, index});
+      section_readers.emplace_back(std::move(section_reader));
+      position += entry.size;
+    }
+    section_status.resize(section_info.size());
+    JXL_RETURN_IF_ERROR(decoder.ProcessSections(
+        section_info.data(), section_info.size(), section_status.data()));
+    for (auto status : section_status) {
+      JXL_RETURN_IF_ERROR(status == jxl::FrameDecoder::kDone);
+    }
+    return true;
+  }();
+  JXL_RETURN_IF_ERROR(closed);
+  JXL_RETURN_IF_ERROR(section_result);
+  JXL_RETURN_IF_ERROR(decoder.FinalizeFrame());
+  layout.num_histograms = frame->state->shared->num_histograms;
+  layout.selector_bits = jxl::CeilLog2Nonzero(layout.num_histograms);
+  const size_t first_ac_id = 2 + layout.num_dc_groups;
+  for (const auto &section : layout.sections) {
+    if (section.id < first_ac_id)
+      continue;
+    const size_t ac_id = section.id - first_ac_id;
+    const size_t pass = ac_id / layout.num_groups;
+    const size_t group = ac_id % layout.num_groups;
+    if (pass >= layout.num_passes)
+      return false;
+    jxl::BitReader selector_reader(
+        jxl::Bytes(bytes.data() + section.offset, section.size));
+    const size_t value = layout.selector_bits == 0
+                             ? 0
+                             : selector_reader.ReadBits(layout.selector_bits);
+    const bool in_bounds = selector_reader.AllReadsWithinBounds();
+    const bool selector_closed = selector_reader.Close();
+    JXL_RETURN_IF_ERROR(in_bounds);
+    JXL_RETURN_IF_ERROR(selector_closed);
+    layout.selectors.push_back(LayoutSelector{pass, group, section.id, value});
+  }
   // These dump categories describe the single-pass DCT8 pixel path.
-  return frame->header.encoding == jxl::FrameEncoding::kVarDCT && frame->header.passes.num_passes == 1 && frame->state->used_acs == 1;
+  return frame->header.encoding == jxl::FrameEncoding::kVarDCT &&
+         frame->header.passes.num_passes == 1 && frame->state->used_acs == 1;
 }
 }
 bool DecodeFirstFrame(const std::vector<uint8_t>& codestream, DecodedFrame* frame) {

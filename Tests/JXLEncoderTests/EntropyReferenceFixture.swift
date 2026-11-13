@@ -658,6 +658,81 @@ struct EntropyReferenceFixture {
 			guard strategy == [0], order.count == 64,
 				Set(order) == Set((0..<64).map(Int64.init))
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "stream_shared_ans" || name == "stream_shared_prefix" {
+			inputFields = Set(
+				[
+					"input.streams.context_map", "input.streams.lengths",
+					"input.streams.tokens",
+				]
+					+ (name == "stream_shared_ans"
+						? [
+							"input.streams.log_alpha_size",
+							"input.streams.frequencies",
+						] : []))
+			expectedFields = [
+				"entropy.streams.bit_counts", "entropy.streams.bytes",
+				"entropy.streams.code_bit_count", "entropy.streams.code_bytes",
+				"entropy.streams.code_kind", "entropy.streams.count",
+				"entropy.streams.lengths", "entropy.streams.tokens",
+				"entropy.streams.transmitted_context_count",
+			]
+			let contextMap = try integers(input, "input.streams.context_map")
+			let lengths = try integers(input, "input.streams.lengths")
+			let tokens = try integers(input, "input.streams.tokens")
+			let codeKind = try integers(expected, "entropy.streams.code_kind")
+			let contextCount = try integers(
+				expected, "entropy.streams.transmitted_context_count")
+			let outputLengths = try integers(expected, "entropy.streams.lengths")
+			let outputTokens = try integers(expected, "entropy.streams.tokens")
+			let codeBits = try integers(expected, "entropy.streams.code_bit_count")
+			let codeBytes = try integers(expected, "entropy.streams.code_bytes")
+			let bitCounts = try integers(expected, "entropy.streams.bit_counts")
+			let streamBytes = try integers(expected, "entropy.streams.bytes")
+			var tokenRecords: [Int64] = []
+			var tokenOffset = 0
+			for (index, length) in lengths.enumerated() {
+				tokenRecords.append(contentsOf: [Int64(index), length])
+				let valueCount = Int(length) * 2
+				guard tokenOffset + valueCount <= tokens.count else {
+					throw SemanticDumpError.unsupportedEntropyFixture(name)
+				}
+				tokenRecords.append(
+					contentsOf: tokens[tokenOffset..<(tokenOffset + valueCount)]
+				)
+				tokenOffset += valueCount
+			}
+			let codeByteCount =
+				codeBits.count == 1 && codeBits[0] >= 0
+				? codeBits[0] / 8 + (codeBits[0].isMultiple(of: 8) ? 0 : 1) : -1
+			let streamByteCount = bitCounts.reduce(Int64(0)) { sum, value in
+				value >= 0
+					? sum + value / 8 + (value.isMultiple(of: 8) ? 0 : 1) : -1
+			}
+			let validCodeInput: Bool
+			if name == "stream_shared_ans" {
+				let logAlpha = try integers(input, "input.streams.log_alpha_size")
+				let frequencies = try integers(input, "input.streams.frequencies")
+				validCodeInput =
+					logAlpha == [6] && frequencies.count == 2
+					&& frequencies.allSatisfy({ $0 >= 0 })
+					&& frequencies.reduce(0, +) == ANSConstants.tabSize
+			} else {
+				validCodeInput = true
+			}
+			guard contextMap == [0, 0, 0, 0], validCodeInput,
+				lengths == [8, 8], tokens.count == 32,
+				tokens.enumerated().allSatisfy({ index, value in
+					index.isMultiple(of: 2)
+						? value == 0 : (0...1).contains(value)
+				}), tokenOffset == tokens.count,
+				codeKind == [name == "stream_shared_ans" ? 1 : 0],
+				contextCount == [4], outputLengths == lengths,
+				outputTokens == tokenRecords, codeBits.count == 1,
+				codeByteCount >= 0,
+				codeBytes.count == Int(codeByteCount),
+				bitCounts == (name == "stream_shared_ans" ? [32, 32] : [8, 8]),
+				streamBytes.count == streamByteCount
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("coefficient_sort_") {
 			guard
 				["coefficient_sort_bounded", "coefficient_sort_boundary"].contains(

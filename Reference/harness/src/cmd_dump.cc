@@ -3,6 +3,7 @@
 #include <fstream>
 #include <iterator>
 #include <set>
+#include <string_view>
 #include "decoded_frame.h"
 #include "registry.h"
 namespace harness {
@@ -21,7 +22,13 @@ int RunDump(const std::vector<std::string>& args) {
     if (!found) { std::fprintf(stderr, "dump: unknown category %s\n", name.c_str()); return 2; }
   }
   SemanticDumpWriter out;
-  for (const auto& category : categories) if (wanted.empty() || wanted.count(category.name)) category.dump(frame, out);
+  for (const auto &category : categories) {
+    if (wanted.empty() && std::string_view(category.name) == "entropy_layout")
+      continue;
+    if (!wanted.empty() && !wanted.count(category.name))
+      continue;
+    category.dump(frame, out);
+  }
   out.Write(stdout); return std::ferror(stdout) ? 1 : 0;
 }
 const RegisterSubcommand kRegister({"dump", "<in.jxl> [category…]", RunDump});

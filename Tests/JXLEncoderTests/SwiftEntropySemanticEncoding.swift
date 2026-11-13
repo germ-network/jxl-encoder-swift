@@ -256,23 +256,32 @@ enum SwiftEntropySemanticEncoding {
 		var records: [Int64] = []
 		var bitCounts: [Int64] = []
 		var bytes: [Int64] = []
+		var codeWriter = BitWriter()
+		codeWriter.write(1, 0)  // disabled LZ77 field in the transmitted code
+		EntropyCodeWriter.write(code, allowContextMapANS: true, writer: &codeWriter)
 		for (index, stream) in tokens.enumerated() {
 			lengths.append(Int64(stream.count))
 			records.append(contentsOf: [Int64(index), Int64(stream.count)])
 			records.append(
 				contentsOf: stream.flatMap { [Int64($0.context), Int64($0.value)] })
-			var writer = BitWriter()
-			if let tables = code.ansInfoTables {
-				ANSTokenWriter.write(
-					tokens: stream, contextMap: code.contextMap,
-					infoTables: tables, writer: &writer)
-			} else {
-				for token in stream { writer.write(token: token, code: code) }
-			}
+			var section = SectionWriter(mode: .staging(.staticAC))
+			for token in stream { section.write(token: token) }
+			section.flush(code: code)
+			let writer = section.finished()
 			bitCounts.append(Int64(writer.bitsWritten))
 			bytes.append(contentsOf: writer.bytes.map(Int64.init))
 		}
 		var dump = SemanticDump()
+		dump.record(
+			"entropy.streams.transmitted_context_count",
+			.integers([Int64(code.transmittedContextCount)]))
+		dump.record(
+			"entropy.streams.code_kind", .integers([code.ansInfoTables == nil ? 0 : 1]))
+		dump.record(
+			"entropy.streams.code_bit_count", .integers([Int64(codeWriter.bitsWritten)])
+		)
+		dump.record(
+			"entropy.streams.code_bytes", .integers(codeWriter.bytes.map(Int64.init)))
 		dump.record("entropy.streams.count", .integers([Int64(tokens.count)]))
 		dump.record("entropy.streams.lengths", .integers(lengths))
 		dump.record("entropy.streams.tokens", .integers(records))
@@ -292,9 +301,5 @@ enum SwiftEntropySemanticEncoding {
 			"entropy.coefficient_order.is_default",
 			.integers([result.isDefault ? 1 : 0]))
 		return dump
-	}
-
-	static func frameLayout(codestream: [UInt8]) throws -> SemanticDump {
-		throw SemanticDumpError.unimplemented
 	}
 }

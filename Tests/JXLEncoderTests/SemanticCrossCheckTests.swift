@@ -122,4 +122,94 @@ struct SemanticCrossCheckTests {
 	func mutationsDifferInMutatedFieldOnly() throws {
 		try Self.verifyMutations(in: #require(Self.directory))
 	}
+
+	@Test(
+		"upstream observes sections and selectors in actual Swift codestreams",
+		.enabled(if: directory != nil))
+	func actualSwiftLayoutsDecode() throws {
+		let directory = try #require(Self.directory)
+		for (name, groups, grid) in [
+			("flower_512_d1", 4, [Int64(2), 2]),
+			("flower_1024", 16, [Int64(4), 4]),
+			("reference_flower_512", 4, [Int64(2), 2]),
+			("reference_flower_1024", 16, [Int64(4), 4]),
+		] {
+			let layout = try SemanticDump(
+				parsing: String(
+					contentsOf: directory.appendingPathComponent(
+						name + ".layout.sem"),
+					encoding: .utf8))
+			let codestream = try Data(
+				contentsOf: directory.appendingPathComponent(name + ".jxl"))
+			#expect(try integers(layout, "entropy_layout.group_grid") == grid)
+			#expect(
+				try integers(layout, "entropy_layout.group_count") == [
+					Int64(groups)
+				])
+			#expect(try integers(layout, "entropy_layout.histogram_set_count") == [1])
+			#expect(try integers(layout, "entropy_layout.selector_bits") == [0])
+			let ids = try integers(layout, "entropy_layout.section_ids")
+			let offsets = try integers(layout, "entropy_layout.section_offsets")
+			let sizes = try integers(layout, "entropy_layout.section_sizes")
+			let indices = try integers(layout, "entropy_layout.section_indices")
+			#expect(Set(ids).count == ids.count)
+			#expect(indices == (0..<Int64(ids.count)).map { $0 })
+			#expect(offsets.count == ids.count && sizes.count == ids.count)
+			#expect(
+				zip(offsets, sizes).allSatisfy {
+					$0.0 >= 0 && $0.1 >= 0
+						&& $0.0 + $0.1 <= Int64(codestream.count)
+				})
+			let selectors = try integers(layout, "entropy_layout.ac_selectors")
+			#expect(selectors.count == groups * 4)
+			#expect(
+				stride(from: 3, to: selectors.count, by: 4).allSatisfy {
+					selectors[$0] == 0
+				})
+		}
+		let eligible = try SemanticDump(
+			parsing: String(
+				contentsOf: directory.appendingPathComponent(
+					"reference_2057x257.layout.sem"), encoding: .utf8))
+		#expect(try integers(eligible, "entropy_layout.group_grid") == [9, 2])
+		#expect(try integers(eligible, "entropy_layout.group_count") == [18])
+		#expect(try integers(eligible, "entropy_layout.dc_group_count") == [2])
+		#expect(try integers(eligible, "entropy_layout.histogram_set_count") == [2])
+		#expect(try integers(eligible, "entropy_layout.selector_bits") == [1])
+		let selectorRecords = try integers(eligible, "entropy_layout.ac_selectors")
+		#expect(selectorRecords.count == 18 * 4)
+		#expect(
+			stride(from: 1, to: selectorRecords.count, by: 4).map {
+				selectorRecords[$0]
+			} == Array(0..<18).map(Int64.init))
+		#expect(
+			stride(from: 3, to: selectorRecords.count, by: 4).map {
+				selectorRecords[$0]
+			} == Array(repeating: 0, count: 8) + [1] + Array(repeating: 0, count: 8) + [
+				1
+			])
+		let eligibleBytes = try Data(
+			contentsOf: directory.appendingPathComponent("reference_2057x257.jxl"))
+		let eligibleIDs = try integers(eligible, "entropy_layout.section_ids")
+		let eligibleIndices = try integers(eligible, "entropy_layout.section_indices")
+		let eligibleOffsets = try integers(eligible, "entropy_layout.section_offsets")
+		let eligibleSizes = try integers(eligible, "entropy_layout.section_sizes")
+		#expect(Set(eligibleIDs).count == eligibleIDs.count)
+		#expect(eligibleIndices == (0..<Int64(eligibleIDs.count)).map { $0 })
+		#expect(
+			eligibleOffsets.count == eligibleIDs.count
+				&& eligibleSizes.count == eligibleIDs.count)
+		#expect(
+			zip(eligibleOffsets, eligibleSizes).allSatisfy {
+				$0.0 >= 0 && $0.1 >= 0 && $0.0 + $0.1 <= Int64(eligibleBytes.count)
+			})
+	}
+
+	private func integers(_ dump: SemanticDump, _ field: String) throws -> [Int64] {
+		guard case .integers(let values)? = dump.fields[field] else {
+			throw SemanticDumpError.malformedEntropyFixture(
+				name: "layout", field: field)
+		}
+		return values
+	}
 }
