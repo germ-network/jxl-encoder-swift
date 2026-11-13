@@ -85,6 +85,19 @@ tests compare all fields normally except the exact named fields listed as
 GER-3386 differences for individual fixtures; a changed difference set or any
 other field still fails.
 
+Predefined-tree inputs record `TreeKind`, `total_pixels`, `bitdepth`,
+`prevprop`, the DC-group count used by the Swift stream, and the root index
+selected for the component projection. Reference outputs come from
+`PredefinedTree` followed by `TokenizeTree`. `nodes` is breadth-first decoder
+order, seven integers per node: property, split value, left child, right child,
+predictor, predictor offset, and multiplier. Leaves use property -1 and zero
+child indices. `tokens` is the full `(context, value)` stream for that
+standalone reference tree. The Swift dump retains its complete legacy stream
+and decoded nodes, then rebases the selected DC subtree to root zero before
+comparing that same component. The 8193-pixel case is a faithful witness;
+8192 pixels crosses the pinned upstream height threshold and is tracked as
+CT-01 on only the component's node/token fields.
+
 Context-map inputs record entries and `map_length` separately. Expected
 outputs include the selected simple, prefix, or ANS mode and `token_count`
 after libjxl's token construction, including LZ77 processing. This count is a

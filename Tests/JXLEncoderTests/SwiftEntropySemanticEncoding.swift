@@ -1,6 +1,70 @@
 @testable import JXLEncoder
 
 enum SwiftEntropySemanticEncoding {
+	private struct TreeNode {
+		let property: Int
+		let splitValue: Int32
+		let left: Int
+		let right: Int
+		let predictor: Int
+		let offset: Int64
+		let multiplier: UInt32
+
+		var fields: [Int64] {
+			[
+				Int64(property), Int64(splitValue), Int64(left), Int64(right),
+				Int64(predictor), offset, Int64(multiplier),
+			]
+		}
+	}
+
+	private static func decodeTree(_ tokens: [Token]) -> ([[Int64]], [[Token]]) {
+		var nodes: [TreeNode] = []
+		var chunks: [[Token]] = []
+		var index = 0
+		var toDecode = 1
+		var leafCount = 0
+		while toDecode > 0 {
+			toDecode -= 1
+			let start = index
+			let property = Int(tokens[index].value) - 1
+			index += 1
+			if property == -1 {
+				let predictor = Int(tokens[index].value)
+				let packedOffset = tokens[index + 1].value
+				let offset = Int64(
+					Int32(
+						bitPattern: (packedOffset >> 1)
+							^ (0 &- (packedOffset & 1))))
+				let multiplierLog = Int(tokens[index + 2].value)
+				let multiplier = (tokens[index + 3].value + 1) << multiplierLog
+				index += 4
+				nodes.append(
+					TreeNode(
+						property: -1, splitValue: 0, left: leafCount,
+						right: 0,
+						predictor: predictor, offset: offset,
+						multiplier: multiplier))
+				leafCount += 1
+			} else {
+				let packed = tokens[index].value
+				let splitValue = Int32(
+					bitPattern: (packed >> 1) ^ (0 &- (packed & 1)))
+				index += 1
+				nodes.append(
+					TreeNode(
+						property: property, splitValue: splitValue,
+						left: nodes.count + toDecode + 1,
+						right: nodes.count + toDecode + 2,
+						predictor: 0, offset: 0, multiplier: 1))
+				toDecode += 2
+			}
+			chunks.append(Array(tokens[start..<index]))
+		}
+		precondition(index == tokens.count)
+		return (nodes.map(\.fields), chunks)
+	}
+
 	static func histogram(counts: [Int], logAlphaSize: Int) -> SemanticDump {
 		precondition((5...8).contains(logAlphaSize))
 		precondition(counts.count <= 256)
@@ -110,12 +174,48 @@ enum SwiftEntropySemanticEncoding {
 		var tokens = ContextTree.staticTokens
 		tokens[1] = Token(
 			context: tokens[1].context, value: packSigned(Int32(1 + dcGroupCount)))
+		let (nodes, chunks) = decodeTree(tokens)
+		let root = 2
+		var subtree = [root]
+		var cursor = 0
+		while cursor < subtree.count {
+			let fields = nodes[subtree[cursor]]
+			if fields[0] >= 0 {
+				subtree.append(Int(fields[2]))
+				subtree.append(Int(fields[3]))
+			}
+			cursor += 1
+		}
+		let rebase = Dictionary(uniqueKeysWithValues: subtree.enumerated().map { ($1, $0) })
+		var componentLeafCount = 0
+		let componentNodes = subtree.flatMap { original -> [Int64] in
+			var fields = nodes[original]
+			if fields[0] >= 0 {
+				fields[2] = Int64(rebase[Int(fields[2])]!)
+				fields[3] = Int64(rebase[Int(fields[3])]!)
+			} else {
+				fields[2] = Int64(componentLeafCount)
+				componentLeafCount += 1
+			}
+			return fields
+		}
+		let componentTokens = subtree.flatMap { chunks[$0] }.flatMap {
+			[Int64($0.context), Int64($0.value)]
+		}
 		var dump = SemanticDump()
 		dump.record("entropy.tree.dc_group_count", .integers([Int64(dcGroupCount)]))
-		dump.record("entropy.tree.token_count", .integers([Int64(tokens.count)]))
 		dump.record(
-			"entropy.tree.tokens",
+			"entropy.tree.token_count", .integers([Int64(componentTokens.count / 2)]))
+		dump.record("entropy.tree.tokens", .integers(componentTokens))
+		dump.record("entropy.tree.node_count", .integers([Int64(subtree.count)]))
+		dump.record("entropy.tree.nodes", .integers(componentNodes))
+		dump.record("entropy.tree.full_token_count", .integers([Int64(tokens.count)]))
+		dump.record(
+			"entropy.tree.full_tokens",
 			.integers(tokens.flatMap { [Int64($0.context), Int64($0.value)] }))
+		dump.record("entropy.tree.full_node_count", .integers([Int64(nodes.count)]))
+		dump.record("entropy.tree.full_nodes", .integers(nodes.flatMap { $0 }))
+		dump.record("entropy.tree.component_root", .integers([Int64(root)]))
 		return dump
 	}
 

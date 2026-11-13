@@ -323,6 +323,25 @@ struct EntropyReferenceTests {
 				name: "context_mtf_ans", input: contextMTF.input,
 				expected: emptyMTFCandidateTokenCount)
 		}
+		let tree = try EntropyReferenceFixture.load("tree_gradient_fixed_8193_dc2")
+		let mismatchedTreeInput = try SemanticDump(
+			parsing: tree.input.serialized.replacingOccurrences(
+				of: "input.tree.total_pixels i 1 8193",
+				with: "input.tree.total_pixels i 1 8192"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "tree_gradient_fixed_8193_dc2", input: mismatchedTreeInput,
+				expected: tree.expected)
+		}
+		let mismatchedTreeNodeCount = try SemanticDump(
+			parsing: tree.expected.serialized.replacingOccurrences(
+				of: "entropy.tree.node_count i 1 67",
+				with: "entropy.tree.node_count i 1 66"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "tree_gradient_fixed_8193_dc2", input: tree.input,
+				expected: mismatchedTreeNodeCount)
+		}
 	}
 
 	@Test
@@ -557,9 +576,87 @@ struct EntropyReferenceTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func predefinedMATreeMatchesReference() throws {
-		Issue.record("Predefined tree nodes and tokens match the reference configuration.")
+		for (name, knownDifferences) in [
+			(
+				"tree_gradient_fixed_8192_dc1",
+				Set([
+					"entropy.tree.node_count", "entropy.tree.nodes",
+					"entropy.tree.token_count", "entropy.tree.tokens",
+				])
+			),
+			("tree_gradient_fixed_8193_dc2", Set<String>()),
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let dcGroupCount)? = fixture.input.fields[
+					"input.tree.dc_group_count"],
+				case .integers(let projectionRoot)? = fixture.input.fields[
+					"input.tree.projection_root"],
+				case .integers(let componentTokenCount)? = fixture.expected.fields[
+					"entropy.tree.token_count"]
+			else { throw SemanticDumpError.unimplemented }
+			let actual = SwiftEntropySemanticEncoding.tree(
+				dcGroupCount: Int(dcGroupCount[0]))
+			guard
+				case .integers(let fullTokens)? = actual.fields[
+					"entropy.tree.full_tokens"]
+			else { throw SemanticDumpError.unimplemented }
+			#expect(projectionRoot == [2])
+			#expect(
+				actual.fields["entropy.tree.component_root"]
+					== .integers(projectionRoot))
+			#expect(actual.fields["entropy.tree.full_token_count"] == .integers([313]))
+			#expect(actual.fields["entropy.tree.full_node_count"] == .integers([89]))
+			#expect(fullTokens.count == 626)
+			#expect(fullTokens[3] == Int64(packSigned(Int32(1 + dcGroupCount[0]))))
+			var sourceTokens = ContextTree.staticTokens
+			sourceTokens[1] = Token(
+				context: sourceTokens[1].context,
+				value: packSigned(Int32(1 + dcGroupCount[0])))
+			#expect(
+				fullTokens
+					== sourceTokens.flatMap {
+						[Int64($0.context), Int64($0.value)]
+					})
+			#expect(componentTokenCount[0] > 0)
+			var projected = SemanticDump()
+			for field in ["node_count", "nodes", "token_count", "tokens"] {
+				guard let value = actual.fields["entropy.tree.\(field)"] else {
+					throw SemanticDumpError.unimplemented
+				}
+				projected.record(
+					"entropy.tree.\(field)", value)
+			}
+			let comparableFields: Set<String> = [
+				"entropy.tree.node_count", "entropy.tree.nodes",
+				"entropy.tree.token_count", "entropy.tree.tokens",
+			]
+			var expected = SemanticDump()
+			for field in comparableFields {
+				guard let value = fixture.expected.fields[field] else {
+					throw SemanticDumpError.unimplemented
+				}
+				expected.record(field, value)
+			}
+			let differences = projected.differences(from: expected)
+			#expect(
+				Set(differences.map(\.field)) == knownDifferences,
+				"\(name): \(differences)")
+			for field in knownDifferences {
+				let fieldDifferences = differences.filter { $0.field == field }
+				withKnownIssue(Comment(rawValue: "CT-01: \(field)")) {
+					#expect(
+						fieldDifferences.isEmpty,
+						"\(name): \(fieldDifferences)")
+				}
+			}
+			#expect(
+				projected.differences(
+					from: expected, excludingFields: knownDifferences
+				).isEmpty)
+		}
 	}
 
 	@Test(.disabled("Awaiting entropy reference implementation"))

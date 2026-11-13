@@ -19,6 +19,8 @@
 #include "lib/jxl/base/bits.h"
 #include "lib/jxl/enc_aux_out.h"
 #include "lib/jxl/memory_manager_internal.h"
+#include "lib/jxl/modular/encoding/enc_encoding.h"
+#include "lib/jxl/modular/encoding/enc_ma.h"
 
 namespace harness {
 namespace {
@@ -342,6 +344,47 @@ int RunContextMap(const std::vector<std::string>& args) {
   return 0;
 }
 
+int RunTree(const std::vector<std::string>& args) {
+  if (args.size() != 4) return 2;
+  int kind = 0;
+  int total_pixels = 0;
+  int bitdepth = 0;
+  int prevprop = 0;
+  if (!ParseInt(args[0], &kind) || kind < 0 || kind > 6 ||
+      !ParseInt(args[1], &total_pixels) || total_pixels <= 0 ||
+      !ParseInt(args[2], &bitdepth) || bitdepth < 1 || bitdepth > 32 ||
+      !ParseInt(args[3], &prevprop) || prevprop < 0 || prevprop > 1) return 2;
+  const auto tree_kind = static_cast<jxl::ModularOptions::TreeKind>(kind);
+  const jxl::Tree tree = jxl::PredefinedTree(
+      tree_kind, static_cast<size_t>(total_pixels), bitdepth, prevprop);
+  std::vector<jxl::Token> tokens;
+  jxl::Tree decoder_tree;
+  if (!jxl::TokenizeTree(tree, &tokens, &decoder_tree)) return 1;
+  std::vector<int64_t> nodes;
+  for (const auto& node : decoder_tree) {
+    nodes.insert(nodes.end(), {
+        node.property, node.splitval, node.lchild, node.rchild,
+        static_cast<int>(node.predictor), node.predictor_offset,
+        node.multiplier});
+  }
+  std::vector<int64_t> serialized_tokens;
+  for (const auto& token : tokens) {
+    serialized_tokens.push_back(token.context);
+    serialized_tokens.push_back(token.value);
+  }
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.tree.kind", {kind});
+  dump.Integers("entropy.tree.total_pixels", {total_pixels});
+  dump.Integers("entropy.tree.bitdepth", {bitdepth});
+  dump.Integers("entropy.tree.prevprop", {prevprop});
+  dump.Integers("entropy.tree.node_count", {static_cast<int64_t>(decoder_tree.size())});
+  dump.Integers("entropy.tree.nodes", nodes);
+  dump.Integers("entropy.tree.token_count", {static_cast<int64_t>(tokens.size())});
+  dump.Integers("entropy.tree.tokens", serialized_tokens);
+  dump.Write(stdout);
+  return 0;
+}
+
 int RunEntropy(const std::vector<std::string>& args) {
   if (args.empty()) return 2;
   if (args[0] == "histogram") {
@@ -353,11 +396,14 @@ int RunEntropy(const std::vector<std::string>& args) {
   if (args[0] == "context-map") {
     return RunContextMap(std::vector<std::string>(args.begin() + 1, args.end()));
   }
+  if (args[0] == "tree") {
+    return RunTree(std::vector<std::string>(args.begin() + 1, args.end()));
+  }
   return 2;
 }
 
 const RegisterSubcommand kRegister({
-    "entropy", "histogram|cluster ...",
+    "entropy", "histogram|cluster|context-map|tree ...",
     RunEntropy});
 
 }  // namespace

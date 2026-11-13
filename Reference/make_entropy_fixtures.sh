@@ -15,7 +15,8 @@ grep -Fx 'hwy=NEON' <<< "$version"
 mkdir -p "$out"
 pin="$LIBJXL_COMMIT"
 tmp="$(mktemp)"
-trap 'rm -f "$tmp"' EXIT
+sorted_entropy="$tmp.entropy"
+trap 'rm -f "$tmp" "$sorted_entropy"' EXIT
 head -n 2 "$root/Reference/provenance.tsv" > "$tmp"
 awk -F '\t' 'NR > 2 && $1 !~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$root/Reference/provenance.tsv" >> "$tmp"
@@ -128,6 +129,32 @@ generate_context_map_with_candidates() {
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
+generate_tree() {
+	local name="$1" kind="$2" total_pixels="$3" bitdepth="$4"
+	local prevprop="$5" dc_group_count="$6" projection_root="$7"
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.tree.kind i 1 %s\n' "$kind"
+		printf 'input.tree.total_pixels i 1 %s\n' "$total_pixels"
+		printf 'input.tree.bitdepth i 1 %s\n' "$bitdepth"
+		printf 'input.tree.prevprop i 1 %s\n' "$prevprop"
+		printf 'input.tree.dc_group_count i 1 %s\n' "$dc_group_count"
+		printf 'input.tree.projection_root i 1 %s\n' "$projection_root"
+	} > "$input"
+	"$harness" entropy tree "$kind" "$total_pixels" "$bitdepth" "$prevprop" \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline tree parameters in generator\t-\tkind=%s pixels=%s bitdepth=%s prevprop=%s dc_group_count=%s projection_root=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" "$kind" "$total_pixels" "$bitdepth" \
+		"$prevprop" "$dc_group_count" "$projection_root" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tPredefinedTree + TokenizeTree kind=%s pixels=%s bitdepth=%s prevprop=%s hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" "$kind" "$total_pixels" \
+		"$bitdepth" "$prevprop" >> "$tmp"
+}
+
 rm -f "$out"/ans_sparse_precise.* "$out"/ans_skewed_approximate.* \
 	"$out"/ans_boundary_fast.* "$out"/ans_threshold48_fast.* \
 	"$out"/ans_threshold64_fast.*
@@ -207,5 +234,19 @@ for ((symbol = 0; symbol < 4; symbol++)); do
 done
 generate_context_map_with_candidates context_raw_rle 4 "${context_rle_entries[@]}" --mtf "${context_rle_mtf[@]}"
 
-{ head -n 2 "$tmp"; tail -n +3 "$tmp" | sort -t $'\t' -k1,1; } > "$root/Reference/provenance.tsv"
+generate_tree tree_gradient_fixed_8192_dc1 6 8192 8 0 1 2
+generate_tree tree_gradient_fixed_8193_dc2 6 8193 8 0 2 2
+
+awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
+	"$tmp" | sort -t $'\t' -k1,1 > "$sorted_entropy"
+{
+	head -n 2 "$tmp"
+	awk -F '\t' -v entropy_file="$sorted_entropy" \
+		'$1 == "Tests/JXLEncoderTests/Fixtures/hopper_420_odd.coef" {
+			while ((getline line < entropy_file) > 0) print line
+			close(entropy_file)
+		}
+		NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\// { next }
+		NR > 2 { print }' "$tmp"
+} > "$root/Reference/provenance.tsv"
 "$root/Reference/pin-check.sh" "$linked"

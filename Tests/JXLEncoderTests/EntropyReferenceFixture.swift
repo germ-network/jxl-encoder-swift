@@ -365,6 +365,74 @@ struct EntropyReferenceFixture {
 				guard simple == [0], useMTF == [1], tokenCountStatus == [2]
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			}
+		} else if name.hasPrefix("tree_gradient_fixed_") {
+			inputFields = [
+				"input.tree.kind", "input.tree.total_pixels", "input.tree.bitdepth",
+				"input.tree.prevprop", "input.tree.dc_group_count",
+				"input.tree.projection_root",
+			]
+			expectedFields = [
+				"entropy.tree.kind", "entropy.tree.total_pixels",
+				"entropy.tree.bitdepth", "entropy.tree.prevprop",
+				"entropy.tree.node_count", "entropy.tree.nodes",
+				"entropy.tree.token_count", "entropy.tree.tokens",
+			]
+			let kind = try integers(input, "input.tree.kind")
+			let totalPixels = try integers(input, "input.tree.total_pixels")
+			let bitdepth = try integers(input, "input.tree.bitdepth")
+			let prevprop = try integers(input, "input.tree.prevprop")
+			let dcGroupCount = try integers(input, "input.tree.dc_group_count")
+			let projectionRoot = try integers(input, "input.tree.projection_root")
+			let outputKind = try integers(expected, "entropy.tree.kind")
+			let outputPixels = try integers(expected, "entropy.tree.total_pixels")
+			let outputBitdepth = try integers(expected, "entropy.tree.bitdepth")
+			let outputPrevprop = try integers(expected, "entropy.tree.prevprop")
+			let nodeCount = try integers(expected, "entropy.tree.node_count")
+			let nodes = try integers(expected, "entropy.tree.nodes")
+			let tokenCount = try integers(expected, "entropy.tree.token_count")
+			let tokens = try integers(expected, "entropy.tree.tokens")
+			let caseConfig: (Int64, Int64)? =
+				switch name {
+				case "tree_gradient_fixed_8192_dc1": (8192, 1)
+				case "tree_gradient_fixed_8193_dc2": (8193, 2)
+				default: nil
+				}
+			guard kind == [6], totalPixels.count == 1,
+				[8192, 8193].contains(totalPixels[0]), bitdepth == [8],
+				prevprop == [0], dcGroupCount.count == 1,
+				(1...2).contains(dcGroupCount[0]), projectionRoot == [2],
+				caseConfig.map({ totalPixels[0] == $0.0 && dcGroupCount[0] == $0.1 }
+				)
+					== true,
+				outputKind == kind, outputPixels == totalPixels,
+				outputBitdepth == bitdepth, outputPrevprop == prevprop,
+				nodeCount.count == 1, nodeCount[0] > 0,
+				nodes.count == nodeCount[0] * 7,
+				tokenCount.count == 1, tokenCount[0] > 0,
+				tokens.count == tokenCount[0] * 2,
+				tokens.allSatisfy({ $0 >= 0 && $0 <= Int64(UInt32.max) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			var leafCount: Int64 = 0
+			for index in 0..<Int(nodeCount[0]) {
+				let base = index * 7
+				let property = nodes[base]
+				if property == -1 {
+					guard nodes[base + 2] == leafCount, nodes[base + 3] == 0
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+					leafCount += 1
+				} else {
+					guard (0...Int64(Int16.max)).contains(property),
+						(0..<nodeCount[0]).contains(nodes[base + 2]),
+						(0..<nodeCount[0]).contains(nodes[base + 3])
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+				}
+			}
 		} else {
 			throw SemanticDumpError.unsupportedEntropyFixture(name)
 		}

@@ -149,7 +149,14 @@ for fixture in fixtures:
  assert hashlib.sha256(fixture.read_bytes()).hexdigest()==expected[fixture.name], fixture.name
 PYCODE
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures; do
+entropy_tree_decisions_match_fixtures() {
+  "$HARNESS" entropy tree 6 8192 8 0 > "$SCRATCH/tree_8192.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/tree_gradient_fixed_8192_dc1.expected.sem" "$SCRATCH/tree_8192.sem"
+  "$HARNESS" entropy tree 6 8193 8 0 > "$SCRATCH/tree_8193.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/tree_gradient_fixed_8193_dc2.expected.sem" "$SCRATCH/tree_8193.sem"
+  if "$HARNESS" entropy tree 6 0 8 0; then return 1; fi
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures; do
   "$check"
   echo "PASS $check"
 done
