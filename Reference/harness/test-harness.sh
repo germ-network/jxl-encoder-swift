@@ -17,6 +17,17 @@ pin_check_clean_after_build() {
   test -n "$linked"
   "$REFERENCE/pin-check.sh" "$linked"
 }
+capture_flag_is_scoped() {
+  python3 - "$REFERENCE/build/harness/compile_commands.json" <<'PYCODE'
+import json,sys
+from pathlib import Path
+entries=json.loads(Path(sys.argv[1]).read_text())
+flagged=[entry for entry in entries if '-fno-access-control' in entry['command']]
+assert len(flagged)==1, [entry['file'] for entry in flagged]
+assert flagged[0]['file'].endswith('/Reference/harness/src/capture_modular_tree.cc')
+assert sum(entry['file'].endswith('/Reference/harness/src/capture_modular_tree.cc') for entry in entries)==1
+PYCODE
+}
 semantic_writer_matches_golden() {
   "$HARNESS" selftest "$SCRATCH/golden.sem" "$SCRATCH/test.dump"
   cmp "$HERE/golden.sem" "$SCRATCH/golden.sem"
@@ -164,6 +175,46 @@ entropy_tree_decisions_match_fixtures() {
 4 1120 tree_acmeta_above_1024
 EOF
   if "$HARNESS" entropy tree 6 0 8 0; then return 1; fi
+  python3 - "$REFERENCE/.." "$HARNESS" "$SCRATCH" <<'PYCODE'
+import hashlib, re, subprocess, sys
+from pathlib import Path
+root, harness, scratch = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+fixtures = root / 'Tests/JXLEncoderTests/Fixtures/entropy'
+name = 'tree_merged_multidc_2057x257'
+input_fields = {}
+for line in (fixtures / f'{name}.input.sem').read_text().splitlines()[1:]:
+    parts = line.split()
+    input_fields[parts[0]] = list(map(int, parts[3:]))
+source = root / 'Tests/JXLEncoderTests/Fixtures/semantic/pixel_lifecycle_2057x521.ppm'
+assert input_fields['input.tree_merged.source_sha256'] == list(hashlib.sha256(source.read_bytes()).digest())
+assert input_fields['input.tree_merged.crop_size'] == [2057, 257]
+assert input_fields['input.tree_merged.effort'] == [4]
+assert input_fields['input.tree_merged.distance_milli'] == [1000]
+assert input_fields['input.tree_merged.output_mode'] == [2]
+assert input_fields['input.tree_merged.buffering'] == [0]
+data = source.read_bytes()
+match = re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s', data)
+assert match and tuple(map(int, match.groups())) == (2057, 521)
+payload = data[match.end():]
+crop = scratch / 'tree_merged_2057x257.ppm'
+row = 2057 * 3
+crop.write_bytes(b'P6\n2057 257\n255\n' + b''.join(payload[y*row:(y+1)*row] for y in range(257)))
+stream = scratch / 'tree_merged_2057x257.jxl'
+subprocess.run([harness, 'encode', str(crop), '1', str(stream), '2', '0'], check=True)
+actual = subprocess.run([harness, 'dump', str(stream), 'entropy_layout'], check=True, capture_output=True, text=True).stdout
+actual_fields = {line.split()[0]: line for line in actual.splitlines()[1:]}
+mapping = {
+    'entropy_layout.group_count': 'entropy.tree_merged.group_count',
+    'entropy_layout.dc_group_count': 'entropy.tree_merged.dc_group_count',
+    'entropy_layout.modular_tree.node_count': 'entropy.tree_merged.node_count',
+    'entropy_layout.modular_tree.nodes': 'entropy.tree_merged.nodes',
+}
+output = ['jxl-semantic-dump 1']
+for source_field, target_field in mapping.items():
+    line = actual_fields[source_field]
+    output.append(target_field + line[len(source_field):])
+assert '\n'.join(output) + '\n' == (fixtures / f'{name}.expected.sem').read_text()
+PYCODE
 }
 entropy_modular_decisions_match_fixtures() {
   local expected="$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/modular_dc_gradient_rows.expected.sem"
@@ -288,7 +339,7 @@ for args in (
     assert result.returncode!=0, args
 PYCODE
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_ac_metadata_and_tree_entropy_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
+for check in version_reports_pin_and_neon pin_check_clean_after_build capture_flag_is_scoped semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_ac_metadata_and_tree_entropy_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
   "$check"
   echo "PASS $check"
 done

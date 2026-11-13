@@ -1,0 +1,7 @@
+jxl-semantic-dump 1
+input.tree_merged.source_sha256 i 32 79 163 8 149 177 154 174 135 154 105 62 177 41 210 25 162 104 4 251 131 52 250 239 205 156 228 29 135 130 248 90 59
+input.tree_merged.crop_size i 2 2057 257
+input.tree_merged.effort i 1 4
+input.tree_merged.distance_milli i 1 1000
+input.tree_merged.output_mode i 1 2
+input.tree_merged.buffering i 1 0

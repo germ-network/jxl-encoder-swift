@@ -1,4 +1,5 @@
 #include "decoded_frame.h"
+#include "capture_modular_tree.h"
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -98,7 +99,8 @@ bool ExtractCodestream(const std::vector<uint8_t>& input,
   return final && !codestream->empty();
 }
 
-jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame) {
+jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame,
+                   bool capture_modular_tree) {
   // Retained decoder images refer to this allocator after this function returns.
   static JxlMemoryManager manager = [] { JxlMemoryManager m; if (!jxl::MemoryManagerInit(&m, nullptr)) std::abort(); return m; }();
   jxl::Status closed = true; size_t offset;
@@ -190,6 +192,17 @@ jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame) {
   JXL_RETURN_IF_ERROR(closed);
   JXL_RETURN_IF_ERROR(section_result);
   JXL_RETURN_IF_ERROR(decoder.FinalizeFrame());
+  if (capture_modular_tree) {
+    const jxl::Tree tree = CaptureModularTree(decoder);
+    layout.modular_tree_node_count = tree.size();
+    for (const auto &node : tree) {
+      layout.modular_tree_nodes.insert(
+          layout.modular_tree_nodes.end(),
+          {node.property, node.splitval, node.lchild, node.rchild,
+           static_cast<int>(node.predictor), node.predictor_offset,
+           node.multiplier});
+    }
+  }
   layout.num_histograms = frame->state->shared->num_histograms;
   layout.selector_bits = jxl::CeilLog2Nonzero(layout.num_histograms);
   const size_t first_ac_id = 2 + layout.num_dc_groups;
@@ -217,9 +230,11 @@ jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame) {
          frame->header.passes.num_passes == 1 && frame->state->used_acs == 1;
 }
 }
-bool DecodeFirstFrame(const std::vector<uint8_t>& codestream, DecodedFrame* frame) {
+bool DecodeFirstFrame(const std::vector<uint8_t>& codestream, DecodedFrame* frame,
+                      bool capture_modular_tree) {
   std::vector<uint8_t> extracted;
-  if (ExtractCodestream(codestream, &extracted) && Decode(extracted, frame))
+  if (ExtractCodestream(codestream, &extracted) &&
+      Decode(extracted, frame, capture_modular_tree))
     return true;
   std::fprintf(stderr, "dump: invalid or unsupported first frame\n"); return false;
 }

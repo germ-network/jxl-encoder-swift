@@ -8,7 +8,7 @@ if [ ! -x "$HARNESS" ]; then bash "$HERE/build-harness.sh"; fi
 OUT="$(mktemp -d)"
 trap 'rm -rf "$OUT"' EXIT
 export JXL_CROSSCHECK_DIR="$OUT"
-swift test --filter '^JXLEncoderTests.SemanticCrossCheckTests/write'
+swift test --filter 'SemanticCrossCheckTests.write'
 for file in "$OUT"/*.jxl; do
   "$HARNESS" dump "$file" > "${file%.jxl}.harness.sem"
 done
@@ -38,6 +38,11 @@ subprocess.run([harness, 'encode', str(crop), '1', str(stream), '2'], check=True
 layout=output/'reference_2057x257.layout.sem'
 with layout.open('w') as result:
     subprocess.run([harness, 'dump', str(stream), 'entropy_layout'], stdout=result, check=True)
+tree_stream=output/'reference_2057x257_buffered.jxl'
+subprocess.run([harness, 'encode', str(crop), '1', str(tree_stream), '2', '0'], check=True)
+tree_layout=output/'reference_2057x257_buffered.layout.sem'
+with tree_layout.open('w') as result:
+    subprocess.run([harness, 'dump', str(tree_stream), 'entropy_layout'], stdout=result, check=True)
 raw=output/'reference_2057x257_raw.jxl'
 subprocess.run([harness, 'encode', str(crop), '1', str(raw), '0'], check=True)
 raw_layout=output/'reference_2057x257_raw.layout.sem'
@@ -60,12 +65,12 @@ result=subprocess.run([harness, 'dump', str(mutated_path), 'entropy_layout'],
 assert result.returncode != 0, 'selector mutation unexpectedly decoded'
 PYCODE
 JXL_CROSSCHECK_ELIGIBLE_INPUT="$OUT/pixel_lifecycle_2057x257.ppm" \
-  swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/write'
+  swift test --skip-build --filter 'SemanticCrossCheckTests.write'
 "$HARNESS" dump "$OUT/swift_2057x257.jxl" entropy_layout \
   > "$OUT/swift_2057x257.layout.sem"
-swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/(harnessAgreesWithEmitters|mutationsDifferInMutatedFieldOnly|actualSwiftLayoutsDecode)'
+swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/(harnessAgreesWithEmitters|mutationsDifferInMutatedFieldOnly|actualSwiftLayoutsDecode|decodedModularTreeCaptureUsesActualMultiDCStreams)'
 swift test --skip-build --filter '^JXLEncoderTests.EntropyReferenceTests/(streamingLayoutMatchesReferenceAboveEightGroups|entropyMutationIsReportedByItsExactField)'
 JXL_ENTROPY_STREAM_EXPORT_DIR="$OUT" swift test --skip-build \
   --filter '^JXLEncoderTests.EntropyReferenceTests/smallFrameSharesOne(AC|Prefix)CodeAcrossIndependentGroupStreams'
 JXL_ENTROPY_STREAM_EXPORT_DIR="$OUT" bash "$HERE/entropy-stream-crosscheck.sh"
-echo 'PASS semantic cross-check: Swift and reference layouts share the 2057x257 input; six reference encodes and two decoded mutations'
+echo 'PASS semantic cross-check: Swift and reference layouts share the 2057x257 input; buffered reference captures the merged tree; seven reference encodes and two decoded mutations'

@@ -37,6 +37,8 @@ struct EntropyLayout {
   size_t num_passes = 0;
   size_t num_histograms = 0;
   size_t selector_bits = 0;
+  size_t modular_tree_node_count = 0;
+  std::vector<int64_t> modular_tree_nodes;
   std::vector<LayoutSection> sections;
   std::vector<LayoutSelector> selectors;
 };
@@ -50,7 +52,8 @@ struct DecodedFrame {
 
 // Decodes the bare codestream's first frame. Returns false with a message on
 // stderr if it doesn't decode.
-bool DecodeFirstFrame(const std::vector<uint8_t>& codestream, DecodedFrame* frame);
+bool DecodeFirstFrame(const std::vector<uint8_t>& codestream, DecodedFrame* frame,
+                      bool capture_modular_tree = false);
 
 }  // namespace harness
 

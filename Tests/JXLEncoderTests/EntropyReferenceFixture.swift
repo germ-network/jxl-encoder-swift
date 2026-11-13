@@ -730,6 +730,43 @@ struct EntropyReferenceFixture {
 					})
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			}
+		} else if name == "tree_merged_multidc_2057x257" {
+			inputFields = [
+				"input.tree_merged.source_sha256", "input.tree_merged.crop_size",
+				"input.tree_merged.effort", "input.tree_merged.distance_milli",
+				"input.tree_merged.output_mode", "input.tree_merged.buffering",
+			]
+			expectedFields = [
+				"entropy.tree_merged.group_count",
+				"entropy.tree_merged.dc_group_count",
+				"entropy.tree_merged.node_count", "entropy.tree_merged.nodes",
+			]
+			let sourceHash = try integers(input, "input.tree_merged.source_sha256")
+			let cropSize = try integers(input, "input.tree_merged.crop_size")
+			let effort = try integers(input, "input.tree_merged.effort")
+			let distance = try integers(input, "input.tree_merged.distance_milli")
+			let outputMode = try integers(input, "input.tree_merged.output_mode")
+			let buffering = try integers(input, "input.tree_merged.buffering")
+			let groups = try integers(expected, "entropy.tree_merged.group_count")
+			let dcGroups = try integers(expected, "entropy.tree_merged.dc_group_count")
+			let nodeCount = try integers(expected, "entropy.tree_merged.node_count")
+			let nodes = try integers(expected, "entropy.tree_merged.nodes")
+			guard
+				sourceHash.count == 32,
+				sourceHash.allSatisfy({ (0...255).contains($0) }),
+				cropSize == [2057, 257], effort == [4], distance == [1000],
+				outputMode == [2], buffering == [0], groups == [18],
+				dcGroups == [2], nodeCount == [95], nodes.count == 95 * 7,
+				Array(nodes.prefix(7)) == [1, 4, 1, 2, 0, 0, 1],
+				stride(from: 0, to: nodes.count, by: 7).allSatisfy({ index in
+					let node = Array(nodes[index..<(index + 7)])
+					return node[0] >= -1 && node[6] > 0
+						&& (node[0] == -1
+							|| (node[2] > 0 && node[2] < nodeCount[0]
+								&& node[3] > 0
+								&& node[3] < nodeCount[0]))
+				})
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("tree_gradient_fixed_")
 			|| name.hasPrefix("tree_wp_fixed_")
 			|| name.hasPrefix("tree_acmeta_")

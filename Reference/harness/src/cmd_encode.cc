@@ -14,10 +14,14 @@ bool Encode(const std::vector<std::string>& args) {
   float distance = std::strtof(args[1].c_str(), &end);
   if (end == args[1].c_str() || *end || !std::isfinite(distance) || distance <= 0) return false;
   int output_mode = 0;
-  if (args.size() == 4) {
+  if (args.size() >= 4) {
     long parsed = std::strtol(args[3].c_str(), &end, 10);
     if (end == args[3].c_str() || *end || parsed < 0 || parsed > 2) return false;
     output_mode = static_cast<int>(parsed);
+  }
+  if (args.size() == 5) {
+    long parsed = std::strtol(args[4].c_str(), &end, 10);
+    if (end == args[4].c_str() || *end || parsed != 0) return false;
   }
   const bool linear = args[0].size() >= 5 && args[0].substr(args[0].size()-5) == ".dump";
   uint32_t width, height;
@@ -55,6 +59,7 @@ bool Encode(const std::vector<std::string>& args) {
   auto* settings = JxlEncoderFrameSettingsCreate(enc.get(), nullptr);
   if (JxlEncoderFrameSettingsSetOption(settings, JXL_ENC_FRAME_SETTING_EFFORT, 4) != JXL_ENC_SUCCESS ||
       JxlEncoderFrameSettingsSetOption(settings, JXL_ENC_FRAME_SETTING_OUTPUT_MODE, output_mode) != JXL_ENC_SUCCESS ||
+      (args.size() == 5 && JxlEncoderFrameSettingsSetOption(settings, JXL_ENC_FRAME_SETTING_BUFFERING, 0) != JXL_ENC_SUCCESS) ||
       JxlEncoderSetFrameDistance(settings, distance) != JXL_ENC_SUCCESS) return false;
   JxlPixelFormat format{3, linear ? JXL_TYPE_FLOAT : JXL_TYPE_UINT8, JXL_NATIVE_ENDIAN, 0};
   const void* pixels = linear ? static_cast<const void*>(floats.data()) : bytes.data();
@@ -73,10 +78,10 @@ bool Encode(const std::vector<std::string>& args) {
   std::ofstream out(args[2], std::ios::binary); out.write(reinterpret_cast<const char*>(output.data()), used); out.close(); return !out.fail();
 }
 int RunEncode(const std::vector<std::string>& args) {
-  if (args.size() != 3 && args.size() != 4) return 2;
+  if (args.size() < 3 || args.size() > 5) return 2;
   if (Encode(args)) return 0;
   std::fprintf(stderr, "encode: invalid input or encoding failed\n"); return 1;
 }
-const RegisterSubcommand kRegister({"encode", "<in.ppm|in.dump> <distance> <out.jxl> [output_mode 0..2]", RunEncode});
+const RegisterSubcommand kRegister({"encode", "<in.ppm|in.dump> <distance> <out.jxl> [output_mode 0..2 [buffering=0]]", RunEncode});
 }
 }  // namespace harness

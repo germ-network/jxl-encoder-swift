@@ -22,6 +22,9 @@ void DumpEntropyLayout(const DecodedFrame &frame, SemanticDumpWriter &out) {
                {static_cast<int64_t>(layout.num_histograms)});
   out.Integers("entropy_layout.selector_bits",
                {static_cast<int64_t>(layout.selector_bits)});
+  out.Integers("entropy_layout.modular_tree.node_count",
+               {static_cast<int64_t>(layout.modular_tree_node_count)});
+  out.Integers("entropy_layout.modular_tree.nodes", layout.modular_tree_nodes);
 
   std::vector<int64_t> section_ids;
   std::vector<int64_t> section_indices;

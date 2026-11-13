@@ -16,7 +16,7 @@ mkdir -p "$out"
 pin="$LIBJXL_COMMIT"
 tmp="$(mktemp)"
 sorted_entropy="$tmp.entropy"
-trap 'rm -f "$tmp" "$sorted_entropy" "$tmp.modular.0" "$tmp.modular.1"' EXIT
+trap 'rm -f "$tmp" "$sorted_entropy" "$tmp.modular.0" "$tmp.modular.1" "$tmp.tree-input.ppm" "$tmp.tree.jxl" "$tmp.tree-layout.sem"' EXIT
 head -n 2 "$root/Reference/provenance.tsv" > "$tmp"
 awk -F '\t' 'NR > 2 && $1 !~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$root/Reference/provenance.tsv" >> "$tmp"
@@ -672,6 +672,64 @@ for name in hybrid_uint_4_2_0 pack_signed_full_reference huffman_tree_full_refer
 	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy_primitives.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tpinned primitive outputs; hwy=NEON\tTests/JXLEncoderTests/EntropyTests.swift,Tests/JXLEncoderTests/PrefixCodeWriterTests.swift\n' \
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 done
+
+tree_name=tree_merged_multidc_2057x257
+tree_input="$out/$tree_name.input.sem"
+tree_expected="$out/$tree_name.expected.sem"
+tree_source="$root/Tests/JXLEncoderTests/Fixtures/semantic/pixel_lifecycle_2057x521.ppm"
+python3 - "$tree_source" "$tree_input" <<'PYCODE'
+import hashlib, sys
+from pathlib import Path
+source, destination = map(Path, sys.argv[1:])
+digest = hashlib.sha256(source.read_bytes()).digest()
+text = ['jxl-semantic-dump 1']
+text += [
+    'input.tree_merged.source_sha256 i 32 ' + ' '.join(map(str, digest)),
+    'input.tree_merged.crop_size i 2 2057 257',
+    'input.tree_merged.effort i 1 4',
+    'input.tree_merged.distance_milli i 1 1000',
+    'input.tree_merged.output_mode i 1 2',
+    'input.tree_merged.buffering i 1 0',
+]
+destination.write_text('\n'.join(text) + '\n')
+PYCODE
+python3 - "$tree_source" "$tmp.tree-input.ppm" <<'PYCODE'
+import re, sys
+from pathlib import Path
+source, destination = map(Path, sys.argv[1:])
+data = source.read_bytes()
+match = re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s', data)
+assert match and tuple(map(int, match.groups())) == (2057, 521)
+payload = data[match.end():]
+row = 2057 * 3
+destination.write_bytes(b'P6\n2057 257\n255\n' + b''.join(
+    payload[y * row:(y + 1) * row] for y in range(257)))
+PYCODE
+"$harness" encode "$tmp.tree-input.ppm" 1 "$tmp.tree.jxl" 2 0
+"$harness" dump "$tmp.tree.jxl" entropy_layout > "$tmp.tree-layout.sem"
+python3 - "$tmp.tree-layout.sem" "$tree_expected" <<'PYCODE'
+import sys
+from pathlib import Path
+source, destination = map(Path, sys.argv[1:])
+fields = {line.split()[0]: line for line in source.read_text().splitlines()[1:]}
+mapping = {
+    'entropy_layout.group_count': 'entropy.tree_merged.group_count',
+    'entropy_layout.dc_group_count': 'entropy.tree_merged.dc_group_count',
+    'entropy_layout.modular_tree.node_count': 'entropy.tree_merged.node_count',
+    'entropy_layout.modular_tree.nodes': 'entropy.tree_merged.nodes',
+}
+output = ['jxl-semantic-dump 1']
+for original, expected in mapping.items():
+    line = fields[original]
+    output.append(expected + line[len(original):])
+destination.write_text('\n'.join(output) + '\n')
+PYCODE
+tree_input_hash="$(shasum -a 256 "$tree_input" | cut -d ' ' -f 1)"
+tree_expected_hash="$(shasum -a 256 "$tree_expected" | cut -d ' ' -f 1)"
+printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/semantic/pixel_lifecycle_2057x521.ppm\t-\tcrop=2057x257 effort=4 distance=1 output_mode=2 buffering=0\tEntropyReferenceTests.swift,SemanticCrossCheckTests.swift\n' \
+	"$tree_name" "$tree_input_hash" >> "$tmp"
+printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/decoded_frame.cc,Reference/harness/src/capture_modular_tree.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tdecoded merged tree; groups=18 dc_groups=2 hwy=NEON\tSemanticCrossCheckTests.swift\n' \
+	"$tree_name" "$tree_expected_hash" "$tree_name" "$pin" >> "$tmp"
 
 git -C "$root" show HEAD:Reference/provenance.tsv \
 	| awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\/stream_shared_(ans|prefix)\.(input|expected|receipt)\.sem$/' \

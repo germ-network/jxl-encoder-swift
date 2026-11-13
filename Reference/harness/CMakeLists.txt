@@ -24,6 +24,10 @@ add_subdirectory("${LIBJXL_DIR}" libjxl EXCLUDE_FROM_ALL)
 file(GLOB HARNESS_SOURCES CONFIGURE_DEPENDS
   "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc")
 
+set_source_files_properties(
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/capture_modular_tree.cc"
+  PROPERTIES COMPILE_OPTIONS "-fno-access-control")
+
 add_executable(jxl-harness ${HARNESS_SOURCES})
 target_include_directories(jxl-harness PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
