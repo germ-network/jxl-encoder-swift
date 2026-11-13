@@ -405,7 +405,7 @@ extension SemanticDump {
 		}
 		record("image_header.size", .integers([Int64(t.width), Int64(t.height)]))
 		record("image_header.transfer_function", .integers([13]))
-		record("image_header.color_space", .integers([0]))
+		record("image_header.color_space", .integers([t.isGrayscale ? 1 : 0]))
 		record("image_header.white_point", .integers([1]))
 		record("image_header.primaries", .integers([1]))
 		record("image_header.rendering_intent", .integers([1]))
