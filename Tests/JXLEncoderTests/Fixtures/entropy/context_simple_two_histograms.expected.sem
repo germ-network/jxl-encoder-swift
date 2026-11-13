@@ -1,0 +1,11 @@
+jxl-semantic-dump 1
+entropy.context_map.bit_count i 1 9
+entropy.context_map.bytes i 2 83 1
+entropy.context_map.entries i 6 0 1 0 1 0 1
+entropy.context_map.entry_bits i 1 1
+entropy.context_map.num_histograms i 1 2
+entropy.context_map.simple i 1 1
+entropy.context_map.token_count i 1 -1
+entropy.context_map.token_count_status i 1 0
+entropy.context_map.use_mtf i 1 0
+entropy.context_map.use_prefix_code i 1 -1

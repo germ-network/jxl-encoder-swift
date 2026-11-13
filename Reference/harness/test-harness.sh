@@ -115,8 +115,19 @@ entropy_rejects_unsafe_histogram_config() {
   if "$HARNESS" entropy histogram 5 fast "${counts[@]}"; then return 1; fi
   if "$HARNESS" entropy histogram 7 fast 2147483647 2147483647 2; then return 1; fi
   if "$HARNESS" entropy cluster fast 2 2147483647 2147483647 2; then return 1; fi
+  if "$HARNESS" entropy context-map 0 0; then return 1; fi
+  if "$HARNESS" entropy context-map 2 0 2; then return 1; fi
+  if "$HARNESS" entropy context-map 16 0 1 --mtf 0; then return 1; fi
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config; do
+entropy_context_map_decisions_match_fixtures() {
+  "$HARNESS" entropy context-map 2 0 1 0 1 0 1 > "$SCRATCH/context_simple.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/context_simple_two_histograms.expected.sem" "$SCRATCH/context_simple.sem"
+  "$HARNESS" entropy context-map 2 0 1 0 1 0 1 --mtf 0 1 1 1 1 1 > "$SCRATCH/context_profitability.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/context_simple_profitability.expected.sem" "$SCRATCH/context_profitability.sem"
+  "$HARNESS" entropy context-map 16 0 1 --mtf 0 1 > "$SCRATCH/context_tie.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/context_tie_raw_mtf.expected.sem" "$SCRATCH/context_tie.sem"
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures; do
   "$check"
   echo "PASS $check"
 done

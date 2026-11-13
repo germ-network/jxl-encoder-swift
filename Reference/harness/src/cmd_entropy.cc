@@ -12,6 +12,11 @@
 #include "lib/jxl/enc_ans.h"
 #include "lib/jxl/enc_ans_params.h"
 #include "lib/jxl/enc_cluster.h"
+#include "lib/jxl/enc_context_map.h"
+#include "lib/jxl/dec_ans.h"
+#include "lib/jxl/dec_bit_reader.h"
+#include "lib/jxl/fields.h"
+#include "lib/jxl/base/bits.h"
 #include "lib/jxl/enc_aux_out.h"
 #include "lib/jxl/memory_manager_internal.h"
 
@@ -194,6 +199,149 @@ int RunClusters(const std::vector<std::string>& args) {
   return 0;
 }
 
+int RunContextMap(const std::vector<std::string>& args) {
+  if (args.size() < 2) return 2;
+  int num_histograms = 0;
+  if (!ParseInt(args[0], &num_histograms) || num_histograms < 1 ||
+      num_histograms > 255) return 2;
+  auto mtf_marker = std::find(args.begin() + 1, args.end(), "--mtf");
+  const bool measure_mtf = mtf_marker != args.end();
+  const size_t entries_end = measure_mtf
+                                 ? static_cast<size_t>(mtf_marker - args.begin())
+                                 : args.size();
+  std::vector<uint8_t> entries;
+  for (size_t i = 1; i < entries_end; ++i) {
+    int entry = 0;
+    if (!ParseInt(args[i], &entry) || entry < 0 || entry >= num_histograms)
+      return 2;
+    entries.push_back(static_cast<uint8_t>(entry));
+  }
+  if (entries.empty() || entries.size() > 1'000'000) return 2;
+  std::vector<uint8_t> mtf_entries;
+  if (measure_mtf) {
+    for (auto it = mtf_marker + 1; it != args.end(); ++it) {
+      int entry = 0;
+      if (!ParseInt(*it, &entry) || entry < 0 || entry >= num_histograms)
+        return 2;
+      mtf_entries.push_back(static_cast<uint8_t>(entry));
+    }
+    if (mtf_entries.size() != entries.size()) return 2;
+  }
+
+  JxlMemoryManager manager;
+  if (!jxl::MemoryManagerInit(&manager, nullptr)) return 1;
+  jxl::BitWriter writer(&manager);
+  if (!writer.WithMaxBits(3 + entries.size() * 24, jxl::LayerType::Header,
+                          nullptr, [&] {
+                            return jxl::EncodeContextMap(
+                                entries, num_histograms, &writer,
+                                jxl::LayerType::Header, nullptr);
+                          })) return 1;
+  const size_t bit_count = writer.BitsWritten();
+  writer.ZeroPadToByte();
+  const auto bytes = writer.GetSpan();
+  size_t bit_offset = 0;
+  auto read_bits = [&](size_t count) {
+    size_t value = 0;
+    for (size_t i = 0; i < count; ++i, ++bit_offset) {
+      value |= size_t((bytes[bit_offset / 8] >> (bit_offset % 8)) & 1) << i;
+    }
+    return value;
+  };
+  int simple = 0;
+  int use_mtf = 0;
+  int entry_bits = -1;
+  int use_prefix_code = -1;
+  if (num_histograms == 1) {
+    simple = 1;
+    entry_bits = 0;
+  } else {
+    simple = static_cast<int>(read_bits(1));
+    if (simple) {
+      entry_bits = static_cast<int>(read_bits(2));
+    } else {
+      use_mtf = static_cast<int>(read_bits(1));
+      std::vector<uint8_t> encoded(bytes.begin(), bytes.end());
+      jxl::BitReader reader(encoded);
+      reader.ReadBits(2);
+      jxl::LZ77Params lz77;
+      if (!jxl::Bundle::Read(&reader, &lz77)) return 1;
+      use_prefix_code = static_cast<int>(reader.ReadBits(1));
+      if (!reader.Close()) return 1;
+    }
+  }
+  auto inspect_candidate = [&](const std::vector<uint8_t>& values,
+                               size_t* cost, size_t* token_count) -> bool {
+    jxl::HistogramParams params;
+    params.uint_method = jxl::HistogramParams::HybridUintMethod::kContextMap;
+    std::vector<std::vector<jxl::Token>> tokens(1);
+    for (uint8_t value : values) tokens[0].emplace_back(0, value);
+    jxl::EntropyEncodingData codes;
+    auto result = jxl::BuildAndEncodeHistograms(
+        &manager, params, 1, tokens, &codes, nullptr,
+        jxl::LayerType::Header, nullptr);
+    if (!result.ok()) return false;
+    *cost = std::move(result).value_();
+    *token_count = tokens[0].size();
+    return true;
+  };
+  size_t raw_cost = 0;
+  size_t mtf_cost = 0;
+  size_t raw_token_count = 0;
+  size_t mtf_token_count = 0;
+  if (measure_mtf &&
+      (!inspect_candidate(entries, &raw_cost, &raw_token_count) ||
+       !inspect_candidate(mtf_entries, &mtf_cost, &mtf_token_count))) return 1;
+  int64_t token_count = -1;
+  int64_t token_count_status = 0;
+  if (simple == 0) {
+    if (use_mtf == 1) {
+      if (measure_mtf) {
+        token_count = static_cast<int64_t>(mtf_token_count);
+        token_count_status = 2;
+      } else {
+        token_count_status = 3;
+      }
+    } else {
+      if (!measure_mtf &&
+          !inspect_candidate(entries, &raw_cost, &raw_token_count)) return 1;
+      token_count = static_cast<int64_t>(raw_token_count);
+      token_count_status = 1;
+    }
+  }
+  std::vector<int64_t> serialized(bytes.begin(), bytes.end());
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.context_map.entries",
+                std::vector<int64_t>(entries.begin(), entries.end()));
+  dump.Integers("entropy.context_map.num_histograms", {num_histograms});
+  dump.Integers("entropy.context_map.simple", {simple});
+  dump.Integers("entropy.context_map.entry_bits", {entry_bits});
+  dump.Integers("entropy.context_map.use_mtf", {use_mtf});
+  dump.Integers("entropy.context_map.use_prefix_code", {use_prefix_code});
+  dump.Integers("entropy.context_map.token_count", {token_count});
+  dump.Integers("entropy.context_map.token_count_status", {token_count_status});
+  dump.Integers("entropy.context_map.bit_count", {static_cast<int64_t>(bit_count)});
+  dump.Integers("entropy.context_map.bytes", serialized);
+  if (measure_mtf) {
+    dump.Integers("entropy.context_map.raw_cost", {static_cast<int64_t>(raw_cost)});
+    dump.Integers("entropy.context_map.mtf_cost", {static_cast<int64_t>(mtf_cost)});
+    dump.Integers("entropy.context_map.raw_token_count",
+                  {static_cast<int64_t>(raw_token_count)});
+    dump.Integers("entropy.context_map.mtf_token_count",
+                  {static_cast<int64_t>(mtf_token_count)});
+    const size_t simple_entry_bits =
+        jxl::CeilLog2Nonzero(static_cast<size_t>(num_histograms));
+    const int64_t simple_cost = simple_entry_bits < 4
+                                    ? static_cast<int64_t>(simple_entry_bits * entries.size())
+                                    : -1;
+    dump.Integers("entropy.context_map.simple_cost", {simple_cost});
+    dump.Integers("entropy.context_map.mtf_entries",
+                  std::vector<int64_t>(mtf_entries.begin(), mtf_entries.end()));
+  }
+  dump.Write(stdout);
+  return 0;
+}
+
 int RunEntropy(const std::vector<std::string>& args) {
   if (args.empty()) return 2;
   if (args[0] == "histogram") {
@@ -201,6 +349,9 @@ int RunEntropy(const std::vector<std::string>& args) {
   }
   if (args[0] == "cluster") {
     return RunClusters(std::vector<std::string>(args.begin() + 1, args.end()));
+  }
+  if (args[0] == "context-map") {
+    return RunContextMap(std::vector<std::string>(args.begin() + 1, args.end()));
   }
   return 2;
 }

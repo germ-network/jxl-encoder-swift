@@ -174,6 +174,197 @@ struct EntropyReferenceFixture {
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 				offset = end
 			}
+		} else if name.hasPrefix("context_") {
+			var requiredInputFields: Set<String> = [
+				"input.context_map.entries", "input.context_map.num_histograms",
+				"input.context_map.allow_ans", "input.context_map.map_length",
+			]
+			var requiredExpectedFields: Set<String> = [
+				"entropy.context_map.entries", "entropy.context_map.num_histograms",
+				"entropy.context_map.simple", "entropy.context_map.entry_bits",
+				"entropy.context_map.use_mtf",
+				"entropy.context_map.use_prefix_code",
+				"entropy.context_map.token_count",
+				"entropy.context_map.token_count_status",
+				"entropy.context_map.bit_count", "entropy.context_map.bytes",
+			]
+			let hasCandidates = [
+				"context_simple_profitability", "context_simple_tie_candidate",
+				"context_tie_raw_mtf", "context_mtf_ans", "context_raw_rle",
+			].contains(name)
+			if hasCandidates {
+				requiredInputFields.insert("input.context_map.mtf_entries")
+				requiredExpectedFields.formUnion([
+					"entropy.context_map.mtf_entries",
+					"entropy.context_map.raw_cost",
+					"entropy.context_map.mtf_cost",
+					"entropy.context_map.simple_cost",
+					"entropy.context_map.raw_token_count",
+					"entropy.context_map.mtf_token_count",
+				])
+			}
+			inputFields = requiredInputFields
+			expectedFields = requiredExpectedFields
+			let entries = try integers(input, "input.context_map.entries")
+			let mapLength = try integers(input, "input.context_map.map_length")
+			let candidateMTF =
+				hasCandidates
+				? try integers(input, "input.context_map.mtf_entries") : nil
+			let histograms = try integers(input, "input.context_map.num_histograms")
+			let allowANS = try integers(input, "input.context_map.allow_ans")
+			guard histograms.count == 1, (1...255).contains(histograms[0]),
+				allowANS.count == 1, (0...1).contains(allowANS[0]),
+				!entries.isEmpty, entries.count <= 1_000_000,
+				mapLength == [Int64(entries.count)],
+				entries.allSatisfy({ (0..<histograms[0]).contains($0) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			let outputEntries = try integers(expected, "entropy.context_map.entries")
+			let outputHistograms = try integers(
+				expected, "entropy.context_map.num_histograms")
+			let simple = try integers(expected, "entropy.context_map.simple")
+			let entryBits = try integers(expected, "entropy.context_map.entry_bits")
+			let useMTF = try integers(expected, "entropy.context_map.use_mtf")
+			let usePrefix = try integers(
+				expected, "entropy.context_map.use_prefix_code")
+			let tokenCount = try integers(expected, "entropy.context_map.token_count")
+			let tokenCountStatus = try integers(
+				expected, "entropy.context_map.token_count_status")
+			let bitCount = try integers(expected, "entropy.context_map.bit_count")
+			let bytes = try integers(expected, "entropy.context_map.bytes")
+			guard simple.count == 1, entryBits.count == 1,
+				useMTF.count == 1, usePrefix.count == 1,
+				tokenCount.count == 1, tokenCountStatus.count == 1,
+				bitCount.count == 1
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			if hasCandidates {
+				let outputMTF = try integers(
+					expected, "entropy.context_map.mtf_entries")
+				let rawCost = try integers(expected, "entropy.context_map.raw_cost")
+				let mtfCost = try integers(expected, "entropy.context_map.mtf_cost")
+				let simpleCost = try integers(
+					expected, "entropy.context_map.simple_cost")
+				let rawTokenCount = try integers(
+					expected, "entropy.context_map.raw_token_count")
+				let mtfTokenCount = try integers(
+					expected, "entropy.context_map.mtf_token_count")
+				let entryWidth = Int64(ceilLog2Nonzero(Int(histograms[0])))
+				guard outputMTF == candidateMTF,
+					rawCost.count == 1, rawCost[0] >= 0,
+					mtfCost.count == 1, mtfCost[0] >= 0,
+					rawTokenCount.count == 1, rawTokenCount[0] >= 0,
+					mtfTokenCount.count == 1, mtfTokenCount[0] >= 0,
+					simpleCost == [
+						entryWidth < 4
+							? entryWidth * Int64(entries.count) : -1
+					]
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+				if name == "context_tie_raw_mtf" {
+					guard candidateMTF == entries, mtfCost == rawCost,
+						entries == [0, 1], histograms == [16],
+						simpleCost == [-1]
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+				} else if name == "context_simple_profitability" {
+					guard entries == [0, 1, 0, 1, 0, 1],
+						candidateMTF == [0, 1, 1, 1, 1, 1],
+						histograms == [2],
+						simpleCost[0] < rawCost[0],
+						simpleCost[0] < mtfCost[0]
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+				} else if name == "context_mtf_ans" {
+					guard
+						entries
+							== Array(repeating: [0, 1], count: 150)
+							.flatMap({ $0 }),
+						candidateMTF == [0]
+							+ Array(repeating: 1, count: 299),
+						histograms == [4], simpleCost == [600],
+						mtfCost[0] < rawCost[0],
+						mtfTokenCount[0] == tokenCount[0]
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+				} else if name == "context_raw_rle" {
+					var expectedEntries = [Int]()
+					expectedEntries.reserveCapacity(80)
+					for value in 0..<4 {
+						expectedEntries.append(
+							contentsOf: repeatElement(value, count: 20))
+					}
+					var expectedMTF = [Int](repeating: 0, count: 20)
+					for value in 1...3 {
+						expectedMTF.append(value)
+						expectedMTF.append(
+							contentsOf: repeatElement(0, count: 19))
+					}
+					guard entries.map(Int.init) == expectedEntries,
+						candidateMTF?.map(Int.init) == expectedMTF,
+						histograms == [4], rawCost[0] < mtfCost[0],
+						simpleCost == [160], simple == [0], useMTF == [0],
+						tokenCountStatus == [1]
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+				} else {
+					guard
+						entries == [
+							1, 1, 0, 1, 1, 1, 1, 1, 1, 2, 2, 1, 1, 2, 2,
+							1,
+							2, 1, 0, 1, 1, 2, 1, 1, 0, 0, 2, 1, 1, 1, 1,
+							0, 0, 0,
+							1, 0, 2, 2, 2, 1, 0, 1, 1, 0, 1, 1, 0, 0,
+						],
+						candidateMTF == [
+							1, 0, 1, 1, 0, 0, 0, 0, 0, 2, 0, 1, 0, 1,
+							0, 1, 1, 1, 2, 1, 0, 2, 1, 0, 2, 0, 2, 2, 0,
+							0, 0, 2,
+							0, 0, 1, 1, 2, 0, 0, 2, 2, 1, 0, 1, 1, 0, 1,
+							0,
+						],
+						histograms == [3], rawCost == simpleCost,
+						simple == [0], useMTF == [0]
+					else {
+						throw SemanticDumpError.unsupportedEntropyFixture(
+							name)
+					}
+				}
+			}
+			let encodedByteCount =
+				bitCount[0] >= 0
+				? bitCount[0] / 8 + (bitCount[0].isMultiple(of: 8) ? 0 : 1)
+				: -1
+			guard outputEntries == entries,
+				outputHistograms == histograms,
+				(0...1).contains(simple[0]),
+				simple[0] == 1
+					? (0...3).contains(entryBits[0]) : entryBits[0] == -1,
+				(0...1).contains(useMTF[0]),
+				simple[0] == 1
+					? usePrefix[0] == -1 : (0...1).contains(usePrefix[0]),
+				simple[0] == 1
+					? tokenCount == [-1] && tokenCountStatus == [0]
+					: (tokenCount[0] >= 0
+						&& (1...3).contains(tokenCountStatus[0])),
+				encodedByteCount == Int64(bytes.count),
+				bytes.allSatisfy({ (0...255).contains($0) })
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			if name == "context_prefix_99" || name == "context_ans_100" {
+				let boundary = name == "context_prefix_99" ? 99 : 100
+				guard mapLength == [Int64(boundary)],
+					tokenCount == [Int64(boundary)], tokenCountStatus == [1]
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
+			if name == "context_mtf_ans" {
+				guard simple == [0], useMTF == [1], tokenCountStatus == [2]
+				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			}
 		} else {
 			throw SemanticDumpError.unsupportedEntropyFixture(name)
 		}

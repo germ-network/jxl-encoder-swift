@@ -76,6 +76,58 @@ generate_cluster() {
 		"$name" "$expected_hash" "$name" "$pin" "$mode" "$limit" >> "$tmp"
 }
 
+generate_context_map() {
+	local name="$1" num_histograms="$2" allow_ans="$3"; shift 3
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.context_map.entries i %s' "$#"
+		if (($# > 0)); then printf ' %s' "$@"; fi
+		printf '\ninput.context_map.map_length i 1 %s\n' "$#"
+		printf 'input.context_map.num_histograms i 1 %s\n' "$num_histograms"
+		printf 'input.context_map.allow_ans i 1 %s\n' "$allow_ans"
+	} > "$input"
+	"$harness" entropy context-map "$num_histograms" "$@" > "$out/$name.expected.sem"
+	local input_hash expected_hash input_list
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	input_list="${*// /;}"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map parameters in generator\t-\tnum_histograms=%s allow_ans=%s entries=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" "$num_histograms" "$allow_ans" "$input_list" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap num_histograms=%s hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" "$num_histograms" >> "$tmp"
+}
+
+generate_context_map_with_candidates() {
+	local name="$1" num_histograms="$2"; shift 2
+	local input="$out/$name.input.sem"
+	local -a entries=() mtf_entries=()
+	local section=entries value
+	for value in "$@"; do
+		if [[ "$value" == "--mtf" ]]; then section=mtf; continue; fi
+		if [[ "$section" == entries ]]; then entries+=("$value"); else mtf_entries+=("$value"); fi
+	done
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.context_map.entries i %s' "${#entries[@]}"
+		printf ' %s' "${entries[@]}"
+		printf '\ninput.context_map.map_length i 1 %s' "${#entries[@]}"
+		printf '\ninput.context_map.num_histograms i 1 %s\n' "$num_histograms"
+		printf 'input.context_map.allow_ans i 1 1\n'
+		printf 'input.context_map.mtf_entries i %s' "${#mtf_entries[@]}"
+		printf ' %s' "${mtf_entries[@]}"
+		printf '\n'
+	} > "$input"
+	"$harness" entropy context-map "$num_histograms" "${entries[@]}" --mtf "${mtf_entries[@]}" > "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map candidates in generator\t-\tnum_histograms=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$input_hash" "$num_histograms" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap selected mode/bytes; BuildAndEncodeHistograms candidate costs and post-LZ77 token counts with default context-map params; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
 rm -f "$out"/ans_sparse_precise.* "$out"/ans_skewed_approximate.* \
 	"$out"/ans_boundary_fast.* "$out"/ans_threshold48_fast.* \
 	"$out"/ans_threshold64_fast.*
@@ -119,6 +171,41 @@ for ((index = 0; index < 10; index++)); do
 done
 generate_cluster clusters_default_cap_fast fast 8 "${over_eight_rows[@]}"
 generate_cluster clusters_over_eight_fast fast 9 "${over_eight_rows[@]}"
+
+generate_context_map context_single_histogram 1 0 0 0 0 0
+generate_context_map context_simple_two_histograms 2 0 0 1 0 1 0 1
+context_alt=()
+context_raw=()
+for ((index = 0; index < 300; index++)); do
+	context_alt+=($((index % 2)))
+	context_raw+=($((((index * 73 + 19) ^ (index * 11)) % 16)))
+done
+context_alt_mtf=(0)
+for ((index = 1; index < 300; index++)); do context_alt_mtf+=(1); done
+generate_context_map_with_candidates context_mtf_ans 4 "${context_alt[@]}" --mtf "${context_alt_mtf[@]}"
+generate_context_map context_raw_ans 16 1 "${context_raw[@]}"
+context_99=()
+context_100=()
+for ((index = 0; index < 100; index++)); do
+	value=$((((index * 73 + 19) ^ (index * 11)) % 16))
+	if ((index < 99)); then context_99+=($value); fi
+	context_100+=($value)
+done
+generate_context_map context_prefix_99 16 1 "${context_99[@]}"
+generate_context_map context_ans_100 16 1 "${context_100[@]}"
+generate_context_map_with_candidates context_simple_profitability 2 0 1 0 1 0 1 --mtf 0 1 1 1 1 1
+generate_context_map_with_candidates context_tie_raw_mtf 16 0 1 --mtf 0 1
+context_simple_tie_entries=(1 1 0 1 1 1 1 1 1 2 2 1 1 2 2 1 2 1 0 1 1 2 1 1 0 0 2 1 1 1 1 0 0 0 1 0 2 2 2 1 0 1 1 0 1 1 0 0)
+context_simple_tie_mtf=(1 0 1 1 0 0 0 0 0 2 0 1 0 1 0 1 1 1 2 1 0 2 1 0 2 0 2 2 0 0 0 2 0 0 1 1 2 0 0 2 2 1 0 1 1 0 1 0)
+generate_context_map_with_candidates context_simple_tie_candidate 3 "${context_simple_tie_entries[@]}" --mtf "${context_simple_tie_mtf[@]}"
+context_rle_entries=()
+context_rle_mtf=()
+for ((symbol = 0; symbol < 4; symbol++)); do
+	for ((repeat = 0; repeat < 20; repeat++)); do context_rle_entries+=($symbol); done
+	context_rle_mtf+=($symbol)
+	for ((repeat = 1; repeat < 20; repeat++)); do context_rle_mtf+=(0); done
+done
+generate_context_map_with_candidates context_raw_rle 4 "${context_rle_entries[@]}" --mtf "${context_rle_mtf[@]}"
 
 { head -n 2 "$tmp"; tail -n +3 "$tmp" | sort -t $'\t' -k1,1; } > "$root/Reference/provenance.tsv"
 "$root/Reference/pin-check.sh" "$linked"

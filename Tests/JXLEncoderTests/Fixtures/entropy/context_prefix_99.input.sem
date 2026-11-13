@@ -1,0 +1,5 @@
+jxl-semantic-dump 1
+input.context_map.entries i 99 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3
+input.context_map.map_length i 1 99
+input.context_map.num_histograms i 1 16
+input.context_map.allow_ans i 1 1

@@ -93,6 +93,100 @@ struct EntropyReferenceTests {
 	}
 
 	@Test
+	func contextMapSimpleChoiceIsStrictlyCheaper() throws {
+		let fixture = try EntropyReferenceFixture.load("context_simple_profitability")
+		guard
+			case .integers(let simpleCost)? = fixture.expected.fields[
+				"entropy.context_map.simple_cost"],
+			case .integers(let rawCost)? = fixture.expected.fields[
+				"entropy.context_map.raw_cost"],
+			case .integers(let mtfCost)? = fixture.expected.fields[
+				"entropy.context_map.mtf_cost"]
+		else { throw SemanticDumpError.unimplemented }
+		#expect(fixture.expected.fields["entropy.context_map.simple"] == .integers([1]))
+		#expect(simpleCost[0] < rawCost[0])
+		#expect(simpleCost[0] < mtfCost[0])
+	}
+
+	@Test
+	func contextMapRejectsSimpleCodingAtEqualCandidateCost() throws {
+		let fixture = try EntropyReferenceFixture.load("context_simple_tie_candidate")
+		#expect(
+			fixture.expected.fields["entropy.context_map.simple_cost"]
+				== fixture.expected.fields["entropy.context_map.raw_cost"])
+		#expect(fixture.expected.fields["entropy.context_map.simple"] == .integers([0]))
+		#expect(fixture.expected.fields["entropy.context_map.use_mtf"] == .integers([0]))
+	}
+
+	@Test
+	func contextMapTokenCountsComeFromPinnedCandidateProbe() throws {
+		for (name, count) in [("context_prefix_99", 99), ("context_ans_100", 100)] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			#expect(
+				fixture.expected.fields["entropy.context_map.token_count"]
+					== .integers([Int64(count)]))
+			#expect(
+				fixture.expected.fields["entropy.context_map.token_count_status"]
+					== .integers([1]))
+		}
+		let mtf = try EntropyReferenceFixture.load("context_mtf_ans")
+		#expect(mtf.expected.fields["entropy.context_map.use_mtf"] == .integers([1]))
+		#expect(
+			mtf.expected.fields["entropy.context_map.token_count_status"]
+				== .integers([2]))
+		#expect(
+			mtf.expected.fields["entropy.context_map.token_count"]
+				== mtf.expected.fields["entropy.context_map.mtf_token_count"])
+		let rle = try EntropyReferenceFixture.load("context_raw_rle")
+		#expect(rle.expected.fields["entropy.context_map.simple"] == .integers([0]))
+		#expect(rle.expected.fields["entropy.context_map.use_mtf"] == .integers([0]))
+		#expect(rle.expected.fields["entropy.context_map.token_count"] == .integers([12]))
+		#expect(
+			rle.expected.fields["entropy.context_map.token_count"]
+				== rle.expected.fields["entropy.context_map.raw_token_count"])
+		#expect(
+			rle.expected.fields["entropy.context_map.token_count_status"]
+				== .integers([1]))
+		#expect(
+			rle.expected.fields["entropy.context_map.token_count"]
+				!= rle.input.fields["input.context_map.map_length"])
+	}
+
+	@Test
+	func contextMapTokenStatusSeparatesInapplicableFromUnobserved() throws {
+		for (name, status) in [("context_single_histogram", 0), ("context_prefix_99", 3)] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let entries)? = fixture.input.fields[
+					"input.context_map.entries"],
+				case .integers(let numHistograms)? = fixture.input.fields[
+					"input.context_map.num_histograms"],
+				case .integers(let allowANS)? = fixture.input.fields[
+					"input.context_map.allow_ans"]
+			else { throw SemanticDumpError.unimplemented }
+			let swift = try SwiftEntropySemanticEncoding.contextMap(
+				entries: entries.map(UInt8.init),
+				numHistograms: Int(numHistograms[0]),
+				allowANS: allowANS[0] != 0)
+			#expect(
+				swift.fields["entropy.context_map.token_count_status"]
+					== .integers([Int64(status)]))
+			#expect(swift.fields["entropy.context_map.token_count"] == .integers([-1]))
+		}
+	}
+
+	@Test
+	func contextMapRawWinsExactCostTie() throws {
+		let fixture = try EntropyReferenceFixture.load("context_tie_raw_mtf")
+		#expect(
+			fixture.expected.fields["entropy.context_map.raw_cost"]
+				== fixture.expected.fields["entropy.context_map.mtf_cost"])
+		#expect(
+			fixture.expected.fields["entropy.context_map.use_mtf"]
+				== .integers([0]))
+	}
+
+	@Test
 	func malformedFixturesAreRejectedBeforeEncodingHelpers() throws {
 		let histogram = try EntropyReferenceFixture.load("ans_singleton_precise")
 		let badCounts = try SemanticDump(
@@ -178,6 +272,56 @@ struct EntropyReferenceTests {
 			try EntropyReferenceFixture.validate(
 				name: "clusters_farthest_fast", input: clusterOverflow.input,
 				expected: overflowingTotals)
+		}
+		let context = try EntropyReferenceFixture.load("context_ans_100")
+		let outOfRangeMap = try SemanticDump(
+			parsing: context.input.serialized.replacingOccurrences(
+				of: "input.context_map.entries i 100 3 7",
+				with: "input.context_map.entries i 100 16 7"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_ans_100", input: outOfRangeMap,
+				expected: context.expected)
+		}
+		for invalidHistogramCount in [0, 256] {
+			#expect(throws: Error.self) {
+				try SwiftEntropySemanticEncoding.contextMap(
+					entries: [0], numHistograms: invalidHistogramCount,
+					allowANS: false)
+			}
+		}
+		#expect(throws: Error.self) {
+			try SwiftEntropySemanticEncoding.contextMap(
+				entries: [], numHistograms: 1, allowANS: false)
+		}
+		let contextTie = try EntropyReferenceFixture.load("context_tie_raw_mtf")
+		let badCost = try SemanticDump(
+			parsing: contextTie.expected.serialized.replacingOccurrences(
+				of: "entropy.context_map.mtf_cost i 1 23",
+				with: "entropy.context_map.mtf_cost i 1 22"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_tie_raw_mtf", input: contextTie.input,
+				expected: badCost)
+		}
+		let contextMTF = try EntropyReferenceFixture.load("context_mtf_ans")
+		let emptySelectedTokenCount = try SemanticDump(
+			parsing: contextMTF.expected.serialized.replacingOccurrences(
+				of: "entropy.context_map.token_count i 1 300",
+				with: "entropy.context_map.token_count i 0"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_mtf_ans", input: contextMTF.input,
+				expected: emptySelectedTokenCount)
+		}
+		let emptyMTFCandidateTokenCount = try SemanticDump(
+			parsing: contextMTF.expected.serialized.replacingOccurrences(
+				of: "entropy.context_map.mtf_token_count i 1 300",
+				with: "entropy.context_map.mtf_token_count i 0"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "context_mtf_ans", input: contextMTF.input,
+				expected: emptyMTFCandidateTokenCount)
 		}
 	}
 
@@ -318,10 +462,99 @@ struct EntropyReferenceTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting entropy reference implementation"))
+	@Test
 	func contextMapChoiceMatchesReference() throws {
-		Issue.record(
-			"Context map coding choices match the reference for identical map inputs.")
+		for (name, knownDifferences) in [
+			("context_single_histogram", Set<String>()),
+			(
+				"context_simple_two_histograms",
+				Set([
+					"entropy.context_map.simple",
+					"entropy.context_map.entry_bits",
+					"entropy.context_map.use_prefix_code",
+					"entropy.context_map.bit_count",
+					"entropy.context_map.bytes",
+				])
+			),
+			(
+				"context_mtf_ans",
+				Set([
+					"entropy.context_map.use_mtf",
+					"entropy.context_map.bit_count",
+					"entropy.context_map.bytes",
+				])
+			),
+			(
+				"context_raw_ans",
+				Set([
+					"entropy.context_map.bit_count",
+					"entropy.context_map.bytes",
+				])
+			),
+			(
+				"context_prefix_99",
+				Set(["entropy.context_map.bit_count", "entropy.context_map.bytes"])
+			),
+			(
+				"context_ans_100",
+				Set(["entropy.context_map.bit_count", "entropy.context_map.bytes"])
+			),
+			(
+				"context_simple_tie_candidate",
+				Set(["entropy.context_map.bit_count", "entropy.context_map.bytes"])
+			),
+			(
+				"context_raw_rle",
+				Set([
+					"entropy.context_map.bit_count",
+					"entropy.context_map.bytes",
+					"entropy.context_map.use_prefix_code",
+				])
+			),
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let entries)? = fixture.input.fields[
+					"input.context_map.entries"],
+				case .integers(let numHistograms)? = fixture.input.fields[
+					"input.context_map.num_histograms"],
+				case .integers(let allowANS)? = fixture.input.fields[
+					"input.context_map.allow_ans"]
+			else { throw SemanticDumpError.unimplemented }
+			let actual = try SwiftEntropySemanticEncoding.contextMap(
+				entries: entries.map(UInt8.init),
+				numHistograms: Int(numHistograms[0]),
+				allowANS: allowANS[0] != 0)
+			let probeOnlyFields: Set<String> = [
+				"entropy.context_map.token_count",
+				"entropy.context_map.token_count_status",
+				"entropy.context_map.mtf_entries",
+				"entropy.context_map.raw_cost",
+				"entropy.context_map.mtf_cost",
+				"entropy.context_map.simple_cost",
+				"entropy.context_map.raw_token_count",
+				"entropy.context_map.mtf_token_count",
+			]
+			let differences = actual.differences(
+				from: fixture.expected, excludingFields: probeOnlyFields)
+			let differenceFields = Set(differences.map(\.field))
+			#expect(differenceFields == knownDifferences, "\(name): \(differences)")
+			#expect(
+				actual.differences(
+					from: fixture.expected,
+					excludingFields: knownDifferences.union(probeOnlyFields)
+				)
+				.isEmpty,
+				"\(name) has unexpected context-map differences")
+			for field in knownDifferences {
+				let fieldDifferences = differences.filter { $0.field == field }
+				withKnownIssue(Comment(rawValue: "GER-3386: \(field)")) {
+					#expect(
+						fieldDifferences.isEmpty,
+						"\(name): \(fieldDifferences)")
+				}
+			}
+		}
 	}
 
 	@Test(.disabled("Awaiting entropy reference implementation"))

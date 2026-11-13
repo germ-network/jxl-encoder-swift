@@ -1,0 +1,11 @@
+jxl-semantic-dump 1
+entropy.context_map.bit_count i 1 365
+entropy.context_map.bytes i 46 160 8 85 140 49 140 97 12 156 72 220 39 188 221 80 252 118 52 216 219 63 50 107 191 217 80 252 118 220 220 219 63 50 107 191 217 76 252 118 120 220 219 7 45 107 31
+entropy.context_map.entries i 100 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15 11 7 11 15 3 7 3 15
+entropy.context_map.entry_bits i 1 -1
+entropy.context_map.num_histograms i 1 16
+entropy.context_map.simple i 1 0
+entropy.context_map.token_count i 1 100
+entropy.context_map.token_count_status i 1 1
+entropy.context_map.use_mtf i 1 0
+entropy.context_map.use_prefix_code i 1 0
