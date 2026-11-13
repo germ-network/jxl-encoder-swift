@@ -59,9 +59,13 @@ result=subprocess.run([harness, 'dump', str(mutated_path), 'entropy_layout'],
                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 assert result.returncode != 0, 'selector mutation unexpectedly decoded'
 PYCODE
+JXL_CROSSCHECK_ELIGIBLE_INPUT="$OUT/pixel_lifecycle_2057x257.ppm" \
+  swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/write'
+"$HARNESS" dump "$OUT/swift_2057x257.jxl" entropy_layout \
+  > "$OUT/swift_2057x257.layout.sem"
 swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/(harnessAgreesWithEmitters|mutationsDifferInMutatedFieldOnly|actualSwiftLayoutsDecode)'
 swift test --skip-build --filter '^JXLEncoderTests.EntropyReferenceTests/(streamingLayoutMatchesReferenceAboveEightGroups|entropyMutationIsReportedByItsExactField)'
 JXL_ENTROPY_STREAM_EXPORT_DIR="$OUT" swift test --skip-build \
   --filter '^JXLEncoderTests.EntropyReferenceTests/smallFrameSharesOne(AC|Prefix)CodeAcrossIndependentGroupStreams'
 JXL_ENTROPY_STREAM_EXPORT_DIR="$OUT" bash "$HERE/entropy-stream-crosscheck.sh"
-echo 'PASS semantic cross-check: six encodes and two decoded mutations'
+echo 'PASS semantic cross-check: Swift and reference layouts share the 2057x257 input; six reference encodes and two decoded mutations'

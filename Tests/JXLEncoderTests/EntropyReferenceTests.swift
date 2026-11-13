@@ -423,6 +423,31 @@ struct EntropyReferenceTests {
 	}
 
 	@Test
+	func malformedStreamLengthsAndFrequenciesAreRejectedBeforeArithmetic() throws {
+		let ans = try EntropyReferenceFixture.load("stream_shared_ans")
+		for invalidLength in ["-1", "9223372036854775807"] {
+			let input = try SemanticDump(
+				parsing: ans.input.serialized.replacingOccurrences(
+					of: "input.streams.lengths i 2 8 8",
+					with: "input.streams.lengths i 2 \(invalidLength) 8"))
+			#expect(throws: Error.self) {
+				try EntropyReferenceFixture.validate(
+					name: "stream_shared_ans", input: input,
+					expected: ans.expected)
+			}
+		}
+		let invalidFrequency = try SemanticDump(
+			parsing: ans.input.serialized.replacingOccurrences(
+				of: "input.streams.frequencies i 2 2048 2048",
+				with: "input.streams.frequencies i 2 9223372036854775807 2048"))
+		#expect(throws: Error.self) {
+			try EntropyReferenceFixture.validate(
+				name: "stream_shared_ans", input: invalidFrequency,
+				expected: ans.expected)
+		}
+	}
+
+	@Test
 	func fastAndBestClustersMatchReference() throws {
 		let clusteringDifferences: Set<String> = [
 			"entropy.clusters.map", "entropy.clusters.count",

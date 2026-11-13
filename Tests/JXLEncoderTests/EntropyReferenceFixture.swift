@@ -688,12 +688,15 @@ struct EntropyReferenceFixture {
 			let codeBytes = try integers(expected, "entropy.streams.code_bytes")
 			let bitCounts = try integers(expected, "entropy.streams.bit_counts")
 			let streamBytes = try integers(expected, "entropy.streams.bytes")
+			guard lengths == [8, 8], tokens.count == 32 else {
+				throw SemanticDumpError.unsupportedEntropyFixture(name)
+			}
 			var tokenRecords: [Int64] = []
 			var tokenOffset = 0
 			for (index, length) in lengths.enumerated() {
 				tokenRecords.append(contentsOf: [Int64(index), length])
 				let valueCount = Int(length) * 2
-				guard tokenOffset + valueCount <= tokens.count else {
+				guard valueCount <= tokens.count - tokenOffset else {
 					throw SemanticDumpError.unsupportedEntropyFixture(name)
 				}
 				tokenRecords.append(
@@ -714,13 +717,13 @@ struct EntropyReferenceFixture {
 				let frequencies = try integers(input, "input.streams.frequencies")
 				validCodeInput =
 					logAlpha == [6] && frequencies.count == 2
-					&& frequencies.allSatisfy({ $0 >= 0 })
-					&& frequencies.reduce(0, +) == ANSConstants.tabSize
+					&& checkedSum(
+						frequencies, limit: Int64(ANSConstants.tabSize))
+						== Int64(ANSConstants.tabSize)
 			} else {
 				validCodeInput = true
 			}
 			guard contextMap == [0, 0, 0, 0], validCodeInput,
-				lengths == [8, 8], tokens.count == 32,
 				tokens.enumerated().allSatisfy({ index, value in
 					index.isMultiple(of: 2)
 						? value == 0 : (0...1).contains(value)

@@ -51,6 +51,16 @@ struct SemanticCrossCheckTests {
 				to: directory.appendingPathComponent(entry.name + ".swift.sem"),
 				atomically: true, encoding: .utf8)
 		}
+		if let eligiblePath = ProcessInfo.processInfo.environment[
+			"JXL_CROSSCHECK_ELIGIBLE_INPUT"]
+		{
+			let image = try loadPPM(
+				data: [UInt8](Data(contentsOf: URL(fileURLWithPath: eligiblePath))),
+				name: "eligible pixel crop")
+			let result = try SwiftSemanticEncoding.encode(image, distance: 1)
+			try Data(result.codestream).write(
+				to: directory.appendingPathComponent("swift_2057x257.jxl"))
+		}
 		for (flip, suffix) in [(true, "ctxflip"), (false, "orderswap")] {
 			let pair = try SemanticMutationTests.encodings(contextFlip: flip)
 			try Data(pair.actual.codestream).write(
@@ -73,7 +83,10 @@ struct SemanticCrossCheckTests {
 		try Self.writeEncodings(to: directory)
 		let files = try FileManager.default.contentsOfDirectory(
 			at: directory, includingPropertiesForKeys: nil)
-		#expect(files.filter { $0.pathExtension == "jxl" }.count == 8)
+		#expect(files.filter { $0.pathExtension == "jxl" }.count >= 8)
+		if ProcessInfo.processInfo.environment["JXL_CROSSCHECK_ELIGIBLE_INPUT"] != nil {
+			#expect(files.contains { $0.lastPathComponent == "swift_2057x257.jxl" })
+		}
 		#expect(files.filter { $0.lastPathComponent.hasSuffix(".swift.sem") }.count == 6)
 	}
 
@@ -202,6 +215,40 @@ struct SemanticCrossCheckTests {
 		#expect(
 			zip(eligibleOffsets, eligibleSizes).allSatisfy {
 				$0.0 >= 0 && $0.1 >= 0 && $0.0 + $0.1 <= Int64(eligibleBytes.count)
+			})
+		let swiftEligible = try SemanticDump(
+			parsing: String(
+				contentsOf: directory.appendingPathComponent(
+					"swift_2057x257.layout.sem"), encoding: .utf8))
+		#expect(try integers(swiftEligible, "entropy_layout.group_grid") == [9, 2])
+		#expect(try integers(swiftEligible, "entropy_layout.group_count") == [18])
+		#expect(try integers(swiftEligible, "entropy_layout.dc_group_count") == [2])
+		#expect(try integers(swiftEligible, "entropy_layout.histogram_set_count") == [1])
+		#expect(try integers(swiftEligible, "entropy_layout.selector_bits") == [0])
+		let swiftSelectors = try integers(swiftEligible, "entropy_layout.ac_selectors")
+		#expect(swiftSelectors.count == 18 * 4)
+		#expect(
+			stride(from: 1, to: swiftSelectors.count, by: 4).map {
+				swiftSelectors[$0]
+			} == Array(0..<18).map(Int64.init))
+		#expect(
+			stride(from: 3, to: swiftSelectors.count, by: 4).allSatisfy {
+				swiftSelectors[$0] == 0
+			})
+		let swiftBytes = try Data(
+			contentsOf: directory.appendingPathComponent("swift_2057x257.jxl"))
+		let swiftIDs = try integers(swiftEligible, "entropy_layout.section_ids")
+		let swiftIndices = try integers(swiftEligible, "entropy_layout.section_indices")
+		let swiftOffsets = try integers(swiftEligible, "entropy_layout.section_offsets")
+		let swiftSizes = try integers(swiftEligible, "entropy_layout.section_sizes")
+		#expect(Set(swiftIDs).count == swiftIDs.count)
+		#expect(swiftIndices == (0..<Int64(swiftIDs.count)).map { $0 })
+		#expect(
+			swiftOffsets.count == swiftIDs.count
+				&& swiftSizes.count == swiftIDs.count)
+		#expect(
+			zip(swiftOffsets, swiftSizes).allSatisfy {
+				$0.0 >= 0 && $0.1 >= 0 && $0.0 + $0.1 <= Int64(swiftBytes.count)
 			})
 	}
 
