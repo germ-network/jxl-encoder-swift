@@ -41,8 +41,21 @@ struct DecisionInventoryFixtureTests {
 		if StageFixtureKnownIssues.byFixture[reference.path] != nil { return .knownIssue }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
-			guard SemanticCase.references.contains(key) else { return .notCompared }
-			if SemanticCase.knownIssueReferences.contains(key) { return .knownIssue }
+			if JPEGSemanticCase.contextWitnessReferences.contains(key) {
+				let fixture = URL(fileURLWithPath: reference.path)
+					.deletingPathExtension().lastPathComponent
+				guard
+					JPEGSemanticCase.contextWitnessContains(
+						category, fixture: fixture)
+				else { return .notCompared }
+			}
+			let references = SemanticCase.references.union(JPEGSemanticCase.references)
+				.union(
+					JPEGSemanticCase.contextWitnessReferences)
+			guard references.contains(key) else { return .notCompared }
+			let knownIssues = SemanticCase.knownIssueReferences.union(
+				JPEGSemanticCase.knownIssueReferences)
+			if knownIssues.contains(key) { return .knownIssue }
 		} else if row.consumers.isEmpty {
 			return .notCompared
 		}
@@ -102,6 +115,29 @@ struct DecisionInventoryFixtureTests {
 				Self.status(reference, row: row)
 					== (consumers.isEmpty ? .notCompared : .verifies))
 		}
+	}
+
+	@Test("a JPEG witness reference names a present, compared category")
+	func jpegWitnessCategoryIsVerified() throws {
+		let fixture = "jpeg_flower_513x267_420_context"
+		let expected = try SemanticDump(fixture: fixture)
+		#expect(JPEGSemanticCase.contextWitnessContains("jpeg_context", fixture: fixture))
+		#expect(!JPEGSemanticCase.contextWitnessContains("block_context", fixture: fixture))
+		#expect(expected.fields.keys.contains { $0.hasPrefix("jpeg_context.") })
+		#expect(!expected.fields.keys.contains { $0.hasPrefix("block_context.") })
+		let path = "Tests/JXLEncoderTests/Fixtures/semantic/\(fixture).sem"
+		let row = ProvenanceRow(
+			path: path, kind: .fixture,
+			sha256: String(repeating: "a", count: 64), origin: .fullLibjxl,
+			generator: "generator", invocation: "generate", input: "input",
+			upstream: DecisionInventory.pinnedUpstream, config: "hwy=NEON",
+			consumers: ["JPEGSemanticFixtureTests.swift"])
+		let validReference = try #require(
+			DecisionInventory.FixtureReference(path + "#jpeg_context"))
+		let invalidReference = try #require(
+			DecisionInventory.FixtureReference(path + "#block_context"))
+		#expect(Self.status(validReference, row: row) == .verifies)
+		#expect(Self.status(invalidReference, row: row) == .notCompared)
 	}
 
 	@Test("a malformed list, or a .sem without a category, is a violation")
