@@ -189,8 +189,14 @@ struct ANSHistogramWriterTests {
 				name: "ans_cost_missing_source_data", input: input,
 				expected: expected)
 		}
-		let validExpected = try EntropyReferenceFixture.load("ans_cost_sparse_precise")
-			.expected
+		var twoSymbolExpected = SemanticDump()
+		twoSymbolExpected.record("entropy.ans_cost.normalized", .integers([2048, 2048]))
+		twoSymbolExpected.record("entropy.ans_cost.serialized_method", .integers([0]))
+		twoSymbolExpected.record("entropy.ans_cost.serialized_shift", .integers([-1]))
+		twoSymbolExpected.record("entropy.ans_cost.header_bits", .integers([6]))
+		twoSymbolExpected.record("entropy.ans_cost.bytes", .integers([6]))
+		twoSymbolExpected.record("entropy.ans_cost.total_cost", .floats([8]))
+		twoSymbolExpected.record("entropy.ans_cost.source_data_bits", .floats([2]))
 		func makeInput(counts: [Int64], logAlpha: Int64 = 7, strategy: Int64 = 2)
 			-> SemanticDump
 		{
@@ -216,35 +222,60 @@ struct ANSHistogramWriterTests {
 			name: "ans_cost_upper_boundary",
 			input: makeInput(counts: [Int64(Int32.max)], logAlpha: 8, strategy: 2),
 			expected: boundaryExpected)
+		try EntropyReferenceFixture.validate(
+			name: "ans_cost_control",
+			input: makeInput(counts: [1, 1], logAlpha: 5, strategy: 0),
+			expected: twoSymbolExpected)
 		#expect(throws: SemanticDumpError.self) {
 			try EntropyReferenceFixture.validate(
 				name: "ans_cost_bad_log_alpha",
-				input: makeInput(counts: [1, 1], logAlpha: 4),
-				expected: validExpected)
+				input: makeInput(counts: [1, 1], logAlpha: 4, strategy: 0),
+				expected: twoSymbolExpected)
 		}
 		#expect(throws: SemanticDumpError.self) {
 			try EntropyReferenceFixture.validate(
 				name: "ans_cost_bad_strategy",
-				input: makeInput(counts: [1, 1], strategy: 3),
-				expected: validExpected)
+				input: makeInput(counts: [1, 1], logAlpha: 5, strategy: 3),
+				expected: twoSymbolExpected)
 		}
 		#expect(throws: SemanticDumpError.self) {
 			try EntropyReferenceFixture.validate(
-				name: "ans_cost_negative_count", input: makeInput(counts: [-1, 1]),
-				expected: validExpected)
+				name: "ans_cost_negative_count",
+				input: makeInput(counts: [-1, 1], logAlpha: 5, strategy: 0),
+				expected: twoSymbolExpected)
 		}
 		#expect(throws: SemanticDumpError.self) {
 			try EntropyReferenceFixture.validate(
 				name: "ans_cost_overflow_sum",
-				input: makeInput(counts: [Int64(Int32.max), 1]),
-				expected: validExpected
+				input: makeInput(
+					counts: [Int64(Int32.max), 1], logAlpha: 5, strategy: 0),
+				expected: twoSymbolExpected
 			)
 		}
+		var emptyExpected = SemanticDump()
+		emptyExpected.record("entropy.ans_cost.normalized", .integers([]))
+		emptyExpected.record("entropy.ans_cost.serialized_method", .integers([1]))
+		emptyExpected.record("entropy.ans_cost.serialized_shift", .integers([-1]))
+		emptyExpected.record("entropy.ans_cost.header_bits", .integers([3]))
+		emptyExpected.record("entropy.ans_cost.bytes", .integers([1]))
+		emptyExpected.record("entropy.ans_cost.total_cost", .floats([3]))
+		emptyExpected.record("entropy.ans_cost.source_data_bits", .floats([0]))
 		#expect(throws: SemanticDumpError.self) {
 			try EntropyReferenceFixture.validate(
 				name: "ans_cost_oversize_alphabet",
-				input: makeInput(counts: Array(repeating: 0, count: 257)),
-				expected: validExpected)
+				input: makeInput(
+					counts: Array(repeating: 0, count: 257), logAlpha: 8,
+					strategy: 0),
+				expected: emptyExpected)
+		}
+		var malformedDimension = SemanticDump()
+		malformedDimension.record("input.histogram.counts", .integers([1, 1]))
+		malformedDimension.record("input.histogram.log_alpha_size", .integers([5, 8]))
+		malformedDimension.record("input.histogram.strategy", .integers([0]))
+		#expect(throws: SemanticDumpError.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ans_cost_log_alpha_dimension",
+				input: malformedDimension, expected: twoSymbolExpected)
 		}
 		for name in [
 			"ans_cost_sparse_precise", "ans_cost_flat_alphabet47",
