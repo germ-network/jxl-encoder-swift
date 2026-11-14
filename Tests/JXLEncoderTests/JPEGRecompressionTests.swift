@@ -50,7 +50,14 @@ struct PortableJPEGRecompressionTests {
 		let acTable: [UInt8] = [0x10, 1] + [UInt8](repeating: 0, count: 15) + [0]
 		let huffman = segment(0xC4, dcTable + acTable)
 		let scan = segment(0xDA, [1, 1, 0, 0, 63, 0])
-		return [0xFF, 0xD8] + quant + frame + huffman + scan + entropy + [0xFF, 0xD9]
+		var jpeg: [UInt8] = [0xFF, 0xD8]
+		jpeg.append(contentsOf: quant)
+		jpeg.append(contentsOf: frame)
+		jpeg.append(contentsOf: huffman)
+		jpeg.append(contentsOf: scan)
+		jpeg.append(contentsOf: entropy)
+		jpeg.append(contentsOf: [0xFF, 0xD9])
+		return jpeg
 	}
 
 	/// An APP1 EXIF segment whose IFD0 holds only an orientation entry.
