@@ -61,9 +61,10 @@ public enum JPEGBlockContextMap {
 	}
 
 	/// Places 1 to 7 luma DC-value thresholds from a histogram of raw DC
-	/// values offset by 1024 (index `j` represents value `j - 1024`, clamped
-	/// at the top), so results are directly comparable to hand-computed
-	/// cases without a `JPEGTranscode` fixture. Pure port of the threshold
+	/// values offset by 1024, converted to an unsigned bucket and saturated
+	/// above at 2047 (index `j` represents value `j - 1024`), so results are
+	/// directly comparable to hand-computed cases without a `JPEGTranscode`
+	/// fixture. Pure port of the threshold
 	/// loop in `ComputeJPEGTranscodingData` (enc_frame.cc).
 	static func computeThresholds(counts: [Int], total rawTotal: Int, qtSum rawQTSum: Int)
 		-> [Int]
@@ -103,7 +104,8 @@ public enum JPEGBlockContextMap {
 		for y in 0..<height {
 			for x in 0..<width {
 				let dc = Int(transcode.dc(channel: luma, x: x, y: y))
-				counts[min(dc + 1024, 2047)] += 1
+				let bucket = UInt32(truncatingIfNeeded: dc + 1024)
+				counts[Int(min(bucket, 2047))] += 1
 				total += 1
 			}
 		}
