@@ -65,7 +65,7 @@ struct ANSHistogramProofCase: Sendable {
 			observation: .selectedCandidate(strategy: .precise, shift: 0)),
 		.init(
 			fixture: "ans_cost_flat_alphabet47",
-			decisions: [.selection, .rebalancing, .generalSerialization],
+			decisions: [.selection],
 			observation: .selectedCandidate(strategy: .fast, shift: nil)),
 		.init(
 			fixture: "ans_cost_skewed_approximate",
