@@ -108,6 +108,66 @@ struct EntropyReferenceFixture {
 				bytes.count == Int((bitCount[0] + 7) / 8),
 				bytes.allSatisfy({ (0...255).contains($0) })
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name.hasPrefix("ans_cost_") {
+			inputFields = [
+				"input.histogram.counts", "input.histogram.log_alpha_size",
+				"input.histogram.strategy",
+			]
+			expectedFields = [
+				"entropy.ans_cost.normalized",
+				"entropy.ans_cost.serialized_method",
+				"entropy.ans_cost.serialized_shift",
+				"entropy.ans_cost.header_bits", "entropy.ans_cost.bytes",
+				"entropy.ans_cost.total_cost", "entropy.ans_cost.source_data_bits",
+			]
+			let counts = try integers(input, "input.histogram.counts")
+			let logAlpha = try integers(input, "input.histogram.log_alpha_size")
+			let strategy = try integers(input, "input.histogram.strategy")
+			guard logAlpha.count == 1, (5...8).contains(logAlpha[0]),
+				counts.count <= 256,
+				((counts.count + 15) / 16) * 16 <= (1 << Int(logAlpha[0])),
+				checkedSum(counts, limit: Int64(Int32.max)) != nil,
+				strategy.count == 1, (0...2).contains(strategy[0])
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+			let normalized = try integers(expected, "entropy.ans_cost.normalized")
+			let method = try integers(expected, "entropy.ans_cost.serialized_method")
+			let shift = try integers(expected, "entropy.ans_cost.serialized_shift")
+			let headerBits = try integers(expected, "entropy.ans_cost.header_bits")
+			let bytes = try integers(expected, "entropy.ans_cost.bytes")
+			guard
+				case .floats(let totalCost)? = expected.fields[
+					"entropy.ans_cost.total_cost"]
+			else {
+				throw SemanticDumpError.malformedEntropyFixture(
+					name: name, field: "entropy.ans_cost.total_cost")
+			}
+			guard
+				case .floats(let sourceDataBits)? = expected.fields[
+					"entropy.ans_cost.source_data_bits"]
+			else {
+				throw SemanticDumpError.malformedEntropyFixture(
+					name: name, field: "entropy.ans_cost.source_data_bits")
+			}
+			let inputAlphabet = counts.lastIndex(where: { $0 > 0 }).map { $0 + 1 } ?? 0
+			guard normalized.count == inputAlphabet,
+				normalized.allSatisfy({
+					(0...ANSConstants.tabSize).contains(Int($0))
+				}),
+				inputAlphabet == 0
+					|| normalized.reduce(Int64(0), +) == ANSConstants.tabSize,
+				method.count == 1, (0...2).contains(method[0]), shift.count == 1,
+				method[0] == 2
+					? (0..<ANSConstants.logTabSize).contains(Int(shift[0]))
+					: shift[0] == -1,
+				headerBits.count == 1, headerBits[0] >= 0,
+				bytes.count
+					== Int(
+						headerBits[0] / 8
+							+ (headerBits[0].isMultiple(of: 8) ? 0 : 1)),
+				bytes.allSatisfy({ (0...255).contains($0) }),
+				totalCost.count == 1, totalCost[0] >= 0,
+				sourceDataBits.count == 1, sourceDataBits[0] >= 0
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("ans_") {
 			inputFields = [
 				"input.histogram.counts", "input.histogram.log_alpha_size",

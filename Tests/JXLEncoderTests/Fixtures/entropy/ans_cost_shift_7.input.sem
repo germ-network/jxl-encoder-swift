@@ -1,0 +1,4 @@
+jxl-semantic-dump 1
+input.histogram.counts i 15 7286 7678 4771 8786 8869 4872 3194 3575 366 3714 6049 6727 8625 860 8008
+input.histogram.log_alpha_size i 1 7
+input.histogram.strategy i 1 2

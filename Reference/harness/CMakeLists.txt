@@ -35,3 +35,14 @@ target_include_directories(jxl-harness PRIVATE
 target_link_libraries(jxl-harness PRIVATE jxl-internal jxl_cms jxl_threads hwy)
 
 target_compile_definitions(jxl-harness PRIVATE LIBJXL_COMMIT="${LIBJXL_COMMIT}")
+
+add_executable(jxl-ans-histogram-probe
+  "${CMAKE_CURRENT_SOURCE_DIR}/ans_histogram_probe.cc"
+  "${CMAKE_CURRENT_SOURCE_DIR}/src/semantic_dump.cc")
+target_include_directories(jxl-ans-histogram-probe PRIVATE
+  "${CMAKE_CURRENT_SOURCE_DIR}/src"
+  "${LIBJXL_DIR}")
+target_link_libraries(jxl-ans-histogram-probe PRIVATE
+  jxl-internal jxl_cms jxl_threads hwy)
+target_compile_definitions(jxl-ans-histogram-probe PRIVATE
+  LIBJXL_COMMIT="${LIBJXL_COMMIT}")
