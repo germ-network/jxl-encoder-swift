@@ -175,50 +175,6 @@ enum ANSHistogramWriter {
 	}
 }
 
-/// Largest-remainder distribution used by frequency-only histogram callers.
-/// It preserves support and sums to `ANSConstants.tabSize`.
-enum ANSHistogramNormalizer {
-	static func normalize(_ counts: [UInt32]) -> [Int] {
-		let total = counts.reduce(0) { $0 + Int($1) }
-		guard total > 0 else { return [Int](repeating: 0, count: counts.count) }
-
-		var shares = [Int](repeating: 0, count: counts.count)
-		var remainders: [(index: Int, remainder: Double)] = []
-		var sum = 0
-		for (i, c) in counts.enumerated() where c > 0 {
-			let exact = Double(c) * Double(ANSConstants.tabSize) / Double(total)
-			let share = max(1, Int(exact))
-			shares[i] = share
-			sum += share
-			remainders.append((i, exact - Double(share)))
-		}
-
-		if sum > ANSConstants.tabSize {
-			// Rare: many low-probability symbols each bumped to 1 overshoot
-			// the total. Reduce from the largest shares first, never below 1.
-			var excess = sum - ANSConstants.tabSize
-			for i in shares.indices.filter({ shares[$0] > 0 }).sorted(by: {
-				shares[$0] > shares[$1]
-			})
-			where excess > 0 {
-				let take = min(shares[i] - 1, excess)
-				shares[i] -= take
-				excess -= take
-			}
-			precondition(excess == 0, "could not fit alphabet into tabSize")
-		} else if sum < ANSConstants.tabSize {
-			var deficit = ANSConstants.tabSize - sum
-			for r in remainders.sorted(by: { $0.remainder > $1.remainder })
-			where deficit > 0 {
-				shares[r.index] += 1
-				deficit -= 1
-			}
-			precondition(deficit == 0, "could not distribute remainder into tabSize")
-		}
-		return shares
-	}
-}
-
 private struct ANSAllowedCount {
 	let count: Int
 	let stepLog: Int

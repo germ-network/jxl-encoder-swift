@@ -174,30 +174,31 @@ enum SectionOptimizer {
 		// `allowANS` alone isn't the real invariant — `flushANS` can only
 		// replay a section that staged nothing but tokens, so that's derived
 		// from what was actually staged rather than trusted from the caller.
-		let ansInfoTables: [[ANSEncSymbolInfo]]? =
+		let ansHistograms: [ANSEncodingHistogram]? =
 			allowANS && !hasRawBits && totalTokens >= ansMinimumTokens
 			? clusters.map { histogram in
-				let counts = ANSHistogramNormalizer.normalize(histogram.counts)
-				let alphabetSize = ANSHistogramWriter.alphabetSize(for: counts)
-				return ANSInfoTable.build(
-					distribution: counts, alphabetSize: alphabetSize,
-					logAlphaSize: ANSConstants.logAlphaSize)
+				ANSEncodingHistogram.computeBest(
+					counts: histogram.counts, strategy: .approximate)
 			} : nil
-
 		// Building the real Huffman trees is wasted work whenever ANS is
 		// selected — `EntropyCode`'s own prefixCodes go unused for encoding
 		// in that case — except diagnostics still need them to measure
 		// prefix-coded bits against the Shannon bound.
 		let prefixCodes: [PrefixCode] =
-			ansInfoTables == nil || EntropyDiagnostics.sink != nil
+			ansHistograms == nil || EntropyDiagnostics.sink != nil
 			? HistogramCluster.buildPrefixCodes(clusters) : []
 
 		// `contextMap` already spans the full raw context space — no base-code
 		// composition needed, unlike the pre-bucketed approach this replaced.
-		let optimized = EntropyCode(
-			contextMap: contextMap,
-			prefixCodes: prefixCodes,
-			ansInfoTables: ansInfoTables)
+		let optimized: EntropyCode
+		if let ansHistograms {
+			optimized = EntropyCode(
+				contextMap: contextMap, prefixCodes: prefixCodes,
+				ansHistograms: ansHistograms)
+		} else {
+			optimized = EntropyCode(
+				contextMap: contextMap, prefixCodes: prefixCodes)
+		}
 
 		if let sink = EntropyDiagnostics.sink {
 			sink(

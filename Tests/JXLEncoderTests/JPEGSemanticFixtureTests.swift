@@ -37,7 +37,9 @@ struct JPEGSemanticCorpusEntry: Sendable, CustomTestStringConvertible {
 			issues["ac_entropy_alphabet"] = ["GER-3388"]
 		} else if name != "jpeg_flat_444" {
 			issues["coeff_order"] = ["GER-3386"]
-			issues["ac_entropy"] = ["GER-3386"]
+			if name != "jpeg_small_422" {
+				issues["ac_entropy"] = ["GER-3386"]
+			}
 			issues["ac_entropy_alphabet"] = ["GER-3388"]
 		}
 		if name.hasPrefix("jpeg_hopper") || name.hasPrefix("jpeg_flower") {
@@ -111,7 +113,6 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 		"jpeg_small_444#ac_entropy": ["ac_entropy.ans.frequencies"],
 		"jpeg_small_444#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
 		"jpeg_small_422#coeff_order": ["coeff_order.dct8.c0", "coeff_order.dct8.c1"],
-		"jpeg_small_422#ac_entropy": ["ac_entropy.ans.frequencies"],
 		"jpeg_small_422#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
 		"jpeg_small_440#coeff_order": ["coeff_order.dct8.c0", "coeff_order.dct8.c1"],
 		"jpeg_small_440#ac_entropy": ["ac_entropy.ans.frequencies"],
@@ -506,7 +507,7 @@ struct JPEGSemanticFixtureTests {
 		#expect(
 			JPEGSemanticCase.knownIssueReferences.isSubset(
 				of: JPEGSemanticCase.references))
-		#expect(JPEGSemanticCase.knownIssueReferences.count == 39)
+		#expect(JPEGSemanticCase.knownIssueReferences.count == 38)
 		#expect(
 			JPEGSemanticCorpusEntry.all.allSatisfy { entry in
 				entry.knownIssues.values.allSatisfy {

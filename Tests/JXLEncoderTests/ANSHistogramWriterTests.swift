@@ -60,7 +60,7 @@ struct ANSHistogramWriterTests {
 			"ans_cost_sparse_precise",
 			"ans_cost_skewed_approximate",
 			"ans_cost_approx_step2_witness",
-			"ans_cost_approx_step2_witness",
+			"ans_cost_precise_map_witness",
 			"ans_cost_scaled_fast", "ans_cost_shift_2", "ans_cost_shift_3",
 		] {
 			let fixture = try EntropyReferenceFixture.load(name)
@@ -192,6 +192,7 @@ struct ANSHistogramWriterTests {
 		for name in [
 			"ans_cost_sparse_precise", "ans_cost_flat_alphabet47",
 			"ans_cost_skewed_approximate", "ans_cost_approx_step2_witness",
+			"ans_cost_precise_map_witness",
 			"ans_cost_scaled_fast", "ans_cost_shift_2", "ans_cost_shift_3",
 			"ans_cost_shift_5", "ans_cost_shift_7", "ans_cost_shift_8",
 			"ans_cost_shift_9", "ans_cost_shift_10", "ans_cost_shift_11",
@@ -374,30 +375,156 @@ struct ANSHistogramWriterTests {
 		}
 	}
 
-	@Test(.disabled("Pending implementation"))
-	func sectionOptimizerUsesApproximateANSSelection() {
-		Issue.record(
-			"Production alias tables and retained histograms share the e4 selected counts"
-		)
+	@Test
+	func sectionOptimizerUsesApproximateANSSelection() throws {
+		let fixture = try EntropyReferenceFixture.load("ans_cost_approx_step2_witness")
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let selected = ANSEncodingHistogram.computeBest(
+			counts: counts, strategy: .approximate)
+		var section = SectionWriter(mode: .staging(.staticAC))
+		for (symbol, count) in counts.enumerated() {
+			for _ in 0..<count {
+				section.write(token: Token(context: 0, value: UInt32(symbol)))
+			}
+		}
+		var sections = [section]
+		let optimized = SectionOptimizer.optimize(
+			sections: &sections, range: 0..<sections.count,
+			baseCode: .staticAC, allowANS: true)
+		#expect(optimized.ansHistograms?.count == 1)
+		#expect(optimized.ansHistograms?.first?.method == selected.method)
+		#expect(
+			optimized.ansHistograms?.first?.alphabetSize == selected.alphabetSize)
+		#expect(
+			Array(
+				optimized.ansHistograms?.first?.normalizedCounts.prefix(
+					selected.alphabetSize) ?? []) == selected.normalizedCounts)
+		#expect(
+			optimized.ansInfoTables?.first?.map(\.freq)
+				== selected.normalizedCounts.prefix(selected.alphabetSize).map {
+					$0
+				})
+		#expect(selected.method == 7)
+		#expect(sections[0].staged.isEmpty)
+
+		var rawSection = SectionWriter(mode: .staging(.staticAC))
+		rawSection.writeRaw(1, 1)
+		for _ in 0..<100 { rawSection.write(token: Token(context: 0, value: 0)) }
+		var rawSections = [rawSection]
+		let prefixFallback = SectionOptimizer.optimize(
+			sections: &rawSections, range: 0..<rawSections.count,
+			baseCode: .staticAC, allowANS: true)
+		#expect(prefixFallback.ansInfoTables == nil)
+		#expect(prefixFallback.ansHistograms == nil)
 	}
 
-	@Test(.disabled("Pending implementation"))
-	func entropyCodeWriterRetainsSelectedHistogramEncoding() {
-		Issue.record(
-			"Serialized headers consume retained choices instead of reconstructing them from frequencies"
-		)
+	@Test
+	func entropyCodeWriterRetainsSelectedHistogramEncoding() throws {
+		let fixture = try EntropyReferenceFixture.load("ans_cost_approx_step2_witness")
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let selected = ANSEncodingHistogram.computeBest(
+			counts: counts, strategy: .approximate)
+		let flat = ANSEncodingHistogram.computeBest(
+			counts: [UInt32](repeating: 1, count: 47), strategy: .fast)
+		let histograms = [selected, flat]
+		let code = EntropyCode(
+			contextMap: [], prefixCodes: [], ansHistograms: histograms)
+		#expect(code.ansHistograms?.map(\.method) == [7, 0])
+		#expect(code.ansInfoTables?.count == histograms.count)
+		for (histogram, table) in zip(histograms, code.ansInfoTables ?? []) {
+			#expect(
+				table.map(\.freq)
+					== histogram.normalizedCounts.prefix(histogram.alphabetSize)
+					.map {
+						$0
+					})
+		}
+		var actual = BitWriter()
+		EntropyCodeWriter.write(code, writer: &actual)
+		var expected = BitWriter()
+		expected.write(1, 0)
+		expected.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+		PrefixCodeWriter.writeUintConfigs(
+			count: histograms.count, logAlphaSize: ANSConstants.logAlphaSize,
+			writer: &expected)
+		for histogram in histograms { histogram.write(to: &expected) }
+		var fullPrecision = BitWriter()
+		fullPrecision.write(1, 0)
+		fullPrecision.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+		PrefixCodeWriter.writeUintConfigs(
+			count: histograms.count, logAlphaSize: ANSConstants.logAlphaSize,
+			writer: &fullPrecision)
+		for histogram in histograms {
+			ANSHistogramWriter.write(
+				counts: histogram.normalizedCounts, writer: &fullPrecision)
+		}
+		#expect(actual.bitsWritten == expected.bitsWritten)
+		#expect(actual.bytes == expected.bytes)
+		#expect(actual.bytes != fullPrecision.bytes)
 	}
 
-	@Test(.disabled("Pending implementation"))
-	func contextMapHistogramUsesReferenceANSSelection() {
-		Issue.record(
-			"The existing direct map ANS path uses the reference histogram strategy")
+	@Test
+	func contextMapHistogramUsesReferenceANSSelection() throws {
+		let fixture = try EntropyReferenceFixture.load("ans_cost_precise_map_witness")
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let entries = counts.enumerated().flatMap { symbol, count in
+			Array(repeating: UInt8(symbol), count: Int(count))
+		}
+		let selected = ANSEncodingHistogram.computeBest(counts: counts, strategy: .precise)
+		let expectedShift = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.serialized_shift")[0]
+		let expectedCounts = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.normalized"
+		).map(Int.init)
+		#expect(expectedShift == 7)
+		#expect(selected.method == expectedShift + 1)
+		#expect(
+			Array(selected.normalizedCounts.prefix(expectedCounts.count))
+				== expectedCounts)
+		var actual = BitWriter()
+		EntropyCodeWriter.writeContextMapEntries(entries, allowANS: true, writer: &actual)
+		var expected = BitWriter()
+		expected.write(3, 0)
+		expected.write(1, 0)
+		expected.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+		PrefixCodeWriter.writeUintConfigs(
+			count: 1, logAlphaSize: ANSConstants.logAlphaSize, writer: &expected)
+		selected.write(to: &expected)
+		let info = ANSInfoTable.build(
+			distribution: selected.normalizedCounts,
+			alphabetSize: selected.alphabetSize,
+			logAlphaSize: ANSConstants.logAlphaSize)
+		let tokens = entries.map { Token(context: 0, value: UInt32($0)) }
+		ANSTokenWriter.write(
+			tokens: tokens, contextMap: [0], infoTables: [info], writer: &expected)
+		#expect(actual.bitsWritten == expected.bitsWritten)
+		#expect(actual.bytes == expected.bytes)
 	}
 
-	@Test(.disabled("Pending implementation"))
+	@Test
 	func suppliedANSInfoTablesRemainSerializable() {
-		Issue.record(
-			"The public frequency-only initializer preserves valid supplied-table serialization"
-		)
+		let table = ANSInfoTable.build(
+			distribution: [1024, 2048, 1024], alphabetSize: 3,
+			logAlphaSize: ANSConstants.logAlphaSize)
+		let code = EntropyCode(
+			contextMap: [0], prefixCodes: [], ansInfoTables: [table])
+		#expect(code.ansHistograms == nil)
+		var actual = BitWriter()
+		EntropyCodeWriter.write(code, writer: &actual)
+		var expected = BitWriter()
+		EntropyCodeWriter.writeContextMap(code, writer: &expected)
+		expected.write(1, 0)
+		expected.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+		PrefixCodeWriter.writeUintConfigs(
+			count: 1, logAlphaSize: ANSConstants.logAlphaSize, writer: &expected)
+		ANSHistogramWriter.write(counts: table.map(\.freq), writer: &expected)
+		#expect(actual.bitsWritten == expected.bitsWritten)
+		#expect(actual.bytes == expected.bytes)
 	}
 }

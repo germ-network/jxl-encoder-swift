@@ -39,7 +39,17 @@ public struct EntropyCode: Sendable {
 		contextMap: [UInt8], prefixCodes: [PrefixCode],
 		originalContextMap: [UInt8]? = nil, ansHistograms: [ANSEncodingHistogram]
 	) {
-		fatalError("Retained ANS histogram construction is not implemented")
+		precondition(!ansHistograms.isEmpty)
+		self.contextMap = contextMap
+		self.prefixCodes = prefixCodes
+		self.originalContextMap = originalContextMap
+		self.ansHistograms = ansHistograms
+		self.ansInfoTables = ansHistograms.map { histogram in
+			ANSInfoTable.build(
+				distribution: histogram.normalizedCounts,
+				alphabetSize: histogram.alphabetSize,
+				logAlphaSize: ANSConstants.logAlphaSize)
+		}
 	}
 
 	public var contextCount: Int { contextMap.count }

@@ -31,13 +31,14 @@ generate() {
 	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
 	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_ans_histogram_fixtures.sh\tReference/make_ans_histogram_fixtures.sh\tinline histogram counts\t-\tstrategy=%s; log_alpha_size=7\tTests/JXLEncoderTests/ANSHistogramWriterTests.swift\n' \
 		"$name" "$input_hash" "$strategy" >> "$tmp"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/ans_histogram_probe.cc\tReference/make_ans_histogram_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tdirect public Counts/Cost/Encode; method and shift inferred from Encode bits; source_data_bits derived from enc_ans.cc:362-376; NEON\tTests/JXLEncoderTests/ANSHistogramWriterTests.swift\n' \
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/ans_histogram_probe.cc\tReference/make_ans_histogram_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tdirect public Counts/Cost/Encode; method and shift inferred from Encode bits; source_data_bits derived from enc_ans.cc:362-376; NEON; hwy=NEON\tTests/JXLEncoderTests/ANSHistogramWriterTests.swift\n' \
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
 generate ans_cost_sparse_precise precise 2 0 3 0 0 15 0 1
 generate ans_cost_flat_alphabet47 fast 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
 generate ans_cost_approx_step2_witness approximate 1 90275 18441 21176 73088
+generate ans_cost_precise_map_witness precise 2 17787 61992 38525 34605 12329
 generate ans_cost_skewed_approximate approximate 1 10000 1 4 16 256 1024
 generate ans_cost_scaled_fast fast 0 9294 684 593 7685 3091 9802 4825 1107
 generate ans_cost_shift_2 precise 2 42 18 8 17
