@@ -78,12 +78,13 @@ enum SwiftJPEGSemanticEncoding {
 			}
 		}
 		var writer = BitWriter()
+		let loopFilter = FrameAssembly.LoopFilter(gaborish: false, epfIterations: 0)
 		let codes = try Encoder.encodeJPEGFrame(
-			transcode, optimizeCodes: true, writer: &writer)
+			transcode, loopFilter: loopFilter, optimizeCodes: true, writer: &writer)
 		let decisions = SwiftJPEGFrameDecisions(
 			transcode: transcode, coeffOrder: coeffOrder,
 			blockContextMap: blockContextMap, dcCode: codes.dc, acCode: codes.ac,
-			acGroups: acGroups)
+			loopFilter: loopFilter, acGroups: acGroups)
 		return Result(codestream: try recompose(decisions), decisions: decisions)
 	}
 
@@ -178,7 +179,7 @@ enum SwiftJPEGSemanticEncoding {
 			xybEncoded: false, to: &writer)
 		FrameAssembly.writeFrameHeader(
 			colorMode: .ycbcr(subsampling: t.subsampling),
-			loopFilter: .init(gaborish: false, epfIterations: 0),
+			loopFilter: d.loopFilter,
 			writer: &writer)
 		FrameAssembly.combineSections(sections.map { $0.finished() }, writer: &writer)
 		writer.zeroPadToByte()
@@ -368,6 +369,7 @@ struct SwiftJPEGFrameDecisions {
 	let blockContextMap: JPEGBlockContextMap.Result
 	let dcCode: EntropyCode
 	let acCode: EntropyCode
+	let loopFilter: FrameAssembly.LoopFilter
 	let acGroups: [[StagedRecord]]
 }
 
@@ -420,8 +422,8 @@ extension SemanticDump {
 		record("frame.dc_groups", .integers([Int64(dim.dcGroupCount)]))
 		record("frame.passes", .integers([1]))
 		record("frame_flags.flags", .integers([128]))
-		record("gaborish.enabled", .integers([0]))
-		record("epf.iterations", .integers([0]))
+		record("gaborish.enabled", .integers([d.loopFilter.gaborish ? 1 : 0]))
+		record("epf.iterations", .integers([Int64(d.loopFilter.epfIterations)]))
 		record("x_matrix_scale.value", .integers([2]))
 		record("b_matrix_scale.value", .integers([2]))
 		for c in 0..<3 {

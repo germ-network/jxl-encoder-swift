@@ -18,6 +18,80 @@ struct LoopFilterTests {
 			}
 			return value
 		}
+
+		mutating func readSize() -> Int {
+			let selector = Int(read(2))
+			return Int(read([9, 13, 18, 30][selector])) + 1
+		}
+
+		mutating func alignToByte() {
+			position = (position + 7) & ~7
+		}
+	}
+
+	enum FixtureError: Error { case missingFilterObservation(Float) }
+
+	static let thresholds: [Float] = [0.7, 1.5, 4].flatMap { boundary in
+		[boundary.nextDown, boundary, boundary.nextUp]
+	}
+
+	static func loopFilter(in codestream: [UInt8]) -> (gaborish: Bool, epf: UInt32) {
+		var reader = BitReader(bytes: codestream)
+		#expect(reader.read(16) == 0x0AFF)
+		#expect(reader.read(1) == 0)
+		_ = reader.readSize()
+		_ = reader.read(3)
+		_ = reader.readSize()
+		_ = reader.read(1 + 1)
+		if reader.read(1) == 1 {
+			_ = reader.read(2 + 4 + 1)
+		} else {
+			_ = reader.read(2 + 1)
+		}
+		_ = reader.read(2)
+		let xybEncoded = reader.read(1) == 1
+		_ = reader.read(20)
+		reader.alignToByte()
+
+		_ = reader.read(14)
+		if !xybEncoded { _ = reader.read(1 + 6) }
+		_ = reader.read(2)
+		if xybEncoded { _ = reader.read(6) }
+		_ = reader.read(8)
+		if reader.read(1) == 1 {
+			_ = reader.read(2)
+			return (true, 2)
+		}
+		let gaborish = reader.read(1) == 1
+		if gaborish { _ = reader.read(1) }
+		let epf = UInt32(reader.read(2))
+		if epf > 0 { _ = reader.read(3) }
+		_ = reader.read(2 + 2)
+		return (gaborish, epf)
+	}
+
+	static func referenceFilters(for distances: [Float]) throws -> [(Bool, UInt32)] {
+		let reference = try SemanticDump(fixture: "distance_filters")
+		guard
+			case .integers(let inputBits)? = reference.fields["distance_filters.inputs"],
+			case .integers(let gaborish)? = reference.fields[
+				"distance_filters.gaborish_effort4"],
+			case .integers(let epf)? = reference.fields[
+				"distance_filters.epf_iterations_effort4"]
+		else { throw SemanticDumpError.badHeader("missing distance filter fields") }
+		return try distances.map { distance in
+			guard let index = inputBits.firstIndex(of: Int64(distance.bitPattern))
+			else {
+				throw FixtureError.missingFilterObservation(distance)
+			}
+			return (gaborish[index] == 1, UInt32(epf[index]))
+		}
+	}
+
+	static func image() throws -> ImageBuffer {
+		let size = 16
+		let samples = (0..<(size * size * 3)).map { UInt8(($0 * 37 + $0 / 3) & 255) }
+		return try ImageBuffer(width: size, height: size, samples: samples)
 	}
 
 	@Test(
@@ -70,21 +144,53 @@ struct LoopFilterTests {
 		}
 	}
 
-	@Test("production pixel headers keep Gaborish off across EPF transitions", .disabled())
+	@Test("production pixel headers keep Gaborish off across EPF transitions")
 	func pixelHeadersKeepGaborishOffAtThresholds() throws {
-		Issue.record(
-			"Read actual Encoder.encode header fields at all nine threshold neighbors")
+		let image = try Self.image()
+		let expected = try Self.referenceFilters(for: Self.thresholds)
+		for optimizeCodes in [true, false] {
+			for (distance, reference) in zip(Self.thresholds, expected) {
+				let encoded = try Encoder.encode(
+					image, distance: distance, optimizeCodes: optimizeCodes)
+				let actual = Self.loopFilter(in: encoded)
+				#expect(actual.gaborish == reference.0)
+				#expect(actual.epf == reference.1)
+				#expect(!actual.gaborish)
+			}
+		}
 	}
 
-	@Test("JPEG headers disable both filters", .disabled())
+	@Test("JPEG headers disable both filters")
 	func jpegHeadersDisableBothFilters() throws {
-		Issue.record(
-			"Read actual Encoder.encodeJPEG filter fields for supported JPEG fixtures")
+		for (fixture, semantic) in [
+			("small_444", "jpeg_small_444"),
+			("small_422", "jpeg_small_422"),
+			("hopper_420_odd", "jpeg_hopper_420_odd"),
+		] {
+			let jpeg = try JPEGParserTests.fixture(fixture)
+			let transcode = try JPEGTranscode(JPEGParser.parse(jpeg))
+			let actual = Self.loopFilter(in: try Encoder.encodeJPEG(transcode))
+			let expected = try SemanticDump(fixture: semantic)
+			#expect(expected.fields["gaborish.enabled"] == .integers([0]))
+			#expect(expected.fields["epf.iterations"] == .integers([0]))
+			#expect(!actual.gaborish)
+			#expect(actual.epf == 0)
+		}
 	}
 
-	@Test("concurrent pixel assembly preserves serial filter fields", .disabled())
+	@Test("concurrent pixel assembly preserves serial filter fields")
 	func concurrentPixelHeadersMatchSerialFilters() async throws {
-		Issue.record(
-			"Read actual concurrent and serial headers at the same threshold neighbors")
+		let image = try Self.image()
+		let expected = try Self.referenceFilters(for: Self.thresholds)
+		for (distance, reference) in zip(Self.thresholds, expected) {
+			let serial = Self.loopFilter(
+				in: try Encoder.encode(image, distance: distance))
+			let concurrent = Self.loopFilter(
+				in: try await Encoder.encodeConcurrently(image, distance: distance))
+			#expect(concurrent.gaborish == reference.0)
+			#expect(concurrent.epf == reference.1)
+			#expect(concurrent.gaborish == serial.gaborish)
+			#expect(concurrent.epf == serial.epf)
+		}
 	}
 }

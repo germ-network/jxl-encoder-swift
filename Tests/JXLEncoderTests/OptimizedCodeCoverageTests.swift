@@ -28,7 +28,8 @@ struct OptimizedCodeCoverageTests {
 		let transcode = try JPEGTranscode(jpeg)
 		var writer = BitWriter()
 		return try Encoder.encodeJPEGFrame(
-			transcode, optimizeCodes: optimize, writer: &writer)
+			transcode, loopFilter: .init(gaborish: false, epfIterations: 0),
+			optimizeCodes: optimize, writer: &writer)
 	}
 
 	/// Reports coverage rather than just asserting, so a failure names the code

@@ -66,7 +66,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"coeff_order": ["GER-3386", "GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
 				"image_sample_format": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
-				"gaborish": ["GER-3387"], "frame_flags": ["GER-3387"],
+				"frame_flags": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
@@ -403,7 +403,8 @@ struct SemanticFixtureTests {
 		let transcode = try JPEGTranscode(JPEGParser.parse(jpeg))
 		var writer = BitWriter()
 		let acCode = try Encoder.encodeJPEGFrame(
-			transcode, optimizeCodes: true, writer: &writer
+			transcode, loopFilter: .init(gaborish: false, epfIterations: 0),
+			optimizeCodes: true, writer: &writer
 		).ac
 		var actual = SemanticDump()
 		try actual.recordACEntropyCode(acCode)
