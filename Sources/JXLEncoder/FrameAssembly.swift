@@ -62,11 +62,14 @@ enum FrameAssembly {
 		writer.write(1, 1)  // last frame
 		writer.write(2, 0)  // no name
 
-		if epfIterations == 2 {
+		if loopFilter.gaborish && epfIterations == 2 {
 			writer.write(1, 1)  // default loop filter
 		} else {
 			writer.write(1, 0)  // not default loop filter
-			writer.write(1, 0)  // no gaborish
+			writer.write(1, loopFilter.gaborish ? 1 : 0)
+			if loopFilter.gaborish {
+				writer.write(1, 0)  // default gaborish customization
+			}
 			writer.write(2, UInt64(epfIterations))
 			if epfIterations > 0 {
 				writer.write(1, 0)  // default epf sharpness
