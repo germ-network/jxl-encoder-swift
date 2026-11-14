@@ -89,8 +89,17 @@ struct LoopFilterTests {
 	}
 
 	static func image() throws -> ImageBuffer {
-		let size = 16
-		let samples = (0..<(size * size * 3)).map { UInt8(($0 * 37 + $0 / 3) & 255) }
+		let size: Int = 16
+		let pixelCount: Int = size * size
+		let sampleCount: Int = pixelCount * 3
+		var samples: [UInt8] = []
+		samples.reserveCapacity(sampleCount)
+		for index in 0..<sampleCount {
+			let scaledIndex: Int = index * 37
+			let channelOffset: Int = index / 3
+			let sampleValue: Int = (scaledIndex + channelOffset) & 255
+			samples.append(UInt8(sampleValue))
+		}
 		return try ImageBuffer(width: size, height: size, samples: samples)
 	}
 
