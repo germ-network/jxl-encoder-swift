@@ -115,7 +115,8 @@ enum SwiftSemanticEncoding {
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
-			epfIterations: params.epfIterations, writer: &writer)
+			loopFilter: .init(gaborish: false, epfIterations: params.epfIterations),
+			writer: &writer)
 		FrameAssembly.combineSections(sections.map { $0.finished() }, writer: &writer)
 		writer.zeroPadToByte()
 		return Result(

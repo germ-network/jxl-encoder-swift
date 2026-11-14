@@ -357,7 +357,7 @@ public enum Encoder {
 
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
-			epfIterations: params.epfIterations,
+			loopFilter: .init(gaborish: false, epfIterations: params.epfIterations),
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)
@@ -485,7 +485,7 @@ extension Encoder {
 
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
-			epfIterations: params.epfIterations,
+			loopFilter: .init(gaborish: false, epfIterations: params.epfIterations),
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)
@@ -724,7 +724,7 @@ extension Encoder {
 
 		FrameAssembly.writeFrameHeader(
 			colorMode: .ycbcr(subsampling: transcode.subsampling),
-			epfIterations: 0,
+			loopFilter: .init(gaborish: false, epfIterations: 0),
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)

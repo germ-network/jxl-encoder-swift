@@ -177,7 +177,8 @@ enum SwiftJPEGSemanticEncoding {
 			width: t.width, height: t.height, transferFunction: .sRGB,
 			xybEncoded: false, to: &writer)
 		FrameAssembly.writeFrameHeader(
-			colorMode: .ycbcr(subsampling: t.subsampling), epfIterations: 0,
+			colorMode: .ycbcr(subsampling: t.subsampling),
+			loopFilter: .init(gaborish: false, epfIterations: 0),
 			writer: &writer)
 		FrameAssembly.combineSections(sections.map { $0.finished() }, writer: &writer)
 		writer.zeroPadToByte()

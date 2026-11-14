@@ -23,9 +23,21 @@ enum FrameAssembly {
 		case ycbcr(subsampling: ChromaSubsampling)
 	}
 
+	struct LoopFilter: Equatable, Sendable {
+		let gaborish: Bool
+		let epfIterations: UInt32
+
+		init(gaborish: Bool, epfIterations: UInt32) {
+			precondition(epfIterations <= 3)
+			self.gaborish = gaborish
+			self.epfIterations = epfIterations
+		}
+	}
+
 	static func writeFrameHeader(
-		colorMode: ColorMode, epfIterations: UInt32, writer: inout BitWriter
+		colorMode: ColorMode, loopFilter: LoopFilter, writer: inout BitWriter
 	) {
+		let epfIterations = loopFilter.epfIterations
 		writer.write(1, 0)  // not all default
 		writer.write(2, 0)  // regular frame
 		writer.write(1, 0)  // vardct
