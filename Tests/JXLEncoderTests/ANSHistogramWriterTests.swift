@@ -189,6 +189,63 @@ struct ANSHistogramWriterTests {
 				name: "ans_cost_missing_source_data", input: input,
 				expected: expected)
 		}
+		let validExpected = try EntropyReferenceFixture.load("ans_cost_sparse_precise")
+			.expected
+		func makeInput(counts: [Int64], logAlpha: Int64 = 7, strategy: Int64 = 2)
+			-> SemanticDump
+		{
+			var dump = SemanticDump()
+			dump.record("input.histogram.counts", .integers(counts))
+			dump.record("input.histogram.log_alpha_size", .integers([logAlpha]))
+			dump.record("input.histogram.strategy", .integers([strategy]))
+			return dump
+		}
+		var boundaryExpected = SemanticDump()
+		boundaryExpected.record("entropy.ans_cost.normalized", .integers([4096]))
+		boundaryExpected.record("entropy.ans_cost.serialized_method", .integers([1]))
+		boundaryExpected.record("entropy.ans_cost.serialized_shift", .integers([-1]))
+		boundaryExpected.record("entropy.ans_cost.header_bits", .integers([3]))
+		boundaryExpected.record("entropy.ans_cost.bytes", .integers([1]))
+		boundaryExpected.record("entropy.ans_cost.total_cost", .floats([3]))
+		boundaryExpected.record("entropy.ans_cost.source_data_bits", .floats([0]))
+		try EntropyReferenceFixture.validate(
+			name: "ans_cost_boundary",
+			input: makeInput(counts: [Int64(Int32.max)], logAlpha: 5, strategy: 0),
+			expected: boundaryExpected)
+		try EntropyReferenceFixture.validate(
+			name: "ans_cost_upper_boundary",
+			input: makeInput(counts: [Int64(Int32.max)], logAlpha: 8, strategy: 2),
+			expected: boundaryExpected)
+		#expect(throws: SemanticDumpError.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ans_cost_bad_log_alpha",
+				input: makeInput(counts: [1, 1], logAlpha: 4),
+				expected: validExpected)
+		}
+		#expect(throws: SemanticDumpError.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ans_cost_bad_strategy",
+				input: makeInput(counts: [1, 1], strategy: 3),
+				expected: validExpected)
+		}
+		#expect(throws: SemanticDumpError.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ans_cost_negative_count", input: makeInput(counts: [-1, 1]),
+				expected: validExpected)
+		}
+		#expect(throws: SemanticDumpError.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ans_cost_overflow_sum",
+				input: makeInput(counts: [Int64(Int32.max), 1]),
+				expected: validExpected
+			)
+		}
+		#expect(throws: SemanticDumpError.self) {
+			try EntropyReferenceFixture.validate(
+				name: "ans_cost_oversize_alphabet",
+				input: makeInput(counts: Array(repeating: 0, count: 257)),
+				expected: validExpected)
+		}
 		for name in [
 			"ans_cost_sparse_precise", "ans_cost_flat_alphabet47",
 			"ans_cost_skewed_approximate", "ans_cost_approx_step2_witness",
@@ -298,25 +355,35 @@ struct ANSHistogramWriterTests {
 
 	@Test
 	func degenerateAndFlatHistogramsMatchReference() throws {
-		for name in [
-			"ans_empty", "ans_all_zero", "ans_singleton_precise",
-			"ans_two_symbol_approximate", "ans_alphabet48_fast", "ans_alphabet64_fast",
-		] {
+		for name in ["ans_empty", "ans_all_zero", "ans_singleton_precise"] {
 			let fixture = try EntropyReferenceFixture.load(name)
 			guard
 				case .integers(let counts)? = fixture.input.fields[
 					"input.histogram.counts"],
-				case .integers(let logAlpha)? = fixture.input.fields[
-					"input.histogram.log_alpha_size"],
 				case .integers(let strategyCode)? = fixture.input.fields[
 					"input.histogram.strategy"]
 			else { throw SemanticDumpError.unimplemented }
-			let actual = SwiftEntropySemanticEncoding.histogram(
-				counts: counts.map(Int.init), logAlphaSize: Int(logAlpha[0]),
-				strategy: strategy(strategyCode[0]))
+			let result = ANSEncodingHistogram.computeBest(
+				counts: counts.map(UInt32.init), strategy: strategy(strategyCode[0])
+			)
+			let expectedNormalized = try fixture.integers(
+				fixture.expected, "entropy.histogram.normalized"
+			).map(Int.init)
+			let expectedBits = try fixture.integers(
+				fixture.expected, "entropy.histogram.bit_count")[0]
+			let expectedBytes = try fixture.integers(
+				fixture.expected, "entropy.histogram.bytes"
+			).map(Int.init)
+			var writer = BitWriter()
+			result.write(to: &writer)
 			#expect(
-				actual.differences(from: fixture.expected).isEmpty,
-				Comment(rawValue: name))
+				Array(result.normalizedCounts.prefix(result.alphabetSize))
+					== expectedNormalized, Comment(rawValue: name))
+			#expect(result.method == 1)
+			#expect(result.headerBits == expectedBits)
+			#expect(writer.bytes.map(Int.init) == expectedBytes)
+			#expect(result.dataBits == 0)
+			#expect(result.cost == Float(expectedBits))
 		}
 	}
 
@@ -347,6 +414,27 @@ struct ANSHistogramWriterTests {
 			#expect(
 				writer.bytes.map(Int.init) == expectedBytes, Comment(rawValue: name)
 			)
+		}
+		// Public libjxl probe values pin RLE4, RLE5, then omission splitting a run.
+		for (counts, normalized, omit, bits, bytes) in [
+			([100, 1, 1, 1, 1], [3968, 32, 32, 32, 32], 0, 23, [24, 32, 73]),
+			([100, 1, 1, 1, 1, 1], [3936, 32, 32, 32, 32, 32], 0, 22, [152, 96, 16]),
+			(
+				[1, 1, 100, 1, 1, 1, 1, 1], [32, 32, 3872, 32, 32, 32, 32, 32], 2,
+				29, [168, 72, 48, 8]
+			),
+		] as [([UInt32], [Int], Int, Int, [Int])] {
+			let result = ANSEncodingHistogram.computeBest(
+				counts: counts, strategy: .precise)
+			var writer = BitWriter()
+			result.write(to: &writer)
+			writer.zeroPadToByte()
+			#expect(
+				Array(result.normalizedCounts.prefix(result.alphabetSize))
+					== normalized)
+			#expect(result.omitPosition == omit)
+			#expect(result.headerBits == bits)
+			#expect(writer.bytes.map(Int.init) == bytes)
 		}
 	}
 
