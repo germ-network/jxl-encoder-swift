@@ -22,6 +22,7 @@ public struct EntropyCode: Sendable {
 	/// prefix encoding in this case; only `EntropyCodeWriter`/`SectionWriter`
 	/// read this field to decide which one actually gets serialized.
 	public let ansInfoTables: [[ANSEncSymbolInfo]]?
+	private(set) var ansHistograms: [ANSEncodingHistogram]? = nil
 
 	public init(
 		contextMap: [UInt8], prefixCodes: [PrefixCode],
@@ -32,6 +33,13 @@ public struct EntropyCode: Sendable {
 		self.prefixCodes = prefixCodes
 		self.originalContextMap = originalContextMap
 		self.ansInfoTables = ansInfoTables
+	}
+
+	init(
+		contextMap: [UInt8], prefixCodes: [PrefixCode],
+		originalContextMap: [UInt8]? = nil, ansHistograms: [ANSEncodingHistogram]
+	) {
+		fatalError("Retained ANS histogram construction is not implemented")
 	}
 
 	public var contextCount: Int { contextMap.count }

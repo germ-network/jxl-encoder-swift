@@ -203,3 +203,44 @@ enum ANSHistogramNormalizer {
 		return shares
 	}
 }
+
+enum ANSHistogramStrategy: Sendable {
+	case precise
+	case approximate
+	case fast
+}
+
+struct ANSEncodingHistogram: Sendable {
+	let normalizedCounts: [Int]
+	let alphabetSize: Int
+	let method: Int
+	let omitPosition: Int
+	let headerBits: Int
+	let dataBits: Float
+	let cost: Float
+
+	private init(
+		normalizedCounts: [Int], alphabetSize: Int, method: Int, omitPosition: Int,
+		headerBits: Int, dataBits: Float, cost: Float
+	) {
+		self.normalizedCounts = normalizedCounts
+		self.alphabetSize = alphabetSize
+		self.method = method
+		self.omitPosition = omitPosition
+		self.headerBits = headerBits
+		self.dataBits = dataBits
+		self.cost = cost
+	}
+
+	static func rebalanced(counts: [UInt32], shift: Int) -> Self {
+		fatalError("ANS normalization is not implemented")
+	}
+
+	static func computeBest(counts: [UInt32], strategy: ANSHistogramStrategy) -> Self {
+		fatalError("ANS precision selection is not implemented")
+	}
+
+	func write(to writer: inout BitWriter) {
+		fatalError("Selected ANS histogram serialization is not implemented")
+	}
+}
