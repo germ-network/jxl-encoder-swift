@@ -13,6 +13,90 @@ struct ANSHistogramWriterTests {
 		}
 	}
 
+	private func strategyCode(_ strategy: ANSHistogramStrategy) -> Int64 {
+		switch strategy {
+		case .fast: 0
+		case .approximate: 1
+		case .precise: 2
+		}
+	}
+
+	@Test
+	func declaredANSProofCasesMatchBoundedPublicObservations() throws {
+		for proof in ANSHistogramProofCase.all {
+			let fixture = try EntropyReferenceFixture.load(proof.fixture)
+			switch proof.observation {
+			case .selectedCandidate, .preciseContextMap:
+				let selectedStrategy = proof.strategy
+				let shift = proof.selectedShift
+				let code = strategyCode(selectedStrategy)
+				#expect(
+					try fixture.integers(
+						fixture.input, "input.histogram.strategy") == [
+							code
+						],
+					Comment(rawValue: proof.fixture))
+				let counts = try fixture.integers(
+					fixture.input, "input.histogram.counts"
+				).map(UInt32.init)
+				let selected = ANSEncodingHistogram.computeBest(
+					counts: counts, strategy: selectedStrategy)
+				let expectedCounts = try fixture.integers(
+					fixture.expected, "entropy.ans_cost.normalized"
+				).map(Int.init)
+				let expectedMethod = try fixture.integers(
+					fixture.expected, "entropy.ans_cost.serialized_method")[0]
+				let expectedShift = try fixture.integers(
+					fixture.expected, "entropy.ans_cost.serialized_shift")[0]
+				let expectedBits = try fixture.integers(
+					fixture.expected, "entropy.ans_cost.header_bits")[0]
+				let expectedBytes = try fixture.integers(
+					fixture.expected, "entropy.ans_cost.bytes"
+				).map(Int.init)
+				guard
+					case .floats(let sourceDataBits)? = fixture.expected.fields[
+						"entropy.ans_cost.source_data_bits"],
+					case .floats(let totalCost)? = fixture.expected.fields[
+						"entropy.ans_cost.total_cost"]
+				else { throw SemanticDumpError.unimplemented }
+				#expect(expectedShift == Int64(shift ?? -1))
+				#expect(expectedMethod == (shift == nil ? 0 : 2))
+				#expect(
+					Array(
+						selected.normalizedCounts.prefix(
+							expectedCounts.count))
+						== expectedCounts)
+				#expect(selected.method == (shift.map { $0 + 1 } ?? 0))
+				#expect(selected.headerBits == expectedBits)
+				#expect(selected.dataBits == sourceDataBits[0])
+				#expect(selected.cost == totalCost[0])
+				var writer = BitWriter()
+				selected.write(to: &writer)
+				writer.zeroPadToByte()
+				#expect(writer.bytes.map(Int.init) == expectedBytes)
+			case .semanticHistogram(let selectedStrategy):
+				guard
+					case .integers(let counts)? = fixture.input.fields[
+						"input.histogram.counts"],
+					case .integers(let logAlpha)? = fixture.input.fields[
+						"input.histogram.log_alpha_size"],
+					case .integers(let code)? = fixture.input.fields[
+						"input.histogram.strategy"]
+				else { throw SemanticDumpError.unimplemented }
+				#expect(code == [strategyCode(selectedStrategy)])
+				let actual = SwiftEntropySemanticEncoding.histogram(
+					counts: counts.map(Int.init),
+					logAlphaSize: Int(logAlpha[0]),
+					strategy: selectedStrategy)
+				#expect(actual.differences(from: fixture.expected).isEmpty)
+			}
+		}
+		let selectedShifts = Set(
+			ANSHistogramProofCase.selectedCandidates.compactMap(\.selectedShift))
+		#expect(selectedShifts == Set([0, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11]))
+		#expect(!selectedShifts.contains(1))
+	}
+
 	@Test
 	func fixedShiftHistogramMatchesReferenceRepresentation() throws {
 		let histogram = ANSEncodingHistogram.rebalanced(counts: [1, 1], shift: 0)
@@ -446,26 +530,28 @@ struct ANSHistogramWriterTests {
 				writer.bytes.map(Int.init) == expectedBytes, Comment(rawValue: name)
 			)
 		}
-		// Public libjxl probe values pin RLE4, RLE5, then omission splitting a run.
-		for (counts, normalized, omit, bits, bytes) in [
-			([100, 1, 1, 1, 1], [3968, 32, 32, 32, 32], 0, 23, [24, 32, 73]),
-			([100, 1, 1, 1, 1, 1], [3936, 32, 32, 32, 32, 32], 0, 22, [152, 96, 16]),
-			(
-				[1, 1, 100, 1, 1, 1, 1, 1], [32, 32, 3872, 32, 32, 32, 32, 32], 2,
-				29, [168, 72, 48, 8]
-			),
-		] as [([UInt32], [Int], Int, Int, [Int])] {
+		// Encode supplies header bits/bytes; omit positions are source-derived from
+		// RebalanceHistogram, not captured from private libjxl state.
+		for proof in ANSHistogramProofCase.inlineRLE {
 			let result = ANSEncodingHistogram.computeBest(
-				counts: counts, strategy: .precise)
+				counts: proof.counts, strategy: .precise)
 			var writer = BitWriter()
 			result.write(to: &writer)
 			writer.zeroPadToByte()
 			#expect(
+				proof.decisions.isSuperset(of: [.omission, .generalSerialization]))
+			#expect(
 				Array(result.normalizedCounts.prefix(result.alphabetSize))
-					== normalized)
-			#expect(result.omitPosition == omit)
-			#expect(result.headerBits == bits)
-			#expect(writer.bytes.map(Int.init) == bytes)
+					== proof.normalized, Comment(rawValue: proof.name))
+			#expect(
+				result.omitPosition == proof.sourceDerivedOmitPosition,
+				Comment(rawValue: proof.name))
+			#expect(
+				result.headerBits == proof.headerBits, Comment(rawValue: proof.name)
+			)
+			#expect(
+				writer.bytes.map(Int.init) == proof.bytes,
+				Comment(rawValue: proof.name))
 		}
 	}
 
@@ -588,7 +674,8 @@ struct ANSHistogramWriterTests {
 
 	@Test
 	func contextMapHistogramUsesReferenceANSSelection() throws {
-		let fixture = try EntropyReferenceFixture.load("ans_cost_precise_map_witness")
+		let proof = ANSHistogramProofCase.contextMap
+		let fixture = try EntropyReferenceFixture.load(proof.fixture)
 		let counts = try fixture.integers(
 			fixture.input, "input.histogram.counts"
 		).map(UInt32.init)
@@ -601,7 +688,8 @@ struct ANSHistogramWriterTests {
 		let expectedCounts = try fixture.integers(
 			fixture.expected, "entropy.ans_cost.normalized"
 		).map(Int.init)
-		#expect(expectedShift == 7)
+		#expect(expectedShift == Int64(proof.selectedShift ?? -1))
+		#expect(proof.decisions.contains(.contextMapSelection))
 		#expect(selected.method == expectedShift + 1)
 		#expect(
 			Array(selected.normalizedCounts.prefix(expectedCounts.count))

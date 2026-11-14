@@ -6,7 +6,7 @@ probe="$root/Reference/build/harness/jxl-ans-histogram-probe"
 out="$root/Tests/JXLEncoderTests/Fixtures/entropy"
 manifest="$root/Reference/provenance.tsv"
 test -x "$probe"
-pin="$(sed -n 's/^LIBJXL_COMMIT=//p' "$root/Reference/libjxl.pin")"
+pin="$(sed -n 's/^LIBJXL_COMMIT=//p' "$root/Reference/libjxl.pin" | tr -d '"')"
 "$root/Reference/pin-check.sh" /Users/markdev/checkouts/common/libjxl
 mkdir -p "$out"
 tmp="$(mktemp)"

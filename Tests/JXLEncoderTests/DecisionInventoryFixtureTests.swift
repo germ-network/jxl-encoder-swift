@@ -52,6 +52,11 @@ struct DecisionInventoryFixtureTests {
 		else { return .notFullLibjxl }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
+			if category == "ans_cost" || category == "histogram" {
+				return ANSHistogramProofCase.all.contains {
+					$0.reference == key
+				} ? .verifies : .notCompared
+			}
 			if JPEGSemanticCase.contextWitnessReferences.contains(key) {
 				let fixture = URL(fileURLWithPath: reference.path)
 					.deletingPathExtension().lastPathComponent
@@ -244,5 +249,28 @@ struct DecisionInventoryFixtureTests {
 		#expect(
 			violations.isEmpty,
 			"\(violations.map(\.description).joined(separator: "\n"))")
+	}
+
+	@Test(
+		"ANS inventory fixtures are bound to typed decision proofs",
+		.enabled(if: PackageCheckout.isAvailable))
+	func ansHistogramInventoryReferencesHaveDecisionProofs() throws {
+		let inventory = try DecisionInventoryTests.committed()
+		for row in inventory.rows
+		where ["AH-01", "AH-02", "AH-03", "AH-04", "AH-05", "EW-08"].contains(row.id) {
+			let references =
+				row.fixture == "-" ? [] : row.fixture.components(separatedBy: ",")
+			#expect(!references.isEmpty, "\(row.id) needs bounded fixture evidence")
+			for text in references {
+				guard let reference = DecisionInventory.FixtureReference(text)
+				else {
+					Issue.record("malformed ANS proof reference: \(text)")
+					continue
+				}
+				#expect(
+					ANSHistogramProofCase.proves(reference, decision: row.id),
+					"\(text) does not prove \(row.id)")
+			}
+		}
 	}
 }
