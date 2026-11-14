@@ -13,6 +13,18 @@ import Testing
 
 @Suite("JPEG block context map")
 struct JPEGBlockContextMapTests {
+	@Test(
+		"DC histogram uses the reference unsigned buckets",
+		.disabled("Pending implementation"),
+		arguments: [
+			-1_048_576, -32_768, -1025, -1024, -1023, 1022, 1023, 1024, 32_767,
+			1_048_576,
+		]
+	)
+	func dcHistogramUsesUnsignedBuckets(dc: Int) {
+		Issue.record("Pin the reference bucket through the computed threshold")
+	}
+
 	@Test("threshold count follows the clamp(log2 total - log2 qtSum - 7, 1, 7) formula")
 	func numThresholdsFormula() {
 		// total = 1024 (ceilLog2 = 10), qtSum = 1 (ceilLog2 = 0): 10-0-7 = 3.

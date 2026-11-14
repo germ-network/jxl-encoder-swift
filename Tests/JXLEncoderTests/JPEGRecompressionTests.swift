@@ -6,6 +6,15 @@ import Testing
 /// point, and JPEG XL signature detection.
 @Suite("Portable JPEG recompression")
 struct PortableJPEGRecompressionTests {
+	@Test(
+		"DC boundary JPEGs recompress through the public API",
+		.disabled("Pending implementation"),
+		arguments: [-1025, -1024, -1023, 1023, 1024]
+	)
+	func dcBoundaryRecompresses(dc: Int) throws {
+		Issue.record("Verify the crafted DC then require a recompressed codestream")
+	}
+
 	/// An APP1 EXIF segment whose IFD0 holds only an orientation entry.
 	static func exifSegment(orientation: Int, littleEndian: Bool) -> [UInt8] {
 		func u16(_ v: Int) -> [UInt8] {
