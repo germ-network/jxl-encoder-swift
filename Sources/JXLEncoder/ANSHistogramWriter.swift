@@ -2,18 +2,9 @@
 //  ANSHistogramWriter.swift
 //  JXLEncoder
 //
-//  Port of `ANSEncodingHistogram::Encode` (enc_ans.cc) — signals the
-//  normalized frequency distribution so the decoder can reconstruct the same
-//  alias table independently. No tiny counterpart (tiny has no ANS).
-//
-//  Simplified from the reference in the way ANSCoder.swift documents: always
-//  full precision (no bits dropped — real libjxl's own maximum-precision
-//  case, `method = ANS_LOG_TAB_SIZE`, not an invented one), so the
-//  shift-dependent `GetPopulationCountPrecision` rounding never triggers.
-//  `omit_pos` is *not* a size optimisation this port can skip — the decoder
-//  identifies the omitted symbol as whichever has the (tied-for-)largest
-//  transmitted bit-width, so a valid bitstream requires playing by that
-//  convention even without the precision-dropping this port omits.
+//  Port of `ANSEncodingHistogram`'s candidate selection, rebalancing, cost
+//  estimation, and wire encoding from `enc_ans.cc`. The decoder reconstructs
+//  the alias table from the selected normalized distribution.
 //
 
 import Foundation
@@ -73,7 +64,15 @@ enum ANSHistogramWriter {
 			return
 		}
 
-		if method != 0 && nonZeroSymbols.count <= maxSymbolsForSmallCode {
+		if method == 0 {
+			precondition(alphabetSize > 0)
+			writer.write(1, 0)
+			writer.write(1, 1)
+			storeVarLenUint8(alphabetSize - 1, writer: &writer)
+			return
+		}
+
+		if nonZeroSymbols.count <= maxSymbolsForSmallCode {
 			writer.write(1, 1)  // small tree
 			writer.write(1, UInt64(nonZeroSymbols.count - 1))
 			for symbol in nonZeroSymbols {
@@ -176,12 +175,8 @@ enum ANSHistogramWriter {
 	}
 }
 
-/// Substitute for `ANSEncodingHistogram::RebalanceHistogram` — see this
-/// file's and ANSCoder.swift's headers for why. Largest-remainder rounding
-/// to a distribution summing to exactly `ANSConstants.tabSize`, keeping
-/// every originally-nonzero symbol at 1 or more (a real constraint:
-/// `BuildAndStoreANSEncodingData`'s own sanity check requires zero/nonzero
-/// to match between input and normalized counts).
+/// Largest-remainder distribution used by frequency-only histogram callers.
+/// It preserves support and sums to `ANSConstants.tabSize`.
 enum ANSHistogramNormalizer {
 	static func normalize(_ counts: [UInt32]) -> [Int] {
 		let total = counts.reduce(0) { $0 + Int($1) }
@@ -468,7 +463,63 @@ struct ANSEncodingHistogram: Sendable {
 	}
 
 	static func computeBest(counts: [UInt32], strategy: ANSHistogramStrategy) -> Self {
-		fatalError("ANS precision selection is not implemented")
+		precondition(counts.count <= 256)
+		let total = counts.reduce(Int64(0)) { $0 + Int64($1) }
+		precondition(total <= Int64(Int32.max))
+		let alphabetSize = counts.lastIndex(where: { $0 > 0 }).map { $0 + 1 } ?? 0
+		if alphabetSize == 0 {
+			return Self(
+				normalizedCounts: counts.map(Int.init), alphabetSize: 0, method: 1,
+				omitPosition: -1, headerBits: 3, dataBits: 0, cost: 3)
+		}
+
+		let nonzero = counts.indices.filter { counts[$0] > 0 }
+		if nonzero.count == 1 {
+			var normalized = counts.map(Int.init)
+			normalized[nonzero[0]] = ANSConstants.tabSize
+			var writer = BitWriter()
+			ANSHistogramWriter.write(
+				counts: normalized, alphabetSize: alphabetSize, method: 1,
+				omitPosition: -1, shift: 0, writer: &writer)
+			return Self(
+				normalizedCounts: normalized, alphabetSize: alphabetSize, method: 1,
+				omitPosition: -1, headerBits: writer.bitsWritten, dataBits: 0,
+				cost: Float(writer.bitsWritten))
+		}
+
+		var flat = [Int](repeating: 0, count: counts.count)
+		let quotient = ANSConstants.tabSize / alphabetSize
+		let remainder = ANSConstants.tabSize % alphabetSize
+		for index in 0..<alphabetSize {
+			flat[index] = quotient + (index < remainder ? 1 : 0)
+		}
+		var flatWriter = BitWriter()
+		ANSHistogramWriter.write(
+			counts: flat, alphabetSize: alphabetSize, method: 0,
+			omitPosition: -1, shift: 0, writer: &flatWriter)
+		let flatLog =
+			Int64(ANSFixedShift.log2Table[alphabetSize])
+			* Int64(ANSConstants.logTabSize)
+		let flatProduct = UInt64(total) &* UInt64(flatLog)
+		let flatDataBits = Float(flatProduct) * Float(1.0 / Double(1 << 31))
+		var best = Self(
+			normalizedCounts: flat, alphabetSize: alphabetSize, method: 0,
+			omitPosition: -1, headerBits: flatWriter.bitsWritten,
+			dataBits: flatDataBits, cost: Float(flatWriter.bitsWritten) + flatDataBits)
+
+		let shifts: [Int]
+		switch strategy {
+		case .precise: shifts = Array(0..<ANSConstants.logTabSize)
+		case .approximate:
+			shifts = Array(stride(from: 0, through: ANSConstants.logTabSize, by: 2))
+		case .fast: shifts = [0, ANSConstants.logTabSize / 2, ANSConstants.logTabSize]
+		}
+		for requestedShift in shifts {
+			let shift = min(requestedShift, ANSConstants.logTabSize - 1)
+			let candidate = rebalanced(counts: counts, shift: shift)
+			if candidate.cost < best.cost { best = candidate }
+		}
+		return best
 	}
 
 	func write(to writer: inout BitWriter) {

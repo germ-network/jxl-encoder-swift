@@ -36,6 +36,8 @@ generate() {
 }
 
 generate ans_cost_sparse_precise precise 2 0 3 0 0 15 0 1
+generate ans_cost_flat_alphabet47 fast 0 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1 1
+generate ans_cost_approx_step2_witness approximate 1 90275 18441 21176 73088
 generate ans_cost_skewed_approximate approximate 1 10000 1 4 16 256 1024
 generate ans_cost_scaled_fast fast 0 9294 684 593 7685 3091 9802 4825 1107
 generate ans_cost_shift_2 precise 2 42 18 8 17

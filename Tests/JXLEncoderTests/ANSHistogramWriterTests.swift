@@ -4,6 +4,15 @@ import Testing
 
 @Suite("Upstream ANS histogram translation")
 struct ANSHistogramWriterTests {
+	private func strategy(_ code: Int64) -> ANSHistogramStrategy {
+		switch code {
+		case 0: .fast
+		case 1: .approximate
+		case 2: .precise
+		default: preconditionFailure("invalid ANS strategy fixture")
+		}
+	}
+
 	@Test
 	func fixedShiftHistogramMatchesReferenceRepresentation() throws {
 		let histogram = ANSEncodingHistogram.rebalanced(counts: [1, 1], shift: 0)
@@ -48,10 +57,11 @@ struct ANSHistogramWriterTests {
 		}
 
 		for name in [
-			"ans_cost_sparse_precise", "ans_cost_skewed_approximate",
+			"ans_cost_sparse_precise",
+			"ans_cost_skewed_approximate",
+			"ans_cost_approx_step2_witness",
+			"ans_cost_approx_step2_witness",
 			"ans_cost_scaled_fast", "ans_cost_shift_2", "ans_cost_shift_3",
-			"ans_cost_shift_5", "ans_cost_shift_7", "ans_cost_shift_8",
-			"ans_cost_shift_9", "ans_cost_shift_10", "ans_cost_shift_11",
 		] {
 			let fixture = try EntropyReferenceFixture.load(name)
 			let counts = try fixture.integers(
@@ -180,7 +190,8 @@ struct ANSHistogramWriterTests {
 				expected: expected)
 		}
 		for name in [
-			"ans_cost_sparse_precise", "ans_cost_skewed_approximate",
+			"ans_cost_sparse_precise", "ans_cost_flat_alphabet47",
+			"ans_cost_skewed_approximate", "ans_cost_approx_step2_witness",
 			"ans_cost_scaled_fast", "ans_cost_shift_2", "ans_cost_shift_3",
 			"ans_cost_shift_5", "ans_cost_shift_7", "ans_cost_shift_8",
 			"ans_cost_shift_9", "ans_cost_shift_10", "ans_cost_shift_11",
@@ -190,31 +201,177 @@ struct ANSHistogramWriterTests {
 		}
 	}
 
-	@Test(.disabled("Pending implementation"))
-	func approximateSearchMatchesReferencePrecisionAndCosts() {
-		Issue.record(
-			"The e4 shift sequence and strict cost comparison select the upstream candidate"
-		)
+	@Test
+	func approximateSearchMatchesReferencePrecisionAndCosts() throws {
+		let fixture = try EntropyReferenceFixture.load("ans_cost_skewed_approximate")
+		#expect(try fixture.integers(fixture.input, "input.histogram.strategy") == [1])
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let result = ANSEncodingHistogram.computeBest(
+			counts: counts, strategy: .approximate)
+		let expectedCounts = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.normalized"
+		).map(Int.init)
+		let expectedShift = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.serialized_shift")[0]
+		let expectedHeaderBits = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.header_bits")[0]
+		guard
+			case .floats(let sourceDataBits)? = fixture.expected.fields[
+				"entropy.ans_cost.source_data_bits"],
+			case .floats(let publicTotalCost)? = fixture.expected.fields[
+				"entropy.ans_cost.total_cost"]
+		else { throw SemanticDumpError.unimplemented }
+		#expect(
+			Array(result.normalizedCounts.prefix(expectedCounts.count))
+				== expectedCounts)
+		#expect(result.method == expectedShift + 1)
+		#expect(result.headerBits == expectedHeaderBits)
+		#expect(result.dataBits == sourceDataBits[0])
+		#expect(result.cost == publicTotalCost[0])
 	}
 
-	@Test(.disabled("Pending implementation"))
-	func degenerateAndFlatHistogramsMatchReference() {
-		Issue.record(
-			"Empty, all-zero, singleton and flat selections retain exact encoding and costs"
-		)
+	@Test
+	func flatCandidateCostMatchesPublicReference() throws {
+		let fixture = try EntropyReferenceFixture.load("ans_cost_flat_alphabet47")
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let result = ANSEncodingHistogram.computeBest(counts: counts, strategy: .fast)
+		let expectedCounts = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.normalized"
+		).map(Int.init)
+		let expectedHeaderBits = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.header_bits")[0]
+		guard
+			case .floats(let expectedDataBits)? = fixture.expected.fields[
+				"entropy.ans_cost.source_data_bits"],
+			case .floats(let expectedCost)? = fixture.expected.fields[
+				"entropy.ans_cost.total_cost"]
+		else { throw SemanticDumpError.unimplemented }
+		#expect(result.method == 0)
+		#expect(
+			Array(result.normalizedCounts.prefix(expectedCounts.count))
+				== expectedCounts)
+		#expect(result.headerBits == expectedHeaderBits)
+		#expect(result.dataBits == expectedDataBits[0])
+		#expect(result.cost == expectedCost[0])
 	}
 
-	@Test(.disabled("Pending implementation"))
-	func histogramSerializationMatchesReferenceOmitTiesAndRuns() {
-		Issue.record(
-			"Selected omission, precision and RLE boundaries produce upstream bits")
+	@Test
+	func preciseSearchRetainsEarlierCandidateOnCostTie() throws {
+		let fixture = try EntropyReferenceFixture.load("ans_cost_shift_8")
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let earlier = ANSEncodingHistogram.rebalanced(counts: counts, shift: 8)
+		for shift in 9...11 {
+			let later = ANSEncodingHistogram.rebalanced(counts: counts, shift: shift)
+			#expect(later.cost == earlier.cost)
+		}
+		let selected = ANSEncodingHistogram.computeBest(counts: counts, strategy: .precise)
+		#expect(selected.method == 9)
+		#expect(selected.normalizedCounts == earlier.normalizedCounts)
 	}
 
-	@Test(.disabled("Pending implementation"))
-	func existingHistogramFixturesMatchReferenceWithoutKnownDifferences() {
-		Issue.record(
-			"Every inherited histogram fixture matches with its actual upstream strategy"
-		)
+	@Test
+	func approximateSearchIncludesEveryEvenShift() throws {
+		let fixture = try EntropyReferenceFixture.load("ans_cost_approx_step2_witness")
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let result = ANSEncodingHistogram.computeBest(
+			counts: counts, strategy: .approximate)
+		let expectedShift = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.serialized_shift")[0]
+		let expectedCounts = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.normalized"
+		).map(Int.init)
+		#expect(expectedShift == 6)
+		#expect(result.method == expectedShift + 1)
+		#expect(
+			Array(result.normalizedCounts.prefix(expectedCounts.count))
+				== expectedCounts)
+	}
+
+	@Test
+	func degenerateAndFlatHistogramsMatchReference() throws {
+		for name in [
+			"ans_empty", "ans_all_zero", "ans_singleton_precise",
+			"ans_two_symbol_approximate", "ans_alphabet48_fast", "ans_alphabet64_fast",
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let counts)? = fixture.input.fields[
+					"input.histogram.counts"],
+				case .integers(let logAlpha)? = fixture.input.fields[
+					"input.histogram.log_alpha_size"],
+				case .integers(let strategyCode)? = fixture.input.fields[
+					"input.histogram.strategy"]
+			else { throw SemanticDumpError.unimplemented }
+			let actual = SwiftEntropySemanticEncoding.histogram(
+				counts: counts.map(Int.init), logAlphaSize: Int(logAlpha[0]),
+				strategy: strategy(strategyCode[0]))
+			#expect(
+				actual.differences(from: fixture.expected).isEmpty,
+				Comment(rawValue: name))
+		}
+	}
+
+	@Test
+	func histogramSerializationMatchesReferenceOmitTiesAndRuns() throws {
+		for name in [
+			"ans_cost_sparse_precise", "ans_cost_skewed_approximate",
+			"ans_cost_shift_5", "ans_cost_shift_7", "ans_cost_shift_8",
+			"ans_cost_shift_9", "ans_cost_shift_10", "ans_cost_shift_11",
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			let counts = try fixture.integers(
+				fixture.input, "input.histogram.counts"
+			).map(UInt32.init)
+			let strategyCode = try fixture.integers(
+				fixture.input, "input.histogram.strategy")[0]
+			let histogram = ANSEncodingHistogram.computeBest(
+				counts: counts, strategy: strategy(strategyCode))
+			var writer = BitWriter()
+			histogram.write(to: &writer)
+			writer.zeroPadToByte()
+			let expectedBits = try fixture.integers(
+				fixture.expected, "entropy.ans_cost.header_bits")[0]
+			let expectedBytes = try fixture.integers(
+				fixture.expected, "entropy.ans_cost.bytes"
+			).map(Int.init)
+			#expect(histogram.headerBits == expectedBits, Comment(rawValue: name))
+			#expect(
+				writer.bytes.map(Int.init) == expectedBytes, Comment(rawValue: name)
+			)
+		}
+	}
+
+	@Test
+	func existingHistogramFixturesMatchReferenceWithoutKnownDifferences() throws {
+		for name in [
+			"ans_empty", "ans_all_zero", "ans_singleton_precise",
+			"ans_two_symbol_approximate", "ans_precision_fast", "ans_sparse_precise",
+			"ans_skewed_approximate", "ans_alphabet48_fast", "ans_alphabet64_fast",
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			guard
+				case .integers(let counts)? = fixture.input.fields[
+					"input.histogram.counts"],
+				case .integers(let logAlpha)? = fixture.input.fields[
+					"input.histogram.log_alpha_size"],
+				case .integers(let strategyCode)? = fixture.input.fields[
+					"input.histogram.strategy"]
+			else { throw SemanticDumpError.unimplemented }
+			let actual = SwiftEntropySemanticEncoding.histogram(
+				counts: counts.map(Int.init), logAlphaSize: Int(logAlpha[0]),
+				strategy: strategy(strategyCode[0]))
+			#expect(
+				actual.differences(from: fixture.expected).isEmpty,
+				Comment(rawValue: name))
+		}
 	}
 
 	@Test(.disabled("Pending implementation"))

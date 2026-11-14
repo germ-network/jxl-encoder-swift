@@ -65,14 +65,18 @@ enum SwiftEntropySemanticEncoding {
 		return (nodes.map(\.fields), chunks)
 	}
 
-	static func histogram(counts: [Int], logAlphaSize: Int) -> SemanticDump {
+	static func histogram(
+		counts: [Int], logAlphaSize: Int, strategy: ANSHistogramStrategy = .precise
+	) -> SemanticDump {
 		precondition((5...8).contains(logAlphaSize))
 		precondition(counts.count <= 256)
 		precondition(((counts.count + 15) / 16) * 16 <= (1 << logAlphaSize))
 		precondition(counts.allSatisfy { $0 >= 0 && $0 <= Int(UInt32.max) })
 		precondition(counts.reduce(UInt64(0)) { $0 + UInt64($1) } <= UInt64(UInt32.max))
-		let normalized = ANSHistogramNormalizer.normalize(counts.map(UInt32.init))
-		let alphabetSize = ANSHistogramWriter.alphabetSize(for: normalized)
+		let selected = ANSEncodingHistogram.computeBest(
+			counts: counts.map(UInt32.init), strategy: strategy)
+		let normalized = selected.normalizedCounts
+		let alphabetSize = selected.alphabetSize
 		let symbols =
 			alphabetSize == 0
 			? []
@@ -80,16 +84,21 @@ enum SwiftEntropySemanticEncoding {
 				distribution: normalized, alphabetSize: alphabetSize,
 				logAlphaSize: logAlphaSize)
 		var writer = BitWriter()
-		ANSHistogramWriter.write(counts: normalized, writer: &writer)
+		selected.write(to: &writer)
 		var dump = SemanticDump()
 		dump.record(
 			"entropy.histogram.normalized",
 			.integers(Array(normalized.prefix(alphabetSize)).map(Int64.init)))
-		let method = normalized.filter { $0 > 0 }.count <= 2 ? 1 : 2
-		dump.record("entropy.histogram.serialized_method", .integers([Int64(method)]))
+		let symbolCount = counts.filter { $0 > 0 }.count
+		let serializedMethod =
+			selected.method == 0 ? 0 : (symbolCount <= 2 ? 1 : 2)
+		dump.record(
+			"entropy.histogram.serialized_method", .integers([Int64(serializedMethod)]))
 		dump.record(
 			"entropy.histogram.serialized_shift",
-			.integers([Int64(method == 1 ? -1 : ANSConstants.logTabSize - 1)]))
+			.integers([
+				Int64(serializedMethod == 2 ? selected.method - 1 : -1)
+			]))
 		dump.record("entropy.histogram.alphabet_size", .integers([Int64(alphabetSize)]))
 		dump.record("entropy.histogram.log_alpha_size", .integers([Int64(logAlphaSize)]))
 		dump.record("entropy.histogram.freqs", .integers(symbols.map { Int64($0.freq) }))
