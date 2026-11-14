@@ -30,7 +30,8 @@ NCPU="$(sysctl -n hw.ncpu 2>/dev/null || nproc)"
 echo "Building jxl-harness against $TARGET_DIR..."
 # shellcheck disable=SC2086
 cmake -S "$HERE/harness" -B "$OUT" $CMAKE_FLAGS_RELEASE \
-	-DLIBJXL_DIR="$TARGET_DIR" -DLIBJXL_COMMIT="$LIBJXL_COMMIT" >/dev/null
+	-DLIBJXL_DIR="$TARGET_DIR" -DLIBJXL_COMMIT="$LIBJXL_COMMIT" \
+	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null
 # GNU Make 3.81 splits the spaced Xcode developer path in recursive calls.
 env -u DEVELOPER_DIR cmake --build "$OUT" --target jxl-harness cjxl -j"$NCPU" >/dev/null
 

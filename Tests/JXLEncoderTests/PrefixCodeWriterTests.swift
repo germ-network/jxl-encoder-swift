@@ -3,13 +3,11 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Expected bytes come from `Reference/legacy-tiny/tools/genprefix.cc`, which calls
-/// libjxl-tiny's own `CreateHuffmanTree`, `WritePrefixCode` and
-/// `WritePrefixCodes` through test hooks.
+/// Static-code bytes remain inherited-tiny regressions; adaptive tree depths
+/// come from the pinned full-libjxl primitive fixture.
 @Suite("Prefix code writer")
 struct PrefixCodeWriterTests {
 	struct Reference {
-		var trees: [(counts: [UInt32], depths: [UInt8])] = []
 		var streams: [String: (bits: Int, bytes: [UInt8])] = [:]
 
 		init() throws {
@@ -19,26 +17,10 @@ struct PrefixCodeWriterTests {
 					subdirectory: "Fixtures")
 			else { throw StageDump.DumpError.fixtureNotFound("prefix_codes") }
 			let text = try String(contentsOf: url, encoding: .utf8)
-			// tree lines carry only depths; the counts live in the generator, so
-			// they are mirrored here
-			let histograms: [[UInt32]] = [
-				[1, 1, 1, 1],
-				[5, 0, 3, 0, 1],
-				[100, 1, 1, 1, 1, 1, 1, 1],
-				[1],
-				[0, 0, 7],
-				[
-					1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096,
-					8192, 16384,
-				],
-			]
 			for line in text.split(separator: "\n") {
 				let parts = line.split(separator: " ").map(String.init)
 				guard let label = parts.first else { continue }
-				if label.hasPrefix("T"), let index = Int(label.dropFirst()) {
-					let depths = parts.dropFirst(2).compactMap { UInt8($0) }
-					trees.append((histograms[index], depths))
-				} else if parts.count >= 3, label != "TREES", label != "CODES" {
+				if parts.count >= 3, label != "CODES" {
 					let bits = Int(parts[1]) ?? 0
 					let bytes = parts.dropFirst(3).compactMap {
 						UInt8($0, radix: 16)
@@ -49,15 +31,29 @@ struct PrefixCodeWriterTests {
 		}
 	}
 
-	@Test("CreateHuffmanTree matches libjxl-tiny")
+	@Test("CreateHuffmanTree matches pinned full libjxl")
 	func huffmanTree() throws {
-		let reference = try Reference()
-		#expect(reference.trees.count == 6)
-		for (counts, expected) in reference.trees {
+		let fixture = try EntropyReferenceFixture.load("huffman_tree_full_reference")
+		let limit = try fixture.integers(fixture.input, "input.huffman.tree_limit")
+		let lengths = try fixture.integers(fixture.input, "input.huffman.lengths")
+		let counts = try fixture.integers(fixture.input, "input.huffman.counts")
+		let expectedLengths = try fixture.integers(
+			fixture.expected, "entropy.huffman.lengths")
+		let expectedDepths = try fixture.integers(
+			fixture.expected, "entropy.huffman.depths")
+		#expect(limit == [15] && lengths == expectedLengths)
+		#expect(lengths.reduce(0, +) == Int64(counts.count))
+		var offset = 0
+		for length in lengths {
+			let end = offset + Int(length)
+			let histogram = counts[offset..<end].map(UInt32.init)
 			let actual = HuffmanTree.createTree(
-				counts: counts, length: counts.count, treeLimit: 15)
-			#expect(actual == expected, "counts \(counts)")
+				counts: histogram, length: histogram.count,
+				treeLimit: Int(limit[0]))
+			#expect(actual.map(Int64.init) == Array(expectedDepths[offset..<end]))
+			offset = end
 		}
+		#expect(offset == expectedDepths.count)
 	}
 
 	@Test("each static prefix code serializes identically", arguments: 0..<8)

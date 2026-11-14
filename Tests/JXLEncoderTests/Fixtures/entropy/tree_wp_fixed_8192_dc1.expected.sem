@@ -1,0 +1,9 @@
+jxl-semantic-dump 1
+entropy.tree.bitdepth i 1 8
+entropy.tree.kind i 1 5
+entropy.tree.node_count i 1 7
+entropy.tree.nodes i 49 15 0 1 2 0 0 1 15 47 3 4 0 0 1 15 -31 5 6 0 0 1 -1 0 0 0 6 0 1 -1 0 1 0 6 0 1 -1 0 2 0 6 0 1 -1 0 3 0 6 0 1
+entropy.tree.prevprop i 1 0
+entropy.tree.token_count i 1 26
+entropy.tree.tokens i 52 1 16 0 0 1 16 0 94 1 16 0 61 1 0 2 6 3 0 4 0 5 0 1 0 2 6 3 0 4 0 5 0 1 0 2 6 3 0 4 0 5 0 1 0 2 6 3 0 4 0 5 0
+entropy.tree.total_pixels i 1 8192

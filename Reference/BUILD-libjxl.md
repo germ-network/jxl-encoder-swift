@@ -142,3 +142,19 @@ Highway is present in the pin's `third_party/highway/`; its
 `recip_estimate.bin` captures the host instruction; it is not a full-libjxl
 quantization-bias fixture. Semantic and stage fixtures record their individual
 SIMD targets and reproducible inputs in `Reference/provenance.tsv`.
+
+`Reference/semantic-crosscheck.sh` sends actual Swift and native reference
+codestreams through `FrameDecoder` layout parsing. It checks section bounds and
+observed selectors for four-group and sixteen-group frames, then crops the
+first 257 rows from the recorded 2057x521 pixel-lifecycle source and verifies
+the eligible 2057x257 reference has 18 AC groups, two DC groups, two histogram
+sets, and its observed selector partition. The script flips a recorded AC
+selector bit and requires the changed stream to be rejected. This is separate
+from semantic mutation checks, which still verify exact changed fields.
+
+`Reference/entropy-stream-crosscheck.sh` regenerates the pinned upstream
+receipts for the Swift-produced shared ANS and prefix code/stream fixtures and
+checks malformed padding, stream-boundary, and final-ANS-state mutations.
+`Reference/harness/test-harness.sh` runs this receipt gate after building the
+harness. The Swift tests separately bind current `SectionWriter` output bytes
+and bit counts to the same committed receipts.

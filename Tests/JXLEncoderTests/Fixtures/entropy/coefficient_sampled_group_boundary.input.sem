@@ -1,0 +1,5 @@
+jxl-semantic-dump 1
+input.coefficient_sampling.blocks i 2 33 32
+input.coefficient_sampling.speed_tier i 1 6
+input.coefficient_sampling.zero_positions i 2 1 8
+input.coefficient_sampling.first_exception i 3 0 0 8

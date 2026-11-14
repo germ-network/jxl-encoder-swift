@@ -192,7 +192,10 @@ func loadPPM(fixture name: String) throws -> ImageBuffer {
 		let url = Bundle.module.url(
 			forResource: name, withExtension: "ppm", subdirectory: "Fixtures/semantic")
 	else { throw SemanticDumpError.fixtureNotFound(name) }
-	let data = [UInt8](try Data(contentsOf: url))
+	return try loadPPM(data: [UInt8](Data(contentsOf: url)), name: name)
+}
+
+func loadPPM(data: [UInt8], name: String) throws -> ImageBuffer {
 	var offset = 0
 	func token() -> String {
 		while offset < data.count {

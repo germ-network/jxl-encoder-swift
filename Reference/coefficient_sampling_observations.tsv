@@ -1,0 +1,3 @@
+# fixture	width_blocks	height_blocks	groups	rejected_blocks	selected_blocks	zero_true	zero_false	position1_zeros	position8_zeros
+coefficient_sampled_group_boundary	33	32	2	512	544	3261	101187	544	543
+coefficient_sort_boundary	8392231	1	262258	4197919	4194312	25165869	780142035	4194312	4194311

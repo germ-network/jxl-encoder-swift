@@ -85,6 +85,39 @@ tests compare all fields normally except the exact named fields listed as
 GER-3386 differences for individual fixtures; a changed difference set or any
 other field still fails.
 
+Predefined-tree inputs record `TreeKind`, `total_pixels`, `bitdepth`,
+`prevprop`, the DC-group count used by the Swift stream, and the root index
+selected for the component projection. Reference outputs come from
+`PredefinedTree` followed by `TokenizeTree`. `nodes` is breadth-first decoder
+order, seven integers per node: property, split value, left child, right child,
+predictor, predictor offset, and multiplier. Leaves use property -1, their
+sequential local leaf ordinal as the left child, and zero as the right child.
+`tokens` is the full `(context, value)` stream for that
+standalone reference tree. The Swift dump retains its complete legacy stream
+and decoded nodes, then rebases the selected DC subtree to root zero before
+comparing that same component. The 8193-pixel case is a faithful witness;
+8192 pixels crosses the pinned upstream height threshold and is tracked as
+CT-01 on only the component's node/token fields.
+
+Modular inputs record the predefined tree configuration and each group's
+dimensions, modular stream ID, channel order, and three row-major DC sample
+planes. `ModularCompress` outputs leaf-context/value token pairs per group.
+Reference contexts are local leaf ordinals; `context_offset` records the
+projection into Swift's shared DC context table. For the fixed gradient tree,
+offset 11 maps every tree leaf to the Swift gradient-context LUT, checked over
+the full gradient property range. Values compare exactly after this context
+projection.
+
+AC-token inputs record a prescribed 2×2 DCT8 coefficient group, its explicit
+coefficient order, channel order, QDC/QF planes, and complete 39-entry block
+context map. `TokenizeCoefficients` outputs the raw context and value vectors.
+The tiny-map witness uses four contexts and matches Swift's current token
+stream exactly. The default-map witness retains upstream's 15-context map
+(`Y=0`, `X=7`, `B=7`) beside Swift's four-context compact map (`Y=0`, `X=2`,
+`B=2`): token values and order match, while raw context count and IDs remain a
+GER-3387 known difference. These prescribed witnesses cover DCT8 tokenization;
+they do not assert which context map an e4 image selects.
+
 Context-map inputs record entries and `map_length` separately. Expected
 outputs include the selected simple, prefix, or ANS mode and `token_count`
 after libjxl's token construction, including LZ77 processing. This count is a
@@ -114,6 +147,14 @@ substituting `map_length` for the measurement fails. The strict-simple fixture
 proves simple is selected only when cheaper; the equality fixture has simple
 cost 96 equal to raw cost 96 and confirms the pinned encoder rejects simple
 coding.
+
+The `hybrid_uint_4_2_0`, `pack_signed_full_reference`, and
+`huffman_tree_full_reference` fixtures replace inherited-tiny primitive
+oracles with outputs from the pinned full-libjxl `HybridUintConfig::Encode`,
+`PackSigned`, and `CreateHuffmanTree` APIs. Their inputs record values,
+configuration, tree limit, and histogram lengths; the portable consumers read
+the recorded inputs and compare each output. Static prefix-code serialization
+remains an inherited-tiny regression.
 
 ## Expected divergence
 
@@ -217,11 +258,24 @@ fields are `f` (float32) with strict zero-ULP comparisons. The supported first
 frame is single-pass VarDCT,
 with DCT8 only and no preview, as produced by the corpus's e4 pixel path.
 Other frame configurations are rejected rather than partially dumped.
+The layout category retains the actual `FrameDecoder` TOC mapping and reads
+selector bits only from each identified AC section start after decoding the
+AC-global histogram count. It does not infer selectors from image group count.
 
 | category | field suffix | layout |
 |---|---|---|
 | `ac_entropy` | `kind`, `table_count`, `uint_config`, `lz77_enabled`, `ans.*` or `prefix.*` | decoded AC code-table type and transmitted table contents; ANS frequencies or prefix depths, in table order |
 | `ac_entropy_alphabet` | `ans_log_alpha_size` | one ANS alphabet precision value, empty for prefix coding |
+| `entropy_layout` | `group_grid`, `group_count`, `dc_group_count`, `pass_count`, `histogram_set_count`, `selector_bits` | decoded frame dimensions and actual AC histogram selection state |
+| `entropy_layout` | `section_ids`, `section_indices`, `section_offsets`, `section_sizes` | TOC logical IDs and physical stream order, with offsets/sizes in codestream bytes |
+| `entropy_layout` | `ac_selectors` | repeated pass, group, logical section ID, selector tuples read from each AC section |
+
+The opt-in `jxl-harness entropy-verify-streams <expected.sem>` consumer reads
+the shared serialized code with pinned `DecodeHistograms`, then creates a fresh
+upstream symbol reader for every prescribed stream in both visitation orders.
+Its receipt binds the exact code and stream bytes/bit counts and decoded token count,
+reader consumption, ANS final-state checks, and whether the stream selected
+ANS or prefix coding.
 | `frame` | `encoding` | scalar; 0 = VarDCT |
 | `frame` | `groups`, `dc_groups`, `passes` | one scalar each |
 | `image_header` | `size` | width, height in pixels |
@@ -316,3 +370,16 @@ The `quantized_ac` stage fixture is not decoded from a codestream. It exercises
 a bounded, explicit fixed-parameter input to the pinned upstream primitive; it
 does not establish conversion safety for unrestricted floats or equality with
 ordinary-image e4 coefficients.
+
+The `coefficient_sampled_group_boundary` fixture records actual upstream
+`ComputeCoeffOrder` output for a 33×32 DCT8-block image spanning two groups.
+Its accepted/rejected block and per-position zero counters come from coverage
+of the unchanged upstream sampling source. The `coefficient_sort_bounded`
+fixture calls the same upstream API without sampling for explicit counts from
+bucket transitions through `2^22 - 1`; Swift's direct count-to-order helper
+must match its order. `coefficient_sort_boundary` preserves the separate
+synthetic sampled witness at and above `2^22`: the sampled source order and the
+unsampled source order agree, while Swift's `Double` sort keys reverse the
+final two positions. `coefficient_natural_dct8` records the upstream natural
+order primitive. The boundary does not establish end-to-end encoder
+reachability.

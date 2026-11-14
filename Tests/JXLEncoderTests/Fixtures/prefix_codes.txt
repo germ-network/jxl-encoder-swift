@@ -1,10 +1,3 @@
-TREES
-T0 4 2 2 2 2
-T1 5 1 0 2 0 2
-T2 8 1 3 4 4 4 4 4 4
-T3 1 1
-T4 3 0 0 1
-T5 15 14 14 13 12 11 10 9 8 7 6 5 4 3 2 1
 CODES
 DC 1116 140 49 90 20 41 82 04 09 12 24 d6 5f 7f fd f5 d7 5f 7f fd f5 11 00 bc 3d 2f d9 54 11 68 55 25 a6 e1 40 66 d7 f6 cd df 33 c6 29 24 b2 82 7f 16 29 ad 7e d1 0c c7 c3 59 83 05 c0 d8 06 46 bd 27 56 35 16 00 63 1b a0 fd 9e 95 75 c8 d4 ff 87 5e 14 63 5c e2 40 97 fa 48 1a 35 c0 39 f7 ed fe 56 8e d0 4a eb 3f 6c 7a 00 91 0e 48 a0 aa ba 7b 86 a4 44 69 b5 f7 8c ff 76 19 59 f9 ff 0f b9 2a 4b 20 81 08 d5 dd 33 1b bc f6 f1 7d ef c7 00
 AC 1374 172 49 90 20 41 82 04 09 12 24 d6 5f 7f fd f5 d7 5f 7f fd f5 17 71 21 ff fd 8b 0c 2c d9 72 92 69 7b ee ee fb 40 48 f5 3c ef 13 ad 32 8f 7b de cf ac 02 ba 61 76 56 09 0d af 44 1a 5f fd 1f 80 20 23 d2 48 4a 55 d5 ed e9 d9 dd f7 8d b5 c7 70 45 cf ff 23 16 62 a5 50 24 e9 d9 3d f7 99 7f 53 aa 08 ac 50 ca c2 2b bb 67 76 01 92 e0 fd bd 12 da 17 71 4f ff f2 bf 24 36 46 76 b2 67 ce 6d fb 98 3e 21 fd 3f cf cb fb 6a 0f bb dd b6 25 51 d4 c3 3d 7b 8e 5a a0 7e c8 61 19 5a d4 ff 3f e0 14 8a 20 40 12 02 e3 ea ee 99 3d f7 a5 fc 23

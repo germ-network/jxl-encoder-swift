@@ -1,0 +1,6 @@
+jxl-semantic-dump 1
+input.streams.context_map i 4 0 0 0 0
+input.streams.log_alpha_size i 1 6
+input.streams.frequencies i 2 2048 2048
+input.streams.lengths i 2 8 8
+input.streams.tokens i 32 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0

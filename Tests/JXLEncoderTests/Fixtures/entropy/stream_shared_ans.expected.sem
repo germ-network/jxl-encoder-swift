@@ -1,0 +1,10 @@
+jxl-semantic-dump 1
+entropy.streams.bit_counts i 2 32 32
+entropy.streams.bytes i 8 64 81 1 19 192 152 0 19
+entropy.streams.code_bit_count i 1 34
+entropy.streams.code_bytes i 5 34 138 5 0 2
+entropy.streams.code_kind i 1 1
+entropy.streams.count i 1 2
+entropy.streams.lengths i 2 8 8
+entropy.streams.tokens i 36 0 8 0 0 0 1 0 0 0 1 0 0 0 1 0 0 0 1 1 8 0 1 0 1 0 0 0 0 0 1 0 1 0 0 0 0
+entropy.streams.transmitted_context_count i 1 4

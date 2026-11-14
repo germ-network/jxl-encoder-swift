@@ -1,0 +1,11 @@
+jxl-semantic-dump 1
+entropy.stream_receipt.code_bit_count i 1 34
+entropy.stream_receipt.code_bytes i 5 34 138 5 0 2
+entropy.stream_receipt.code_bytes_consumed i 1 34
+entropy.stream_receipt.code_is_ans i 1 1
+entropy.stream_receipt.decoded_token_count i 1 16
+entropy.stream_receipt.order_passes i 4 0 1 1 0
+entropy.stream_receipt.readers i 8 32 1 32 1 32 1 32 1
+entropy.stream_receipt.stream_bit_counts i 2 32 32
+entropy.stream_receipt.stream_bytes i 8 64 81 1 19 192 152 0 19
+entropy.stream_receipt.stream_count i 1 2

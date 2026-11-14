@@ -17,6 +17,17 @@ pin_check_clean_after_build() {
   test -n "$linked"
   "$REFERENCE/pin-check.sh" "$linked"
 }
+capture_flag_is_scoped() {
+  python3 - "$REFERENCE/build/harness/compile_commands.json" <<'PYCODE'
+import json,sys
+from pathlib import Path
+entries=json.loads(Path(sys.argv[1]).read_text())
+flagged=[entry for entry in entries if '-fno-access-control' in entry['command']]
+assert len(flagged)==1, [entry['file'] for entry in flagged]
+assert flagged[0]['file'].endswith('/Reference/harness/src/capture_modular_tree.cc')
+assert sum(entry['file'].endswith('/Reference/harness/src/capture_modular_tree.cc') for entry in entries)==1
+PYCODE
+}
 semantic_writer_matches_golden() {
   "$HARNESS" selftest "$SCRATCH/golden.sem" "$SCRATCH/test.dump"
   cmp "$HERE/golden.sem" "$SCRATCH/golden.sem"
@@ -149,7 +160,186 @@ for fixture in fixtures:
  assert hashlib.sha256(fixture.read_bytes()).hexdigest()==expected[fixture.name], fixture.name
 PYCODE
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures; do
+entropy_tree_decisions_match_fixtures() {
+  "$HARNESS" entropy tree 6 8192 8 0 > "$SCRATCH/tree_8192.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/tree_gradient_fixed_8192_dc1.expected.sem" "$SCRATCH/tree_8192.sem"
+  "$HARNESS" entropy tree 6 8193 8 0 > "$SCRATCH/tree_8193.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/tree_gradient_fixed_8193_dc2.expected.sem" "$SCRATCH/tree_8193.sem"
+  while read -r kind pixels name; do
+    "$HARNESS" entropy tree "$kind" "$pixels" 8 0 > "$SCRATCH/$name.sem"
+    cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/$name.expected.sem" "$SCRATCH/$name.sem"
+  done <<'EOF'
+5 8192 tree_wp_fixed_8192_dc1
+5 8193 tree_wp_fixed_8193_dc2
+4 280 tree_acmeta_below_1024
+4 1120 tree_acmeta_above_1024
+EOF
+  if "$HARNESS" entropy tree 6 0 8 0; then return 1; fi
+  python3 - "$REFERENCE/.." "$HARNESS" "$SCRATCH" <<'PYCODE'
+import hashlib, re, subprocess, sys
+from pathlib import Path
+root, harness, scratch = Path(sys.argv[1]), sys.argv[2], Path(sys.argv[3])
+fixtures = root / 'Tests/JXLEncoderTests/Fixtures/entropy'
+name = 'tree_merged_multidc_2057x257'
+input_fields = {}
+for line in (fixtures / f'{name}.input.sem').read_text().splitlines()[1:]:
+    parts = line.split()
+    input_fields[parts[0]] = list(map(int, parts[3:]))
+source = root / 'Tests/JXLEncoderTests/Fixtures/semantic/pixel_lifecycle_2057x521.ppm'
+assert input_fields['input.tree_merged.source_sha256'] == list(hashlib.sha256(source.read_bytes()).digest())
+assert input_fields['input.tree_merged.crop_size'] == [2057, 257]
+assert input_fields['input.tree_merged.effort'] == [4]
+assert input_fields['input.tree_merged.distance_milli'] == [1000]
+assert input_fields['input.tree_merged.output_mode'] == [2]
+assert input_fields['input.tree_merged.buffering'] == [0]
+data = source.read_bytes()
+match = re.match(rb'P6\s+(\d+)\s+(\d+)\s+255\s', data)
+assert match and tuple(map(int, match.groups())) == (2057, 521)
+payload = data[match.end():]
+crop = scratch / 'tree_merged_2057x257.ppm'
+row = 2057 * 3
+crop.write_bytes(b'P6\n2057 257\n255\n' + b''.join(payload[y*row:(y+1)*row] for y in range(257)))
+stream = scratch / 'tree_merged_2057x257.jxl'
+subprocess.run([harness, 'encode', str(crop), '1', str(stream), '2', '0'], check=True)
+actual = subprocess.run([harness, 'dump', str(stream), 'entropy_layout'], check=True, capture_output=True, text=True).stdout
+actual_fields = {line.split()[0]: line for line in actual.splitlines()[1:]}
+mapping = {
+    'entropy_layout.group_count': 'entropy.tree_merged.group_count',
+    'entropy_layout.dc_group_count': 'entropy.tree_merged.dc_group_count',
+    'entropy_layout.modular_tree.node_count': 'entropy.tree_merged.node_count',
+    'entropy_layout.modular_tree.nodes': 'entropy.tree_merged.nodes',
+}
+output = ['jxl-semantic-dump 1']
+for source_field, target_field in mapping.items():
+    line = actual_fields[source_field]
+    output.append(target_field + line[len(source_field):])
+assert '\n'.join(output) + '\n' == (fixtures / f'{name}.expected.sem').read_text()
+PYCODE
+}
+entropy_modular_decisions_match_fixtures() {
+  local expected="$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/modular_dc_gradient_rows.expected.sem"
+  local -a first=(3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20)
+  local -a second=(2 3 8 6 8193 0 4 1 0 2 7 8 9 10 11 12 -4 -2 0 2 4 6 -30 -20 -10 0 10 20)
+  "$HARNESS" entropy modular "${first[@]}" > "$SCRATCH/modular0.sem"
+  "$HARNESS" entropy modular "${second[@]}" > "$SCRATCH/modular1.sem"
+  for group in 0 1; do
+    python3 - "$expected" "$SCRATCH/modular$group.sem" "$group" <<'PYCODE'
+import sys
+from pathlib import Path
+expected=Path(sys.argv[1]).read_text().splitlines()
+actual=Path(sys.argv[2]).read_text().splitlines()
+group=sys.argv[3]
+fields=["jxl-semantic-dump 1"]
+prefix=f"entropy.modular.group{group}."
+fields.extend(line.replace(prefix,"entropy.modular.",1) for line in expected[1:] if line.startswith(prefix))
+assert fields==actual
+PYCODE
+  done
+  local -a wp=(3 2 8 5 8192 0 3 1 0 2 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20)
+  "$HARNESS" entropy modular "${wp[@]}" > "$SCRATCH/modular_wp.sem"
+  cmp "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy/modular_dc_wp_fixed_8192.expected.sem" "$SCRATCH/modular_wp.sem"
+}
+entropy_modular_rejects_unsafe_inputs() {
+  local -a samples=(3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 9 -3 -1 2 3 6 10 30 20 10 0 -10 -20)
+  local -a zero_width=(0 "${samples[@]:1}")
+  local -a duplicate_order=(3 2 8 6 8193 0 3 1 1 2 "${samples[@]:10}")
+  if "$HARNESS" entropy modular "${zero_width[@]}"; then return 1; fi
+  if "$HARNESS" entropy modular "${duplicate_order[@]}"; then return 1; fi
+  if "$HARNESS" entropy modular "${samples[@]:0:10}"; then return 1; fi
+  if "$HARNESS" entropy modular 3 2 8 6 8193 0 3 1 0 2 4 5 6 7 8 40000 -3 -1 2 3 6 10 30 20 10 0 -10 -20; then return 1; fi
+}
+entropy_ac_tokens_match_fixtures() {
+  python3 - "$HARNESS" "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy" <<'PYCODE'
+import subprocess,sys
+from pathlib import Path
+harness=sys.argv[1]; fixtures=Path(sys.argv[2])
+for name in ('ac_tokens_tiny_map','ac_tokens_default_map'):
+    fields={}
+    for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+        parts=line.split(); fields[parts[0]]=parts[3:]
+    keys=('width','height','context_count','context_map','order','qdc','qf','channel0','channel1','channel2')
+    args=['entropy','ac-tokens']+[value for key in keys for value in fields[f'input.ac_tokens.{key}']]
+    result=subprocess.run([harness,*args],text=True,capture_output=True)
+    assert result.returncode==0, (name,result.stderr)
+    assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
+    if name=='ac_tokens_tiny_map':
+        cases=[]
+        zero=list(args); zero[2]='0'; cases.append(zero)
+        contexts=list(args); contexts[4]='3'; cases.append(contexts)
+        duplicate=list(args); duplicate[3+3+39+1]=duplicate[3+3+39]; cases.append(duplicate)
+        oversized_qdc=list(args); oversized_qdc[3+3+39+64]= '256'; cases.append(oversized_qdc)
+        oversized_coeff=list(args); oversized_coeff[3+3+39+64+8]='2147483648'; cases.append(oversized_coeff)
+        for case in cases:
+            assert subprocess.run([harness,*case],capture_output=True).returncode!=0
+PYCODE
+}
+entropy_ac_metadata_and_tree_entropy_match_fixtures() {
+  python3 - "$HARNESS" "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy" <<'PYCODE'
+import subprocess,sys
+from pathlib import Path
+harness,fixtures=sys.argv[1],Path(sys.argv[2])
+for name in ('acmeta_channels_16x16','acmeta_channels_24x24'):
+    fields={}
+    for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+        parts=line.split(); fields[parts[0]]=parts[3:]
+    width,height=(int(fields[f'input.ac_metadata.{key}'][0]) for key in ('width','height'))
+    args=['entropy','ac-metadata',str(width),str(height),str(width*height)]
+    for key in ('ytox','ytob','acs','raw_quant_field','epf'):
+        args.extend(fields[f'input.ac_metadata.{key}'])
+    result=subprocess.run([harness,*args],text=True,capture_output=True)
+    assert result.returncode==0, (name,result.stderr)
+    assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
+name='tree_entropy_cheetah'; fields={}
+for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+    parts=line.split(); fields[parts[0]]=parts[3:]
+tokens=fields['input.tree_entropy.tokens']
+args=['entropy','tree-entropy','6','0','0','313',*tokens]
+result=subprocess.run([harness,*args],text=True,capture_output=True)
+assert result.returncode==0, result.stderr
+assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
+PYCODE
+}
+independent_entropy_streams_match_swift_bytes() {
+  bash "$REFERENCE/entropy-stream-crosscheck.sh"
+}
+entropy_primitives_match_fixtures() {
+  python3 - "$HARNESS" "$REFERENCE/../Tests/JXLEncoderTests/Fixtures/entropy" <<'PYCODE'
+import subprocess,sys
+from pathlib import Path
+harness,fixtures=sys.argv[1],Path(sys.argv[2])
+for name,mode,fields in (
+    ('hybrid_uint_4_2_0','uint',('config','values')),
+    ('pack_signed_full_reference','signed',('values',)),
+    ('huffman_tree_full_reference','huffman',('tree_limit',))):
+    values={}
+    for line in (fixtures/f'{name}.input.sem').read_text().splitlines()[1:]:
+        parts=line.split(); values[parts[0]]=parts[3:]
+    prefix={'uint':'input.uint.','signed':'input.signed.','huffman':'input.huffman.'}[mode]
+    args=['entropy-primitives',mode]
+    for field in fields:
+        args.extend(values[prefix+field])
+    if mode=='huffman':
+        lengths=list(map(int,values[prefix+'lengths']))
+        counts=values[prefix+'counts']; offset=0
+        for length in lengths:
+            args.append(','.join(counts[offset:offset+length]))
+            offset+=length
+        assert offset==len(counts)
+    result=subprocess.run([harness,*args],text=True,capture_output=True)
+    assert result.returncode==0, (name,result.stderr)
+    assert result.stdout==(fixtures/f'{name}.expected.sem').read_text(), name
+for args in (
+    ['entropy-primitives','huffman','15','0,0'],
+    ['entropy-primitives','huffman','1','1,1,1'],
+):
+    try:
+        result=subprocess.run([harness,*args],text=True,capture_output=True,timeout=2)
+    except subprocess.TimeoutExpired as error:
+        raise AssertionError((args,'unsafe Huffman input timed out')) from error
+    assert result.returncode!=0, args
+PYCODE
+}
+for check in version_reports_pin_and_neon pin_check_clean_after_build capture_flag_is_scoped semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_ac_metadata_and_tree_entropy_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
   "$check"
   echo "PASS $check"
 done
