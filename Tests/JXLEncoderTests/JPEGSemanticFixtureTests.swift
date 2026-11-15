@@ -557,6 +557,15 @@ struct JPEGSemanticFixtureTests {
 	}
 
 	@Test(
+		"Distinct JPEG quantization tables match upstream block contexts",
+		.disabled("Pending upstream caller fixture"))
+	func distinctQuantizationTablesMatchUpstreamBlockContexts() throws {
+		Issue.record(
+			"Compare production caller thresholds, buckets and categories with pinned upstream decoded output"
+		)
+	}
+
+	@Test(
 		"JPEG tokens use full-resolution luma DC buckets at sampled chroma positions",
 	)
 	func jpegContextsUseFullResolutionLumaDCBuckets() throws {

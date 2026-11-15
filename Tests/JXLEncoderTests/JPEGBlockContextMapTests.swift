@@ -14,6 +14,24 @@ import Testing
 @Suite("JPEG block context map")
 struct JPEGBlockContextMapTests {
 	@Test(
+		"Threshold inputs use the first JXL channel table",
+		.disabled("Pending caller selection implementation"))
+	func thresholdInputsUseFirstJXLChannelTable() throws {
+		Issue.record(
+			"Compare caller-selected thresholds, buckets and contexts with distinct transposed channel tables"
+		)
+	}
+
+	@Test(
+		"Grayscale threshold inputs retain the sole component table",
+		.disabled("Pending caller selection implementation"))
+	func grayscaleThresholdInputsUseSoleComponentTable() throws {
+		Issue.record(
+			"Compare caller results when all JXL channels map to the grayscale component"
+		)
+	}
+
+	@Test(
 		"DC histogram uses the reference unsigned buckets",
 		arguments: [
 			(-1_048_576, 2047), (-32_768, 2047), (-1025, 2047), (-1024, 0),
