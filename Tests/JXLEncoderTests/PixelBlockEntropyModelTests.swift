@@ -109,13 +109,14 @@ struct PixelBlockEntropyModelTests {
 		#expect(source.qfThresholds == proof.qfThresholds)
 		#expect(source.numContexts == proof.numContexts)
 		#expect(source.contextMap.count == proof.contextMap.count)
-		let differences = source.contextMap.enumerated().compactMap { index, value in
-			let native = proof.contextMap[index]
-			return value == native
-				? nil
-				: PixelBlockMapDifference(
-					index: index, source: value, native: native)
-		}
+		let differences: [PixelBlockMapDifference] = source.contextMap.enumerated()
+			.compactMap { index, value -> PixelBlockMapDifference? in
+				let native = proof.contextMap[index]
+				return value == native
+					? nil
+					: PixelBlockMapDifference(
+						index: index, source: value, native: native)
+			}
 		#expect(differences == proof.sourceMapDifferences)
 	}
 

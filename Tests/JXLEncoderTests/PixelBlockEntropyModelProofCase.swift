@@ -13,33 +13,55 @@ struct PixelBlockEntropyModelProofCase: Sendable {
 	let contextMap: [UInt8]
 	let sourceMapDifferences: [PixelBlockMapDifference]
 
-	static let small13 = Self(
-		quantCounts: histogram([(0, 1024)]), qfThresholds: [], numContexts: 3,
-		contextMap: [0] + [UInt8](repeating: 1, count: 12)
-			+ [UInt8](repeating: 2, count: 26), sourceMapDifferences: [])
+	static let small13: Self = {
+		let counts = histogram([(0, 1024)])
+		var map: [UInt8] = [0]
+		map.append(contentsOf: repeatElement(1, count: 12))
+		map.append(contentsOf: repeatElement(2, count: 26))
+		return Self(
+			quantCounts: counts, qfThresholds: [], numContexts: 3,
+			contextMap: map, sourceMapDifferences: [])
+	}()
 
-	static let unequalPositive26 = Self(
-		quantCounts: histogram([(3, 4000), (10, 6000)]), qfThresholds: [10],
-		numContexts: 7,
-		contextMap: [0, 1, 2, 3] + [UInt8](repeating: 3, count: 22)
-			+ [4, 5, 6] + [UInt8](repeating: 6, count: 23)
-			+ [4, 5, 6] + [UInt8](repeating: 6, count: 23),
-		sourceMapDifferences: [])
+	static let unequalPositive26: Self = {
+		let counts = histogram([(3, 4000), (10, 6000)])
+		var map: [UInt8] = [0, 1, 2, 3]
+		map.append(contentsOf: repeatElement(3, count: 22))
+		map.append(contentsOf: [4, 5, 6])
+		map.append(contentsOf: repeatElement(6, count: 23))
+		map.append(contentsOf: [4, 5, 6])
+		map.append(contentsOf: repeatElement(6, count: 23))
+		return Self(
+			quantCounts: counts, qfThresholds: [10], numContexts: 7,
+			contextMap: map, sourceMapDifferences: [])
+	}()
 
-	static let tieObservation = Self(
-		quantCounts: histogram((0..<250).map { ($0, 200) }),
-		qfThresholds: [125], numContexts: 14,
-		contextMap: [0, 1, 2, 3, 4, 5, 6, 7] + [UInt8](repeating: 8, count: 18)
-			+ [9, 10, 11, 12] + [UInt8](repeating: 13, count: 22)
-			+ [9, 10, 11, 12] + [UInt8](repeating: 13, count: 22),
-		sourceMapDifferences: Self.tieObservationDifferences)
+	static let tieObservation: Self = {
+		let entries: [(Int, Int)] = (0..<250).map { ($0, 200) }
+		let counts = histogram(entries)
+		var map: [UInt8] = [0, 1, 2, 3, 4, 5, 6, 7]
+		map.append(contentsOf: repeatElement(8, count: 18))
+		map.append(contentsOf: [9, 10, 11, 12])
+		map.append(contentsOf: repeatElement(13, count: 22))
+		map.append(contentsOf: [9, 10, 11, 12])
+		map.append(contentsOf: repeatElement(13, count: 22))
+		return Self(
+			quantCounts: counts, qfThresholds: [125], numContexts: 14,
+			contextMap: map, sourceMapDifferences: tieObservationDifferences)
+	}()
 
-	static let flower1024 = Self(
-		quantCounts: histogram([(5, 16_384)]), qfThresholds: [5], numContexts: 13,
-		contextMap: [0, 1, 2, 3, 4, 5, 6, 7] + [UInt8](repeating: 7, count: 18)
-			+ [8, 9, 10, 11] + [UInt8](repeating: 12, count: 22)
-			+ [8, 9, 10, 11] + [UInt8](repeating: 12, count: 22),
-		sourceMapDifferences: [])
+	static let flower1024: Self = {
+		let counts = histogram([(5, 16_384)])
+		var map: [UInt8] = [0, 1, 2, 3, 4, 5, 6, 7]
+		map.append(contentsOf: repeatElement(7, count: 18))
+		map.append(contentsOf: [8, 9, 10, 11])
+		map.append(contentsOf: repeatElement(12, count: 22))
+		map.append(contentsOf: [8, 9, 10, 11])
+		map.append(contentsOf: repeatElement(12, count: 22))
+		return Self(
+			quantCounts: counts, qfThresholds: [5], numContexts: 13,
+			contextMap: map, sourceMapDifferences: [])
+	}()
 
 	private static func histogram(_ entries: [(Int, Int)]) -> [Int] {
 		var counts = [Int](repeating: 0, count: 256)
