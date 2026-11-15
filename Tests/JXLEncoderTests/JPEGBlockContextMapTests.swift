@@ -14,21 +14,72 @@ import Testing
 @Suite("JPEG block context map")
 struct JPEGBlockContextMapTests {
 	@Test(
-		"Threshold inputs use the first JXL channel table",
-		.disabled("Pending caller selection implementation"))
+		"Threshold inputs use the first JXL channel table")
 	func thresholdInputsUseFirstJXLChannelTable() throws {
-		Issue.record(
-			"Compare caller-selected thresholds, buckets and contexts with distinct transposed channel tables"
-		)
+		let transcode = try distinctTableTranscode(grayscale: false)
+		let result = JPEGBlockContextMap.compute(transcode)
+		#expect(Array(transcode.quantTable(channel: 0)[1...5]) == [1, 1, 1, 1, 1])
+		let expected = JPEGBlockContextMap.computeThresholds(
+			counts: histogram(), total: 4096,
+			qtSum: transcode.quantTable(channel: 0)[1...5].reduce(0) { $0 + Int($1) })
+		#expect(expected.count == 2)
+		#expect(result.thresholds == expected)
+		#expect(result.numContexts == 7)
+		#expect(result.bucket(dc: Int32(expected[0])) == 0)
+		#expect(result.bucket(dc: Int32(expected[0] + 1)) == 1)
+		#expect(result.category(channel: 1, dcBucket: 1) == 1)
+		#expect(result.category(channel: 0, dcBucket: 1) == 3)
+
+		let changedIrrelevantTables = JPEGBlockContextMap.compute(
+			try distinctTableTranscode(grayscale: false, changeLumaAndCr: true))
+		#expect(changedIrrelevantTables.thresholds == result.thresholds)
+		#expect(changedIrrelevantTables.contextMap == result.contextMap)
 	}
 
 	@Test(
-		"Grayscale threshold inputs retain the sole component table",
-		.disabled("Pending caller selection implementation"))
+		"Grayscale threshold inputs retain the sole component table")
 	func grayscaleThresholdInputsUseSoleComponentTable() throws {
-		Issue.record(
-			"Compare caller results when all JXL channels map to the grayscale component"
-		)
+		let transcode = try distinctTableTranscode(grayscale: true)
+		let result = JPEGBlockContextMap.compute(transcode)
+		let expected = JPEGBlockContextMap.computeThresholds(
+			counts: histogram(), total: 4096,
+			qtSum: transcode.quantTable(channel: 0)[1...5].reduce(0) { $0 + Int($1) })
+		#expect(result.thresholds == expected)
+		#expect(result.numContexts == 4)
+		#expect(result.category(channel: 0, dcBucket: 1) == 3)
+	}
+
+	private func histogram() -> [Int] {
+		var counts = [Int](repeating: 0, count: 2048)
+		for i in 0..<4096 { counts[200 + i / 4] += 1 }
+		return counts
+	}
+
+	private func distinctTableTranscode(grayscale: Bool, changeLumaAndCr: Bool = false)
+		throws -> JPEGTranscode
+	{
+		var first = [UInt16](repeating: 80, count: 64)
+		for natural in [8, 16, 24, 32, 40] { first[natural] = 1 }
+		var luma = [UInt16](repeating: 20, count: 64)
+		for i in 1...5 { luma[i] = changeLumaAndCr ? 1 : 120 }
+		var cr = [UInt16](repeating: 50, count: 64)
+		for i in 1...5 { cr[i] = changeLumaAndCr ? 1 : 200 }
+		let blocks = 4096
+		func component(_ id: UInt8, _ table: Int) -> JPEGComponent {
+			var coefficients = [Int32](repeating: 0, count: blocks * 64)
+			for i in 0..<blocks { coefficients[i * 64] = Int32(i / 4 - 824) }
+			return JPEGComponent(
+				identifier: id, horizontalSampling: 1, verticalSampling: 1,
+				quantTableIndex: table, blocksPerLine: blocks, blocksPerColumn: 1,
+				coefficients: coefficients)
+		}
+		let components =
+			grayscale
+			? [component(1, 0)] : [component(1, 1), component(2, 0), component(3, 2)]
+		return try JPEGTranscode(
+			JPEGImage(
+				width: blocks * 8, height: 8, components: components,
+				quantTables: [first, luma, cr], restartInterval: 0))
 	}
 
 	@Test(
