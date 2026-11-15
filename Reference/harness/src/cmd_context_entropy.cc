@@ -28,9 +28,17 @@ bool ParseValue(std::string_view text, uint32_t* value) {
 }
 
 int RunContextEntropy(const std::vector<std::string>& args) {
-  if (args.empty() || args.size() > 1'000'000) return 2;
+  if (args.empty() || args.size() > 1'000'001) return 2;
+  const bool capture_table_bits = args.front() == "--capture-table-bits";
+  const size_t entry_start = capture_table_bits ? 1 : 0;
+  std::vector<std::string> entry_args;
+  entry_args.reserve(args.size() - entry_start);
+  for (size_t i = entry_start; i < args.size(); ++i) {
+    entry_args.push_back(args[i]);
+  }
+  if (entry_args.empty() || entry_args.size() > 1'000'000) return 2;
   std::vector<std::vector<jxl::Token>> tokens(1);
-  for (const std::string& arg : args) {
+  for (const std::string& arg : entry_args) {
     uint32_t value = 0;
     if (!ParseValue(arg, &value) || value > 255) return 2;
     tokens[0].emplace_back(0, value);
@@ -59,42 +67,47 @@ int RunContextEntropy(const std::vector<std::string>& args) {
   writer.ZeroPadToByte();
   const auto bytes = writer.GetSpan();
 
+  const jxl::EntropyEncodingData& output_codes =
+      capture_table_bits ? codes : estimated_codes;
+  const std::vector<std::vector<jxl::Token>>& output_tokens =
+      capture_table_bits ? tokens : estimated_tokens;
   std::vector<int64_t> encoded_tokens;
   std::vector<int64_t> configs;
-  std::vector<int64_t> context_map(estimated_codes.context_map.begin(),
-                                   estimated_codes.context_map.end());
+  std::vector<int64_t> context_map(output_codes.context_map.begin(),
+                                   output_codes.context_map.end());
   std::vector<std::vector<uint32_t>> histogram_counts(
-      estimated_codes.encoding_info.size());
-  size_t context_count = estimated_codes.lz77.enabled ? 2 : 1;
+      output_codes.encoding_info.size());
+  size_t context_count = output_codes.lz77.enabled ? 2 : 1;
   for (size_t context = 0; context < context_count; ++context) {
-    const size_t histogram = estimated_codes.context_map.empty()
+    const size_t histogram = output_codes.context_map.empty()
                                  ? 0
-                                 : estimated_codes.context_map[context];
+                                 : output_codes.context_map[context];
     if (histogram_counts[histogram].empty()) {
       histogram_counts[histogram].resize(256);
     }
   }
-  for (const jxl::Token& token : estimated_tokens[0]) {
+  for (const jxl::Token& token : output_tokens[0]) {
     encoded_tokens.insert(encoded_tokens.end(),
                           {token.context, token.value,
                            token.is_lz77_length ? 1 : 0});
-    const size_t histogram = estimated_codes.context_map.empty()
+    const size_t histogram = output_codes.context_map.empty()
                                  ? 0
-                                 : estimated_codes.context_map[token.context];
+                                 : output_codes.context_map[token.context];
     const jxl::HybridUintConfig& config =
-        token.is_lz77_length ? estimated_codes.lz77.length_uint_config
-                             : estimated_codes.uint_config[histogram];
+        token.is_lz77_length ? output_codes.lz77.length_uint_config
+                             : output_codes.uint_config[histogram];
     uint32_t symbol = 0, bit_count_unused = 0, bits_unused = 0;
     config.Encode(token.value, &symbol, &bit_count_unused, &bits_unused);
-    if (token.is_lz77_length) symbol += estimated_codes.lz77.min_symbol;
+    if (token.is_lz77_length) symbol += output_codes.lz77.min_symbol;
     ++histogram_counts[histogram][symbol];
   }
-  for (const auto& config : estimated_codes.uint_config) {
+  for (const auto& config : output_codes.uint_config) {
     configs.insert(configs.end(), {config.split_exponent, config.msb_in_token,
                                    config.lsb_in_token});
   }
   std::vector<int64_t> flattened_counts;
   std::vector<int64_t> table_values;
+  std::vector<int64_t> table_bits;
   std::vector<int64_t> table_lengths;
   for (size_t histogram = 0; histogram < histogram_counts.size(); ++histogram) {
     size_t alphabet_size =
@@ -109,17 +122,23 @@ int RunContextEntropy(const std::vector<std::string>& args) {
     table_lengths.push_back(alphabet_size);
     for (size_t symbol = 0; symbol < alphabet_size; ++symbol) {
       flattened_counts.push_back(histogram_counts[histogram][symbol]);
-      const auto& info = estimated_codes.encoding_info[histogram][symbol];
+      const auto& info = output_codes.encoding_info[histogram][symbol];
       table_values.push_back(info.depth);
       table_values.push_back(info.freq_);
+      if (capture_table_bits) {
+        table_bits.push_back(info.bits);
+      }
     }
+  }
+  if (capture_table_bits && (codes.lz77.enabled || !codes.use_prefix_code)) {
+    return 1;
   }
   std::vector<int64_t> serialized(bytes.begin(), bytes.end());
   SemanticDumpWriter dump;
   dump.Integers("entropy.context_entropy.entries", [&] {
     std::vector<int64_t> values;
-    values.reserve(args.size());
-    for (const std::string& arg : args) {
+    values.reserve(entry_args.size());
+    for (const std::string& arg : entry_args) {
       uint32_t value = 0;
       ParseValue(arg, &value);
       values.push_back(value);
@@ -132,27 +151,30 @@ int RunContextEntropy(const std::vector<std::string>& args) {
   dump.Integers("entropy.context_entropy.context_map", context_map);
   dump.Integers("entropy.context_entropy.uint_configs", configs);
   dump.Integers("entropy.context_entropy.length_uint_config",
-                {static_cast<int64_t>(estimated_codes.lz77.length_uint_config.split_exponent),
-                 static_cast<int64_t>(estimated_codes.lz77.length_uint_config.msb_in_token),
-                 static_cast<int64_t>(estimated_codes.lz77.length_uint_config.lsb_in_token)});
+                {static_cast<int64_t>(output_codes.lz77.length_uint_config.split_exponent),
+                 static_cast<int64_t>(output_codes.lz77.length_uint_config.msb_in_token),
+                 static_cast<int64_t>(output_codes.lz77.length_uint_config.lsb_in_token)});
   dump.Integers("entropy.context_entropy.rle_enabled",
-                {estimated_codes.lz77.enabled ? 1 : 0});
+                {output_codes.lz77.enabled ? 1 : 0});
   dump.Integers("entropy.context_entropy.min_length_symbol",
-                {estimated_codes.lz77.min_symbol});
+                {output_codes.lz77.min_symbol});
   dump.Integers("entropy.context_entropy.min_length",
-                {estimated_codes.lz77.min_length});
+                {output_codes.lz77.min_length});
   dump.Integers("entropy.context_entropy.distance_context",
                 {static_cast<int64_t>(
-                    estimated_codes.lz77.nonserialized_distance_context)});
+                    output_codes.lz77.nonserialized_distance_context)});
   dump.Integers("entropy.context_entropy.histogram_count",
-                {static_cast<int64_t>(estimated_codes.encoding_info.size())});
+                {static_cast<int64_t>(output_codes.encoding_info.size())});
   dump.Integers("entropy.context_entropy.histogram_lengths", table_lengths);
   dump.Integers("entropy.context_entropy.histogram_counts", flattened_counts);
   dump.Integers("entropy.context_entropy.tables", table_values);
+  if (capture_table_bits) {
+    dump.Integers("entropy.context_entropy.table_bits", table_bits);
+  }
   dump.Integers("entropy.context_entropy.use_prefix_code",
-                {estimated_codes.use_prefix_code ? 1 : 0});
+                {output_codes.use_prefix_code ? 1 : 0});
   dump.Integers("entropy.context_entropy.log_alpha_size",
-                {static_cast<int64_t>(estimated_codes.log_alpha_size)});
+                {static_cast<int64_t>(output_codes.log_alpha_size)});
   dump.Integers("entropy.context_entropy.bit_count",
                 {static_cast<int64_t>(bit_count)});
   dump.Integers("entropy.context_entropy.bytes", serialized);
@@ -284,7 +306,7 @@ int RunContextEntropyRLEPattern(const std::vector<std::string>& args) {
 }
 
 const RegisterSubcommand kRegister(
-    {"context-entropy", "<entry>...", RunContextEntropy});
+    {"context-entropy", "[--capture-table-bits] <entry>...", RunContextEntropy});
 const RegisterSubcommand kSingletonContextsRegister(
     {"context-entropy-singleton-contexts", "<majority_count>",
      RunContextEntropySingletonContexts});

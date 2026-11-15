@@ -11,14 +11,57 @@ private struct FixedPrefixNativeWireRecord: Sendable {
 
 @Suite("Fixed prefix entropy serialization")
 struct FixedPrefixEntropySerializationTests {
-	@Test(.disabled("Awaiting native table_bits capture and independent contract review."))
+	@Test
 	func fixedPrefixEntropySerializationMatchesNativeWire() throws {
+		let fixtureName = "context_entropy_prefix_99_fixed_wire"
 		let fixture = try EntropyReferenceFixture.load(
-			"context_entropy_prefix_99_fixed_wire")
+			fixtureName)
+		let histogramCount = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.histogram_count")
 		let tokenValues = try fixture.integers(
 			fixture.expected, "entropy.context_entropy.tokens")
-		guard tokenValues.count.isMultiple(of: 3) else {
-			throw SemanticDumpError.unimplemented
+		let capturedCounts = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.histogram_counts")
+		let capturedTables = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.tables")
+		let histogramLengths = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.histogram_lengths")
+		let tableBits = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.table_bits")
+		let capturedContextMap = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.context_map")
+		let capturedConfigurations = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.uint_configs")
+		let runLengthEnabled = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.rle_enabled")
+		let usesPrefixCode = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.use_prefix_code")
+		let logAlphabetSize = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.log_alpha_size")
+		let bitCounts = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.bit_count")
+		let costs = try fixture.integers(
+			fixture.expected, "entropy.context_entropy.cost")
+		guard histogramCount == [1], tokenValues.count.isMultiple(of: 3),
+			!tokenValues.isEmpty, capturedCounts.count <= 256,
+			capturedTables.count.isMultiple(of: 2),
+			histogramLengths == [Int64(capturedCounts.count)],
+			tableBits.count == capturedCounts.count,
+			capturedConfigurations == [2, 0, 1],
+			runLengthEnabled.count == 1, usesPrefixCode.count == 1,
+			logAlphabetSize.count == 1, bitCounts == [301],
+			costs.count == 1, costs[0] >= 0
+		else {
+			throw SemanticDumpError.unsupportedEntropyFixture(fixtureName)
+		}
+		let depthValues = stride(from: 0, to: capturedTables.count, by: 2)
+			.map { capturedTables[$0] }
+		guard depthValues.count == capturedCounts.count,
+			depthValues.allSatisfy({ (0...Int64(UInt8.max)).contains($0) }),
+			depthValues.count <= 64,
+			tableBits.allSatisfy({ (0...Int64(UInt16.max)).contains($0) })
+		else {
+			throw SemanticDumpError.unsupportedEntropyFixture(fixtureName)
 		}
 		let tokens = stride(from: 0, to: tokenValues.count, by: 3).map { index in
 			ContextMapEntropy.EncodedToken(
@@ -27,50 +70,48 @@ struct FixedPrefixEntropySerializationTests {
 					value: UInt32(tokenValues[index + 1])),
 				isLength: tokenValues[index + 2] != 0)
 		}
-		let capturedCounts = try fixture.integers(
-			fixture.expected, "entropy.context_entropy.histogram_counts")
 		var histogram = Histogram()
 		for (symbol, count) in capturedCounts.enumerated() {
 			histogram.counts[symbol] = UInt32(count)
 			histogram.totalCount += Int(count)
 		}
-		let capturedTables = try fixture.integers(
-			fixture.expected, "entropy.context_entropy.tables")
-		guard capturedTables.count.isMultiple(of: 2) else {
-			throw SemanticDumpError.unimplemented
-		}
-		let depths = stride(from: 0, to: capturedTables.count, by: 2)
-			.map { UInt8(capturedTables[$0]) }
-		let tableBits = try fixture.integers(
-			fixture.expected, "entropy.context_entropy.table_bits")
-		guard tableBits.count == depths.count,
-			tableBits.allSatisfy({ (0...Int64(UInt16.max)).contains($0) })
-		else { throw SemanticDumpError.unimplemented }
+		let depths = depthValues.map(UInt8.init)
 		let prefixCode = PrefixCode(
 			depths: depths + [UInt8](repeating: 0, count: 64 - depths.count),
 			bits: tableBits.map(UInt16.init)
 				+ [UInt16](repeating: 0, count: 64 - tableBits.count))
-		let nativeBytes = try fixture.integers(
+		let nativeByteValues = try fixture.integers(
 			fixture.expected, "entropy.context_entropy.bytes"
-		).map(UInt8.init)
+		)
+		guard nativeByteValues.count == (Int(bitCounts[0]) + 7) / 8,
+			nativeByteValues.allSatisfy({ (0...Int64(UInt8.max)).contains($0) })
+		else {
+			throw SemanticDumpError.unsupportedEntropyFixture(fixtureName)
+		}
+		let nativeBytes = nativeByteValues.map(UInt8.init)
 		let nativeRecord = FixedPrefixNativeWireRecord(
-			fixture: "context_entropy_prefix_99_fixed_wire",
-			tableBits: tableBits,
-			bitCount: Int(
-				try fixture.integers(
-					fixture.expected, "entropy.context_entropy.bit_count")[0]),
-			bytes: nativeBytes)
+			fixture: fixtureName, tableBits: tableBits,
+			bitCount: Int(bitCounts[0]), bytes: nativeBytes)
+		let uintConfigurations = stride(
+			from: 0, to: capturedConfigurations.count, by: 3
+		).map { index in
+			HybridUintConfiguration(
+				splitExponent: Int(capturedConfigurations[index]),
+				msbInToken: Int(capturedConfigurations[index + 1]),
+				lsbInToken: Int(capturedConfigurations[index + 2]))
+		}
+		#expect(runLengthEnabled == [0])
+		#expect(capturedContextMap == [0])
+		#expect(usesPrefixCode == [1])
+		#expect(logAlphabetSize == [15])
 		let prepared = ContextMapEntropy.Prepared(
-			runLength: .init(enabled: false, tokens: tokens),
-			contextMap: [0], histograms: [histogram],
-			uintConfigurations: [
-				HybridUintConfiguration(
-					splitExponent: 2, msbInToken: 0, lsbInToken: 1)
-			], usesPrefixCode: true, logAlphabetSize: 15,
+			runLength: .init(enabled: runLengthEnabled[0] == 1, tokens: tokens),
+			contextMap: capturedContextMap.map(UInt8.init),
+			histograms: [histogram], uintConfigurations: uintConfigurations,
+			usesPrefixCode: usesPrefixCode[0] == 1,
+			logAlphabetSize: Int(logAlphabetSize[0]),
 			prefixCodes: [prefixCode], ansHistograms: [],
-			estimatedCost: Int(
-				try fixture.integers(
-					fixture.expected, "entropy.context_entropy.cost")[0]))
+			estimatedCost: Int(costs[0]))
 		var writer = BitWriter()
 		ContextMapEntropy.write(prepared, to: &writer)
 		#expect(nativeRecord.fixture == "context_entropy_prefix_99_fixed_wire")

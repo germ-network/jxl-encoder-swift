@@ -286,6 +286,27 @@ generate_context_entropy() {
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
+generate_context_entropy_fixed_wire() {
+	local name="$1"; shift
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.context_entropy.entries i %s' "$#"
+		printf ' %s' "$@"
+		printf '\n'
+	} > "$input"
+	"$harness" context-entropy --capture-table-bits "$@" \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash input_list
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	input_list="${*// /;}"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline fixed-prefix context entropy entries\t-\tentries=%s\tTests/JXLEncoderTests/FixedPrefixEntropySerializationTests.swift\n' \
+		"$name" "$input_hash" "$input_list" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_context_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tFixed prefix wire serialization with public ANSEncSymbolInfo.bits; RLE disabled; hwy=NEON\tTests/JXLEncoderTests/FixedPrefixEntropySerializationTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
 generate_context_entropy_singleton_contexts() {
 	local name="$1" majority_count="$2"
 	local input="$out/$name.input.sem"
@@ -684,6 +705,7 @@ done
 generate_context_map context_prefix_99 16 "${context_99[@]}"
 generate_context_map context_ans_100 16 "${context_100[@]}"
 generate_context_entropy context_entropy_prefix_99 "${context_99[@]}"
+generate_context_entropy_fixed_wire context_entropy_prefix_99_fixed_wire "${context_99[@]}"
 generate_context_entropy context_entropy_ans_100 "${context_100[@]}"
 generate_context_entropy_singleton_contexts context_entropy_singleton_contexts 102
 generate_context_entropy_skewed_histograms context_entropy_skewed_histograms 3000000
