@@ -1,4 +1,5 @@
 ---
+'@germ-network/jxl-encoder-swift': patch
 ---
 
-Match e4 DCT8 AC quantization to libjxl's channel-specific dead zones and matrix multipliers.
+Translate e4 X matrix-scale selection and channel-specific DCT8 AC dead zones to match libjxl.
