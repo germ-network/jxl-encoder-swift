@@ -318,7 +318,6 @@ enum LibcxxBoundedSort {
 					continue
 				} else if leftSorted {
 					first = pivot + 1
-					isLeftmost = false
 					continue
 				}
 			}

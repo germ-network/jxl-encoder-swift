@@ -1,3 +1,4 @@
+---
 '@germ-network/jxl-encoder-swift': patch
 ---
 
