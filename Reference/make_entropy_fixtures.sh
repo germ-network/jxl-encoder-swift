@@ -286,6 +286,43 @@ generate_context_entropy() {
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
+generate_context_entropy_singleton_contexts() {
+	local name="$1" majority_count="$2"
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.context_entropy.majority_count i 1 %s\n' "$majority_count"
+	} > "$input"
+	"$harness" context-entropy-singleton-contexts "$majority_count" \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tcompact singleton-context witness\t-\tmajority_count=%s\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$input_hash" "$majority_count" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_context_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tBuildAndEncodeHistograms all-singleton coder selection; hwy=NEON\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
+generate_context_entropy_rle_pattern() {
+	local name="$1" groups="$2" run_length="$3" filler_count="$4" tail_length="$5"
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.context_entropy.rle_pattern i 4 %s %s %s %s\n' \
+			"$groups" "$run_length" "$filler_count" "$tail_length"
+	} > "$input"
+	"$harness" context-entropy-rle-pattern "$groups" "$run_length" \
+		"$filler_count" "$tail_length" > "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tcompact RLE cumulative-cost pattern\t-\tgroups=%s run_length=%s filler_count=%s tail_length=%s\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$input_hash" "$groups" "$run_length" "$filler_count" "$tail_length" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_context_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tApplyLZ77_RLE cumulative Float endpoint witness; hwy=NEON\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
 generate_tree() {
 	local name="$1" kind="$2" total_pixels="$3" bitdepth="$4"
 	local prevprop="$5" dc_group_count="$6" projection_root="$7"
@@ -630,6 +667,30 @@ generate_context_map context_prefix_99 16 "${context_99[@]}"
 generate_context_map context_ans_100 16 "${context_100[@]}"
 generate_context_entropy context_entropy_prefix_99 "${context_99[@]}"
 generate_context_entropy context_entropy_ans_100 "${context_100[@]}"
+generate_context_entropy_singleton_contexts context_entropy_singleton_contexts 102
+context_rle_two_survivors=()
+for ((run = 0; run < 30; run++)); do
+	for ((repeat = 0; repeat < 20; repeat++)); do
+		context_rle_two_survivors+=("$((run % 16))")
+	done
+done
+generate_context_entropy context_entropy_rle_prefix_two_hist \
+	"${context_rle_two_survivors[@]}"
+for runs in 21 22; do
+	context_rle_threshold=()
+	for ((run = 0; run < runs; run++)); do
+		for ((repeat = 0; repeat < 100; repeat++)); do
+			context_rle_threshold+=(0)
+		done
+		for ((value = 1; value <= 27; value++)); do
+			context_rle_threshold+=("$value")
+		done
+	done
+	generate_context_entropy "context_entropy_rle_threshold_${runs}" \
+		"${context_rle_threshold[@]}"
+done
+generate_context_entropy_rle_pattern \
+	context_entropy_rle_cumulative_rounding 5000 200 52 4
 generate_context_map_with_candidates context_simple_profitability 2 0 1 0 1 0 1 --mtf 0 1 1 1 1 1
 generate_context_map_with_candidates context_tie_raw_mtf 16 0 1 --mtf 0 1
 context_simple_tie_entries=(1 1 0 1 1 1 1 1 1 2 2 1 1 2 2 1 2 1 0 1 1 2 1 1 0 0 2 1 1 1 1 0 0 0 1 0 2 2 2 1 0 1 1 0 1 1 0 0)

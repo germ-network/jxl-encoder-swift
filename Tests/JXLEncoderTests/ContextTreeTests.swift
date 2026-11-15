@@ -3,9 +3,8 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Reference bytes from `Reference/legacy-tiny/tools/gentree.cc`, which calls libjxl-tiny's
-/// own `WriteContextTree` and `WriteEntropyCode`. These exercise histogram
-/// clustering, context-map coding and prefix-code serialization together.
+/// Frozen bytes from `Reference/legacy-tiny/tools/gentree.cc`, which calls
+/// libjxl-tiny's own `WriteContextTree` and `WriteEntropyCode`.
 @Suite("Context tree and entropy code")
 struct ContextTreeTests {
 	static func loadReference(
@@ -61,20 +60,47 @@ struct ContextTreeTests {
 
 	@Test("entropy code serializes identically", arguments: ["DC", "AC"])
 	func entropyCode(which: String) throws {
-		let reference = try Self.loadReference("context_entropy_code")
-		let expected = try #require(reference["EC\(which)"])
+		let frozenReference = try Self.loadReference()
+		let frozen = try #require(frozenReference["EC\(which)"])
+		let supplementalReference = try Self.loadReference("context_entropy_code")
+		let supplemental = try #require(supplementalReference["EC\(which)"])
 		let code: EntropyCode = which == "DC" ? .staticDC : .staticAC
 
 		var writer = BitWriter()
 		EntropyCodeWriter.write(code, writer: &writer)
 
-		#expect(writer.bitsWritten == expected.bits)
+		withKnownIssue(
+			Comment(
+				rawValue:
+					"GER-3396 \(which): shared source map policy changes static-code bit count (lib/jxl/enc_context_map.cc:65-139)"
+			)
+		) {
+			#expect(writer.bitsWritten == frozen.bits)
+		}
+		#expect(writer.bitsWritten == supplemental.bits)
 		writer.zeroPadToByte()
 		let actual = writer.take()
-		let firstDifference = zip(actual, expected.bytes).enumerated()
+		let frozenDifference = zip(actual, frozen.bytes).enumerated()
 			.first { $0.element.0 != $0.element.1 }?.offset
-		#expect(firstDifference == nil, "first differing byte at \(firstDifference ?? -1)")
-		#expect(actual.count == expected.bytes.count)
+		withKnownIssue(
+			Comment(
+				rawValue:
+					"GER-3396 \(which): shared source map policy changes static-code bytes (lib/jxl/enc_context_map.cc:65-139)"
+			)
+		) {
+			#expect(
+				frozenDifference == nil,
+				"first differing byte at \(frozenDifference ?? -1)")
+		}
+		withKnownIssue(
+			Comment(
+				rawValue:
+					"GER-3396 \(which): shared source map policy changes static-code byte count (lib/jxl/enc_context_map.cc:65-139)"
+			)
+		) {
+			#expect(actual.count == frozen.bytes.count)
+		}
+		#expect(actual == supplemental.bytes)
 	}
 
 	@Test("the static tree carries 313 tokens")

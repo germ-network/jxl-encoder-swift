@@ -629,22 +629,23 @@ struct ANSHistogramWriterTests {
 
 	@Test
 	func contextMapHistogramUsesReferenceANSSelection() throws {
-		let fixture = try EntropyReferenceFixture.load("context_mtf_ans")
-		let entries = try fixture.integers(
-			fixture.input, "input.context_map.entries"
-		).map(UInt8.init)
-		let prepared = ContextMapEncoding.prepare(entries, numHistograms: 4)
-		guard case .moveToFront = prepared.representation,
-			let selected = prepared.moveToFront
-		else { throw SemanticDumpError.unimplemented }
-		#expect(!selected.usesPrefixCode)
-		#expect(selected.ansHistograms.count == 1)
-		var actual = BitWriter()
-		ContextMapEncoding.write(prepared, to: &actual)
+		let proof = ANSHistogramProofCase.contextMap
+		let fixture = try EntropyReferenceFixture.load(proof.fixture)
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let selected = ANSEncodingHistogram.computeBest(counts: counts, strategy: .precise)
+		let expectedShift = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.serialized_shift")[0]
+		let expectedCounts = try fixture.integers(
+			fixture.expected, "entropy.ans_cost.normalized"
+		).map(Int.init)
+		#expect(expectedShift == Int64(proof.selectedShift ?? -1))
+		#expect(proof.decisions.contains(.contextMapSelection))
+		#expect(selected.method == expectedShift + 1)
 		#expect(
-			actual.bytes.map(Int64.init)
-				== (try fixture.integers(
-					fixture.expected, "entropy.context_map.bytes")))
+			Array(selected.normalizedCounts.prefix(expectedCounts.count))
+				== expectedCounts)
 	}
 
 	@Test

@@ -359,6 +359,48 @@ struct EntropyReferenceFixture {
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 				offset = end
 			}
+		} else if name == "context_entropy_rle_cumulative_rounding" {
+			inputFields = ["input.context_entropy.rle_pattern"]
+			expectedFields = [
+				"entropy.context_entropy.input_count",
+				"entropy.context_entropy.rle_enabled",
+				"entropy.context_entropy.token_count",
+				"entropy.context_entropy.token_hash",
+			]
+			let pattern = try integers(input, "input.context_entropy.rle_pattern")
+			let inputCount = try integers(
+				expected, "entropy.context_entropy.input_count")
+			let rle = try integers(expected, "entropy.context_entropy.rle_enabled")
+			let tokenCount = try integers(
+				expected, "entropy.context_entropy.token_count")
+			let tokenHash = try integers(
+				expected, "entropy.context_entropy.token_hash")
+			guard pattern == [5000, 200, 52, 4],
+				inputCount == [1_260_004], rle == [1],
+				tokenCount.count == 1, tokenCount[0] > 100,
+				tokenHash.count == 1, (0...Int64(UInt32.max)).contains(tokenHash[0])
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "context_entropy_singleton_contexts" {
+			inputFields = ["input.context_entropy.majority_count"]
+			expectedFields = [
+				"entropy.context_entropy.token_count",
+				"entropy.context_entropy.rle_enabled",
+				"entropy.context_entropy.histogram_counts",
+				"entropy.context_entropy.use_prefix_code",
+			]
+			let majority = try integers(input, "input.context_entropy.majority_count")
+			guard majority == [102],
+				try integers(expected, "entropy.context_entropy.token_count") == [
+					103
+				],
+				try integers(expected, "entropy.context_entropy.rle_enabled") == [
+					0
+				],
+				try integers(expected, "entropy.context_entropy.histogram_counts")
+					== [102, 0, 0, 1],
+				try integers(expected, "entropy.context_entropy.use_prefix_code")
+					== [1]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("context_entropy_") {
 			inputFields = ["input.context_entropy.entries"]
 			expectedFields = [

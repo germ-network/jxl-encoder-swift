@@ -133,6 +133,13 @@ enum ContextMapEntropy {
 				symbolCosts[index] = 12
 			}
 		}
+		var cumulativeBitCosts = [Float](repeating: 0, count: entries.count + 1)
+		for index in entries.indices {
+			let encoded = dataConfig.encode(UInt32(entries[index]))
+			cumulativeBitCosts[index + 1] =
+				symbolCosts[Int(encoded.symbol)] + Float(encoded.bitCount)
+				+ cumulativeBitCosts[index]
+		}
 
 		var transformed: [EncodedToken] = []
 		transformed.reserveCapacity(entries.count)
@@ -157,13 +164,8 @@ enum ContextMapEntropy {
 				continue
 			}
 
-			let symbol = dataConfig.encode(UInt32(entries[index])).symbol
-			var repeatedCost: Float = 0
-			for _ in 0..<repeatCount {
-				repeatedCost += symbolCosts[Int(symbol)]
-				repeatedCost += Float(
-					dataConfig.encode(UInt32(entries[index])).bitCount)
-			}
+			let repeatedCost =
+				cumulativeBitCosts[index + repeatCount] - cumulativeBitCosts[index]
 			let encodedLength = repeatCount - minLength
 			let lengthCost =
 				repeatCount >= minLength
@@ -192,7 +194,7 @@ enum ContextMapEntropy {
 			index += repeatCount
 		}
 
-		guard bitDecrease > Float(entries.count) * 0.2 + 16 else {
+		guard Double(bitDecrease) > Double(entries.count) * 0.2 + 16 else {
 			return RunLengthResult(
 				enabled: false,
 				tokens: entries.map {
@@ -255,11 +257,8 @@ enum ContextMapEntropy {
 		var costHistograms = sourceHistograms
 		for index in costHistograms.indices { costHistograms[index].computeBitCost() }
 		let (histograms, contextMap) = cluster(sourceHistograms)
-		let usesPrefixCode =
-			runLength.tokens.count < 100
-			|| costHistograms.allSatisfy {
-				$0.totalCount == 0 || $0.bitCost / Float($0.totalCount) < 1e-5
-			}
+		let usesPrefixCode = shouldUsePrefixCode(
+			tokenCount: runLength.tokens.count, histograms: costHistograms)
 		let logAlphabetSize =
 			usesPrefixCode
 			? PrefixCodeWriter.prefixMaxBits
@@ -284,12 +283,17 @@ enum ContextMapEntropy {
 		PrefixCodeWriter.writeUintConfigs(
 			uintConfigurations, logAlphaSize: logAlphabetSize, writer: &costWriter)
 		if usesPrefixCode {
-			for (histogram, code) in zip(histograms, prefixCodes) {
+			for histogram in histograms {
 				let alphabetSize = max(
 					1,
 					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
 				PrefixCodeWriter.storeVarLenUInt16(
 					alphabetSize - 1, writer: &costWriter)
+			}
+			for (histogram, code) in zip(histograms, prefixCodes) {
+				let alphabetSize = max(
+					1,
+					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
 				if alphabetSize > 1 {
 					PrefixCodeWriter.writePrefixCode(code, writer: &costWriter)
 				}
@@ -301,7 +305,7 @@ enum ContextMapEntropy {
 				for symbol in histogram.counts.indices {
 					estimatedCost +=
 						Int(histogram.counts[symbol])
-						* Int(code.depths[symbol])
+						* (code.isDegenerate ? 0 : Int(code.depths[symbol]))
 				}
 			}
 		} else {
@@ -315,6 +319,10 @@ enum ContextMapEntropy {
 			usesPrefixCode: usesPrefixCode, logAlphabetSize: logAlphabetSize,
 			prefixCodes: prefixCodes, ansHistograms: ansHistograms,
 			estimatedCost: estimatedCost)
+	}
+
+	static func shouldUsePrefixCode(tokenCount: Int, histograms: [Histogram]) -> Bool {
+		tokenCount < 100 || histograms.allSatisfy { $0.bitCost < 1e-5 }
 	}
 
 	static func write(_ prepared: Prepared, to writer: inout BitWriter) {
@@ -344,12 +352,17 @@ enum ContextMapEntropy {
 			prepared.uintConfigurations, logAlphaSize: prepared.logAlphabetSize,
 			writer: &writer)
 		if prepared.usesPrefixCode {
-			for (histogram, code) in zip(prepared.histograms, prepared.prefixCodes) {
+			for histogram in prepared.histograms {
 				let alphabetSize = max(
 					1,
 					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
 				PrefixCodeWriter.storeVarLenUInt16(
 					alphabetSize - 1, writer: &writer)
+			}
+			for (histogram, code) in zip(prepared.histograms, prepared.prefixCodes) {
+				let alphabetSize = max(
+					1,
+					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
 				if alphabetSize > 1 {
 					PrefixCodeWriter.writePrefixCode(code, writer: &writer)
 				}
@@ -365,7 +378,9 @@ enum ContextMapEntropy {
 					encoded.token.value)
 				let symbol = Int(baseSymbol + (encoded.isLength ? 224 : 0))
 				let code = prepared.prefixCodes[histogram]
-				writer.write(Int(code.depths[symbol]), UInt64(code.bits[symbol]))
+				let depth = code.isDegenerate ? 0 : Int(code.depths[symbol])
+				let symbolBits = code.isDegenerate ? 0 : UInt64(code.bits[symbol])
+				writer.write(depth, symbolBits)
 				writer.write(Int(bitCount), UInt64(bits))
 			}
 		} else {

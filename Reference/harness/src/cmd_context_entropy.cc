@@ -160,8 +160,94 @@ int RunContextEntropy(const std::vector<std::string>& args) {
   return 0;
 }
 
+int RunContextEntropySingletonContexts(const std::vector<std::string>& args) {
+  if (args.size() != 1) return 2;
+  uint32_t majority_count = 0;
+  if (!ParseValue(args[0], &majority_count) || majority_count < 100 ||
+      majority_count > 1'000'000) return 2;
+  std::vector<std::vector<jxl::Token>> tokens(majority_count + 1);
+  for (size_t i = 0; i < majority_count; ++i) {
+    tokens[i].emplace_back(0, 0);
+  }
+  tokens.back().emplace_back(1, 1);
+  JxlMemoryManager manager;
+  if (!jxl::MemoryManagerInit(&manager, nullptr)) return 1;
+  jxl::HistogramParams params;
+  params.uint_method = jxl::HistogramParams::HybridUintMethod::kContextMap;
+  jxl::EntropyEncodingData codes;
+  auto cost = jxl::BuildAndEncodeHistograms(
+      &manager, params, 2, tokens, &codes, nullptr,
+      jxl::LayerType::Header, nullptr);
+  if (!cost.ok()) return 1;
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.context_entropy.token_count",
+                {static_cast<int64_t>(majority_count) + 1});
+  dump.Integers("entropy.context_entropy.rle_enabled",
+                {codes.lz77.enabled ? 1 : 0});
+  dump.Integers("entropy.context_entropy.histogram_counts",
+                {static_cast<int64_t>(majority_count), 0, 0, 1});
+  dump.Integers("entropy.context_entropy.use_prefix_code",
+                {codes.use_prefix_code ? 1 : 0});
+  dump.Write(stdout);
+  return 0;
+}
+
+int RunContextEntropyRLEPattern(const std::vector<std::string>& args) {
+  if (args.size() != 4) return 2;
+  uint32_t groups = 0, run_length = 0, filler_count = 0, tail_length = 0;
+  if (!ParseValue(args[0], &groups) || groups == 0 || groups > 10'000 ||
+      !ParseValue(args[1], &run_length) || run_length < 4 || run_length > 4096 ||
+      !ParseValue(args[2], &filler_count) || filler_count == 0 || filler_count > 255 ||
+      !ParseValue(args[3], &tail_length) || tail_length > 4096) return 2;
+  const uint64_t entry_count = static_cast<uint64_t>(groups) *
+      (static_cast<uint64_t>(run_length) + filler_count) + tail_length;
+  if (entry_count > 4'000'000) return 2;
+  std::vector<std::vector<jxl::Token>> tokens(1);
+  tokens[0].reserve(entry_count);
+  for (uint32_t group = 0; group < groups; ++group) {
+    for (uint32_t i = 0; i < run_length; ++i) tokens[0].emplace_back(0, 0);
+    for (uint32_t value = 1; value <= filler_count; ++value) {
+      tokens[0].emplace_back(0, value);
+    }
+  }
+  for (uint32_t i = 0; i < tail_length; ++i) tokens[0].emplace_back(0, 0);
+  JxlMemoryManager manager;
+  if (!jxl::MemoryManagerInit(&manager, nullptr)) return 1;
+  jxl::HistogramParams params;
+  params.uint_method = jxl::HistogramParams::HybridUintMethod::kContextMap;
+  jxl::EntropyEncodingData codes;
+  auto result = jxl::BuildAndEncodeHistograms(
+      &manager, params, 1, tokens, &codes, nullptr,
+      jxl::LayerType::Header, nullptr);
+  if (!result.ok()) return 1;
+  uint32_t hash = 2166136261u;
+  for (const jxl::Token& token : tokens[0]) {
+    for (uint32_t value : {token.context, token.value,
+                           static_cast<uint32_t>(token.is_lz77_length)}) {
+      hash = (hash ^ value) * 16777619u;
+    }
+  }
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.context_entropy.input_count",
+                {static_cast<int64_t>(entry_count)});
+  dump.Integers("entropy.context_entropy.rle_enabled",
+                {codes.lz77.enabled ? 1 : 0});
+  dump.Integers("entropy.context_entropy.token_count",
+                {static_cast<int64_t>(tokens[0].size())});
+  dump.Integers("entropy.context_entropy.token_hash",
+                {static_cast<int64_t>(hash)});
+  dump.Write(stdout);
+  return 0;
+}
+
 const RegisterSubcommand kRegister(
     {"context-entropy", "<entry>...", RunContextEntropy});
+const RegisterSubcommand kSingletonContextsRegister(
+    {"context-entropy-singleton-contexts", "<majority_count>",
+     RunContextEntropySingletonContexts});
+const RegisterSubcommand kRLEPatternRegister(
+    {"context-entropy-rle-pattern", "<groups> <run_length> <filler_count> <tail_length>",
+     RunContextEntropyRLEPattern});
 
 }  // namespace
 }  // namespace harness
