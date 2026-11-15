@@ -68,7 +68,6 @@ struct DecisionInventoryFixtureTests {
 				return ContextMapProofCase.all.contains {
 					$0.reference == key
 				} ? .verifies : .notCompared
-				} ? .verifies : .notCompared
 			}
 			if category == "clusters" {
 				return HistogramCostProofCase.hasActiveConsumer(key)
