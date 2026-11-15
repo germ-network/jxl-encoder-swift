@@ -187,13 +187,19 @@ int RunClusters(const std::vector<std::string>& args) {
   std::vector<int64_t> cluster_lengths;
   std::vector<int64_t> totals;
   std::vector<int64_t> values;
+  std::vector<float> input_entropies;
+  std::vector<float> cluster_entropies;
   int64_t input_total = 0;
   int64_t output_total = 0;
-  for (const auto& histogram : input) input_total += histogram.total_count;
+  for (const auto& histogram : input) {
+    input_total += histogram.total_count;
+    input_entropies.push_back(histogram.ShannonEntropy());
+  }
   for (const auto& cluster : clusters) {
     const size_t length = cluster.alphabet_size();
     cluster_lengths.push_back(length);
     totals.push_back(cluster.total_count);
+    cluster_entropies.push_back(cluster.ShannonEntropy());
     output_total += cluster.total_count;
     for (size_t i = 0; i < length; ++i) values.push_back(cluster.counts[i]);
   }
@@ -206,6 +212,8 @@ int RunClusters(const std::vector<std::string>& args) {
   dump.Integers("entropy.clusters.histogram_counts", values);
   dump.Integers("entropy.clusters.input_total_count", {input_total});
   dump.Integers("entropy.clusters.output_total_count", {output_total});
+  dump.Floats("entropy.clusters.input_shannon_entropy", input_entropies);
+  dump.Floats("entropy.clusters.output_shannon_entropy", cluster_entropies);
   dump.Write(stdout);
   return 0;
 }

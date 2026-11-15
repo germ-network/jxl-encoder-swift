@@ -430,24 +430,26 @@ struct EntropyReferenceTests {
 
 	@Test
 	func fastAndBestClustersMatchReference() throws {
-		let clusteringDifferences: Set<String> = [
-			"entropy.clusters.map", "entropy.clusters.count",
-			"entropy.clusters.alphabet_lengths",
-			"entropy.clusters.total_counts",
-			"entropy.clusters.histogram_counts",
-		]
 		let fixtures: [(String, Set<String>)] = [
 			("clusters_fast_identical", Set<String>()),
 			("clusters_best_identical", Set<String>()),
 			("clusters_ties_fast", Set<String>()),
-			("clusters_distance_48_fast", clusteringDifferences),
-			("clusters_distance_56_fast", clusteringDifferences),
+			("clusters_distance_48_fast", Set<String>()),
+			("clusters_distance_56_fast", Set<String>()),
 			("clusters_distance_64_fast", Set<String>()),
 			("clusters_default_cap_fast", Set<String>()),
 			("clusters_farthest_fast", Set<String>()),
 			("clusters_over_eight_fast", Set<String>()),
-			("clusters_fast_merge", clusteringDifferences),
-			("clusters_best_merge", Set<String>()),
+			("clusters_fast_merge", Set<String>()),
+			(
+				"clusters_best_merge",
+				[
+					"entropy.clusters.map", "entropy.clusters.count",
+					"entropy.clusters.alphabet_lengths",
+					"entropy.clusters.total_counts",
+					"entropy.clusters.histogram_counts",
+				]
+			),
 		]
 		for (name, knownDifferences) in fixtures {
 			let fixture = try EntropyReferenceFixture.load(name)
@@ -505,7 +507,7 @@ struct EntropyReferenceTests {
 				#expect(
 					fixture.expected.fields["entropy.clusters.count"]
 						== .integers([2]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([1]))
+				#expect(actual.fields["entropy.clusters.count"] == .integers([2]))
 			}
 			if name == "clusters_distance_64_fast" {
 				#expect(
@@ -542,24 +544,53 @@ struct EntropyReferenceTests {
 				#expect(histograms.count == 10)
 				#expect(
 					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([8]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([8]))
+						== .integers([10]))
+				#expect(actual.fields["entropy.clusters.count"] == .integers([10]))
 			}
-			let differences = actual.differences(from: fixture.expected)
+			let differences = actual.differences(
+				from: fixture.expected,
+				excludingFields: [
+					"entropy.clusters.input_shannon_entropy",
+					"entropy.clusters.output_shannon_entropy",
+				])
 			let differenceFields = Set(differences.map(\.field))
 			#expect(differenceFields == knownDifferences, "\(name): \(differences)")
 			#expect(
 				actual.differences(
-					from: fixture.expected, excludingFields: knownDifferences
+					from: fixture.expected,
+					excludingFields: knownDifferences.union([
+						"entropy.clusters.input_shannon_entropy",
+						"entropy.clusters.output_shannon_entropy",
+					])
 				)
 				.isEmpty,
 				"\(name) has unexpected matching-field differences")
-			for field in knownDifferences {
-				let fieldDifferences = differences.filter { $0.field == field }
-				withKnownIssue(Comment(rawValue: "GER-3386: \(field)")) {
+			for field in [
+				"entropy.clusters.input_shannon_entropy",
+				"entropy.clusters.output_shannon_entropy",
+			] {
+				if name == "clusters_best_merge",
+					field == "entropy.clusters.output_shannon_entropy"
+				{
+					continue
+				}
+				guard
+					case .floats(let actualValues)? = actual.fields[field],
+					case .floats(let expectedValues)? = fixture.expected.fields[
+						field]
+				else {
+					Issue.record("Missing Shannon entropy field: \(field)")
+					continue
+				}
+				let matches =
+					actualValues.map(\.bitPattern)
+					== expectedValues.map(\.bitPattern)
+				if name == "clusters_best_merge" {
 					#expect(
-						fieldDifferences.isEmpty,
-						"\(name): \(fieldDifferences)")
+						field == "entropy.clusters.input_shannon_entropy"
+							&& matches)
+				} else {
+					#expect(matches)
 				}
 			}
 		}

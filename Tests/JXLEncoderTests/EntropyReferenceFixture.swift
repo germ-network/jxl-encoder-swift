@@ -244,6 +244,8 @@ struct EntropyReferenceFixture {
 				"entropy.clusters.histogram_counts",
 				"entropy.clusters.input_total_count",
 				"entropy.clusters.output_total_count",
+				"entropy.clusters.input_shannon_entropy",
+				"entropy.clusters.output_shannon_entropy",
 			]
 			let mode = try integers(input, "input.clusters.mode")
 			let limit = try integers(input, "input.clusters.limit")
@@ -268,6 +270,12 @@ struct EntropyReferenceFixture {
 				expected, "entropy.clusters.input_total_count")
 			let outputTotal = try integers(
 				expected, "entropy.clusters.output_total_count")
+			guard
+				case .floats(let inputEntropies)? = expected.fields[
+					"entropy.clusters.input_shannon_entropy"],
+				case .floats(let outputEntropies)? = expected.fields[
+					"entropy.clusters.output_shannon_entropy"]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			guard clusterCount.count == 1,
 				(1...min(Int(limit[0]), lengths.count)).contains(
 					Int(clusterCount[0])),
@@ -280,6 +288,10 @@ struct EntropyReferenceFixture {
 				outputCounts.count == alphabetLengths.reduce(0, +),
 				outputCounts.allSatisfy({ (0...Int64(Int32.max)).contains($0) }),
 				inputTotal == [total], outputTotal == [total],
+				inputEntropies.count == lengths.count,
+				outputEntropies.count == Int(clusterCount[0]),
+				inputEntropies.allSatisfy(\.isFinite),
+				outputEntropies.allSatisfy(\.isFinite),
 				checkedSum(totals, limit: Int64(UInt32.max)) == total
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 			var offset = 0

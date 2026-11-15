@@ -16,7 +16,9 @@ mkdir -p "$out"
 pin="$LIBJXL_COMMIT"
 tmp="$(mktemp)"
 sorted_entropy="$tmp.entropy"
-trap 'rm -f "$tmp" "$sorted_entropy" "$tmp.modular.0" "$tmp.modular.1" "$tmp.tree-input.ppm" "$tmp.tree.jxl" "$tmp.tree-layout.sem"' EXIT
+original_provenance="$tmp.original"
+trap 'rm -f "$tmp" "$sorted_entropy" "$original_provenance" "$tmp.modular.0" "$tmp.modular.1" "$tmp.tree-input.ppm" "$tmp.tree.jxl" "$tmp.tree-layout.sem"' EXIT
+cp "$root/Reference/provenance.tsv" "$original_provenance"
 head -n 2 "$root/Reference/provenance.tsv" > "$tmp"
 awk -F '\t' 'NR > 2 && $1 !~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$root/Reference/provenance.tsv" >> "$tmp"
@@ -542,7 +544,7 @@ for ((index = 0; index < 10; index++)); do
 	done
 	over_eight_rows+=("$(IFS=,; printf '%s' "${row[*]}")")
 done
-generate_cluster clusters_default_cap_fast fast 8 "${over_eight_rows[@]}"
+generate_cluster clusters_default_cap_fast fast 128 "${over_eight_rows[@]}"
 generate_cluster clusters_over_eight_fast fast 9 "${over_eight_rows[@]}"
 
 generate_context_map context_single_histogram 1 0 0 0 0 0
@@ -731,20 +733,29 @@ printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-s
 printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/decoded_frame.cc,Reference/harness/src/capture_modular_tree.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tdecoded merged tree; groups=18 dc_groups=2 hwy=NEON\tSemanticCrossCheckTests.swift\n' \
 	"$tree_name" "$tree_expected_hash" "$tree_name" "$pin" >> "$tmp"
 
-git -C "$root" show HEAD:Reference/provenance.tsv \
-	| awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\/stream_shared_(ans|prefix)\.(input|expected|receipt)\.sem$/' \
-	>> "$tmp"
-
 awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$tmp" | sort -t $'\t' -k1,1 > "$sorted_entropy"
-{
-	head -n 2 "$tmp"
-	awk -F '\t' -v entropy_file="$sorted_entropy" \
-		'$1 == "Tests/JXLEncoderTests/Fixtures/hopper_420_odd.coef" {
-			while ((getline line < entropy_file) > 0) print line
-			close(entropy_file)
-		}
-		NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\// { next }
-		NR > 2 { print }' "$tmp"
-} > "$root/Reference/provenance.tsv"
+python3 - "$tmp" "$sorted_entropy" "$original_provenance" "$root/Reference/provenance.tsv" <<'PYCODE'
+import sys
+from pathlib import Path
+
+generated, sorted_entropy, original, destination = map(Path, sys.argv[1:])
+generated_lines = generated.read_text().splitlines()
+original_lines = original.read_text().splitlines()
+new_entropy = {
+    line.split("\t", 1)[0]: line
+    for line in sorted_entropy.read_text().splitlines()
+}
+output = original_lines[:2]
+seen = set()
+for line in original_lines[2:]:
+    path = line.split("\t", 1)[0]
+    if path in new_entropy:
+        output.append(new_entropy[path])
+        seen.add(path)
+    else:
+        output.append(line)
+output.extend(new_entropy[path] for path in sorted(new_entropy.keys() - seen))
+destination.write_text("\n".join(output) + "\n")
+PYCODE
 "$root/Reference/pin-check.sh" "$linked"
