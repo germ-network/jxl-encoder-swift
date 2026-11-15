@@ -121,4 +121,21 @@ struct QuantizerTests {
 			}
 		}
 	}
+	@Test(
+		"e4 dead zones match upstream for each channel and quadrant",
+		.disabled("Pending reference comparison"))
+	func e4DeadZonesMatchReferenceAtThresholdBounds() throws {
+		Issue.record(
+			"Compare signed below, equal and above threshold outputs for every channel and quadrant"
+		)
+	}
+
+	@Test(
+		"actual e4 callers select the translated dead zones",
+		.disabled("Pending reference comparison"))
+	func e4CallerQuantizedCoefficientsMatchReference() throws {
+		Issue.record(
+			"Compare actual upstream caller coefficients using measured DCT inputs")
+	}
+
 }

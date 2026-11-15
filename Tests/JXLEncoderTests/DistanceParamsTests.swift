@@ -95,4 +95,19 @@ struct DistanceParamsTests {
 		let floor = try DistanceParams(distance: 0.03)
 		#expect(tiny == floor)
 	}
+	@Test(
+		"X matrix scales match upstream at distance transition boundaries",
+		.disabled("Pending reference comparison"))
+	func matrixScalesMatchReferenceAtTransitionBounds() throws {
+		Issue.record("Compare every observed X scale including strict transition neighbors")
+	}
+
+	@Test(
+		"X matrix scale reaches coefficient quantization and frame signaling",
+		.disabled("Pending reference comparison"))
+	func matrixScaleFlowsThroughQuantizationAndSignaling() throws {
+		Issue.record(
+			"Compare the multiplier, quantized coefficients and emitted matrix scales")
+	}
+
 }
