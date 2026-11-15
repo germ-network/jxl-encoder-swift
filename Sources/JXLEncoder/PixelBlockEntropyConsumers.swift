@@ -1,5 +1,6 @@
 extension JPEGBlockContextMap.Result {
 	func category(channel: Int, dcBucket: Int, rawQuant: UInt32) -> Int {
+		precondition(thresholds.isEmpty && dcBucket == 0)
 		var quantBucket = 0
 		for threshold in qfThresholds where rawQuant > threshold { quantBucket += 1 }
 		let base =

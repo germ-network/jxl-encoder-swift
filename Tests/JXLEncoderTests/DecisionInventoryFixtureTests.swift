@@ -52,6 +52,9 @@ struct DecisionInventoryFixtureTests {
 		else { return .notFullLibjxl }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
+			if PixelBlockContextProofCase.proves(key, decision: "PX-01") {
+				return .verifies
+			}
 			if category == "ans_cost" || category == "histogram" {
 				return ANSHistogramProofCase.all.contains {
 					$0.reference == key
@@ -270,6 +273,23 @@ struct DecisionInventoryFixtureTests {
 				#expect(
 					ANSHistogramProofCase.proves(reference, decision: row.id),
 					"\(text) does not prove \(row.id)")
+			}
+		}
+	}
+
+	@Test(
+		"pixel block-context inventory references are bound to a typed bounded proof",
+		.enabled(if: PackageCheckout.isAvailable))
+	func pixelBlockContextReferencesHaveProofs() throws {
+		let inventory = try DecisionInventoryTests.committed()
+		for row in inventory.rows where row.id == "PX-01" {
+			let references = row.fixture.components(separatedBy: ",")
+			#expect(!references.isEmpty && !references.contains("-"))
+			for reference in references {
+				#expect(
+					PixelBlockContextProofCase.proves(
+						reference, decision: row.id),
+					"\(reference) does not prove \(row.id)")
 			}
 		}
 	}

@@ -138,20 +138,44 @@ enum LibcxxBoundedSort {
 	}
 
 	static func insertion(_ first: Int, _ last: Int, _ v: inout [Int], _ n: [Int]) {
-		guard last > first + 1 else { return }
-		for i in (first + 1)..<last where less(v[i], v[i - 1], n) {
-			let value = v[i]
-			var j = i
-			while j > first && less(value, v[j - 1], n) {
-				v[j] = v[j - 1]
-				j -= 1
+		guard first < last else { return }
+		var i = first + 1
+		while i < last {
+			var j = i - 1
+			if less(v[i], v[j], n) {
+				let value = v[i]
+				var source = j
+				j = i
+				repeat {
+					v[j] = v[source]
+					j = source
+					if j == first { break }
+					source -= 1
+				} while less(value, v[source], n)
+				v[j] = value
 			}
-			v[j] = value
+			i += 1
 		}
 	}
 
 	static func unguardedInsertion(_ first: Int, _ last: Int, _ v: inout [Int], _ n: [Int]) {
-		insertion(first, last, &v, n)
+		guard first < last else { return }
+		precondition(first > 0)
+		var i = first + 1
+		while i < last {
+			var source = i - 1
+			if less(v[i], v[source], n) {
+				let value = v[i]
+				var destination = i
+				repeat {
+					v[destination] = v[source]
+					destination = source
+					source -= 1
+				} while less(value, v[source], n)
+				v[destination] = value
+			}
+			i += 1
+		}
 	}
 
 	static func incomplete(_ first: Int, _ last: Int, _ v: inout [Int], _ n: [Int]) -> Bool {

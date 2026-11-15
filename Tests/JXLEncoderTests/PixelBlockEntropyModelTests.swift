@@ -82,19 +82,6 @@ struct PixelBlockEntropyModelTests {
 		"All transmitted entries and category counts match source sorting for reachable 13 and 26 entry lists."
 	)
 	func tieHeavyFullMapsMatchPinnedSort() throws {
-		let params = try DistanceParams(distance: 1)
-		var histogram = [Int](repeating: 0, count: 256)
-		for quant in 0..<250 { histogram[quant] = 200 }
-		let model = PixelBlockEntropyModel.compute(quantCounts: histogram, params: params)
-		let url = try #require(
-			Bundle.module.url(
-				forResource: "e4_pixel_block_model_ties", withExtension: "sem",
-				subdirectory: "Fixtures/semantic"))
-		let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
-		#expect(model.qfThresholds == parseInts(lines[1])?.map(UInt32.init))
-		#expect(model.numContexts == parseInts(lines[2])?.first)
-		#expect(model.contextMap.map(Int.init) == parseInts(lines[3]))
-
 		let sortURL = try #require(
 			Bundle.module.url(
 				forResource: "e4_pixel_sort_witness", withExtension: "tsv",
@@ -107,6 +94,41 @@ struct PixelBlockEntropyModelTests {
 			LibcxxBoundedSort.sort(&actual, counts: [Int](repeating: 0, count: length))
 			#expect(actual == Array(expected.dropFirst()))
 		}
+
+		let nonuniformURL = try #require(
+			Bundle.module.url(
+				forResource: "e4_pixel_sort_nonuniform", withExtension: "tsv",
+				subdirectory: "Fixtures/semantic"))
+		var witnessedLengths: [Int] = []
+		for line in try String(contentsOf: nonuniformURL, encoding: .utf8).split(
+			separator: "\n")
+		{
+			let fields = line.split(separator: "\t")
+			#expect(fields.count == 3)
+			let length = Int(fields[0])!
+			let sourceCounts = fields[1].split(separator: ",").compactMap { Int($0) }
+			let expected = fields[2].split(separator: ",").compactMap { Int($0) }
+			#expect(sourceCounts.count == length)
+			#expect(expected.count == length)
+			witnessedLengths.append(length)
+			var actual = Array(0..<length)
+			LibcxxBoundedSort.sort(&actual, counts: sourceCounts)
+			#expect(actual == expected)
+		}
+		#expect(witnessedLengths == Array(3...26))
+
+		let params = try DistanceParams(distance: 1)
+		var histogram = [Int](repeating: 0, count: 256)
+		for quant in 0..<250 { histogram[quant] = 200 }
+		let model = PixelBlockEntropyModel.compute(quantCounts: histogram, params: params)
+		let url = try #require(
+			Bundle.module.url(
+				forResource: "e4_pixel_block_model_ties", withExtension: "sem",
+				subdirectory: "Fixtures/semantic"))
+		let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
+		#expect(model.qfThresholds == parseInts(lines[1])?.map(UInt32.init))
+		#expect(model.numContexts == parseInts(lines[2])?.first)
+		#expect(model.contextMap.map(Int.init) == parseInts(lines[3]))
 	}
 
 	private func parseInts(_ line: Substring) -> [Int]? {
@@ -127,13 +149,47 @@ struct PixelBlockEntropyModelTests {
 		}
 		let result = JPEGBlockContextMap.Result(
 			thresholds: [], qfThresholds: [10], contextMap: map, numContexts: 6)
+		#expect(result.thresholds.isEmpty)
 		for channel in 0..<3 {
 			#expect(
 				result.category(channel: channel, dcBucket: 0, rawQuant: 10)
 					== channel)
 			#expect(
-				result.category(channel: channel, dcBucket: 7, rawQuant: 11)
+				result.category(channel: channel, dcBucket: 0, rawQuant: 11)
 					== channel + 3)
+		}
+		let proof = PixelBlockContextProofCase.categoryLookup
+		let sourceURL = try #require(
+			Bundle.module.url(
+				forResource: proof.fixture, withExtension: "sem",
+				subdirectory: "Fixtures/semantic"))
+		let sourceFields = Dictionary(
+			uniqueKeysWithValues: try String(contentsOf: sourceURL, encoding: .utf8)
+				.split(separator: "\n").map { line in
+					let fields = line.split(separator: " ")
+					return (
+						String(fields[0]),
+						fields.dropFirst().compactMap { Int($0) }
+					)
+				})
+		let rawQuant = sourceFields["consumer_raw_qf"]!
+		let categories = sourceFields["consumer_categories"]!
+		var histogram = [Int](repeating: 0, count: 256)
+		for quant in 0..<250 { histogram[quant] = 200 }
+		let model = PixelBlockEntropyModel.compute(
+			quantCounts: histogram, params: try DistanceParams(distance: 1))
+		#expect(model.qfThresholds.map(Int.init) == [rawQuant[0]])
+		for channel in 0..<3 {
+			#expect(
+				model.category(
+					channel: channel, dcBucket: 0, rawQuant: UInt32(rawQuant[0])
+				)
+					== categories[channel * 2])
+			#expect(
+				model.category(
+					channel: channel, dcBucket: 0, rawQuant: UInt32(rawQuant[1])
+				)
+					== categories[channel * 2 + 1])
 		}
 	}
 
@@ -158,8 +214,56 @@ struct PixelBlockEntropyModelTests {
 		#expect(reader.read(4) == 1)
 		#expect(reader.read(2) == 3)
 		#expect(reader.read(8) == 80)
-		#expect(result.contextMap.map(Int.init) == parseInts(lines[3]))
+		let expectedMap = parseInts(lines[3])!
+		#expect(result.contextMap.map(Int.init) == expectedMap)
 		#expect(result.numContexts == parseInts(lines[2])?.first)
+		let mapMode = reader.read(3)
+		let decodedMap: [Int]
+		if mapMode == 1 {
+			decodedMap = [Int](repeating: 0, count: expectedMap.count)
+		} else {
+			#expect(mapMode == 0)
+			#expect(reader.read(1) == 1)
+			let mapCode = HistogramCluster.optimizePrefixCodes(
+				tokens: expectedMap.map { Token(context: 0, value: UInt32($0)) },
+				contextMap: [0], prefixCodeCount: 1)
+			var mapHeader = BitWriter()
+			PrefixCodeWriter.writePrefixCodes(mapCode.prefixCodes, writer: &mapHeader)
+			var headerReader = TestBitReader(bytes: mapHeader.bytes)
+			for _ in 0..<mapHeader.bitsWritten {
+				#expect(reader.read(1) == headerReader.read(1))
+			}
+			decodedMap = reader.readPrefixSymbols(
+				count: expectedMap.count, code: mapCode.prefixCodes[0])
+		}
+		#expect(decodedMap == expectedMap)
+		#expect((decodedMap.max() ?? -1) + 1 == result.numContexts)
+		expectQuantThresholdSelectorsRoundTrip()
+	}
+
+	private func expectQuantThresholdSelectorsRoundTrip() {
+		let thresholds: [UInt32] = [1, 2, 5, 12, 13, 44, 45]
+		let result = JPEGBlockContextMap.Result(
+			thresholds: [], qfThresholds: thresholds,
+			contextMap: [0], numContexts: 1)
+		var writer = BitWriter()
+		JPEGBlockContextMap.write(result, writer: &writer)
+		var reader = TestBitReader(bytes: writer.bytes)
+		#expect(reader.read(1) == 0)
+		for _ in 0..<3 { #expect(reader.read(4) == 0) }
+		#expect(reader.read(4) == UInt64(thresholds.count))
+		for threshold in thresholds {
+			let value = threshold - 1
+			let (selector, width, offset): (UInt64, Int, UInt32) =
+				switch value {
+				case 0..<4: (0, 2, 0)
+				case 4..<12: (1, 3, 4)
+				case 12..<44: (2, 5, 12)
+				default: (3, 8, 44)
+				}
+			#expect(reader.read(2) == selector)
+			#expect(reader.read(width) == UInt64(value - offset))
+		}
 	}
 
 	@Test(
@@ -271,5 +375,28 @@ private struct TestBitReader {
 			bitOffset += 1
 		}
 		return result
+	}
+
+	mutating func skip(_ count: Int) {
+		bitOffset += count
+	}
+
+	mutating func readPrefixSymbols(count: Int, code: PrefixCode) -> [Int] {
+		let maxDepth = Int(code.depths.max() ?? 0)
+		var symbols: [Int] = []
+		for _ in 0..<count {
+			var bits: UInt16 = 0
+			var symbol: Int?
+			for depth in 1...maxDepth {
+				bits |= UInt16(read(1)) << UInt16(depth - 1)
+				symbol = code.depths.indices.first {
+					code.depths[$0] == depth && code.bits[$0] == bits
+				}
+				if symbol != nil { break }
+			}
+			guard let symbol else { return symbols }
+			symbols.append(symbol)
+		}
+		return symbols
 	}
 }

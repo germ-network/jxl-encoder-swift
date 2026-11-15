@@ -68,7 +68,7 @@ non-empty, and `-` means "none" where a column allows it.
 ## Rules
 
 1. Each file's header line is exactly its column names, in order. Every line has that many non-empty fields and no carriage return.
-2. Ids match the pattern, are unique, and use the prefix the table below assigns to the row's `swift_file`.
+2. Ids match the pattern, are unique, and use the prefix the table below assigns to the row's `swift_file`. `AC-07` keeps its stable identity at `PixelBlockEntropyModel.swift`; this is the sole relocation exception, and no other `AC` row may move from `ACContext.swift`.
 3. `classification`, `verification` and `path` take only the listed values.
 4. `upstream` is the pinned revision or `-`; `-` only with `original`. `upstream_function` and `config` are `-` exactly when `upstream` is.
 5. Provenance: `swift_symbol`, `decision` and `evidence` are never `-`; `evidence` holds the locations column 11 requires; `upstream_function`, when not `-`, is `(lib|tools)/<path>:<Function>`.

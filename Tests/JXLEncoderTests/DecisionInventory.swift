@@ -337,12 +337,18 @@ struct DecisionInventory {
 		for row in rows {
 			if !Self.isValidId(row.id) {
 				add(.idFormat, row, "id \(row.id)")
-			} else if let prefix = row.id.components(separatedBy: "-").first,
-				Self.idPrefixes[prefix] != row.swiftFile
-			{
-				add(
-					.idPrefix, row,
-					"prefix \(prefix) is not assigned to \(row.swiftFile)")
+			} else if let prefix = row.id.components(separatedBy: "-").first {
+				let ac07File = "Sources/JXLEncoder/PixelBlockEntropyModel.swift"
+				let expectedFile =
+					row.id == "AC-07" ? ac07File : Self.idPrefixes[prefix]
+				if expectedFile != row.swiftFile
+					|| (row.id == "AC-07" && prefix != "AC")
+				{
+					add(
+						.idPrefix, row,
+						"prefix \(prefix) is not assigned to \(row.swiftFile)"
+					)
+				}
 			}
 			if !seenIds.insert(row.id).inserted {
 				add(.duplicateId, row, "id \(row.id) repeated")
