@@ -169,6 +169,8 @@ struct DecisionInventory {
 		"JT": "Sources/JXLEncoder/JPEGTranscode.swift",
 		"PB": "Sources/JXLEncoder/PlaneBuffer.swift",
 		"PC": "Sources/JXLEncoder/PrefixCodeWriter.swift",
+		"PM": "Sources/JXLEncoder/PixelBlockEntropyModel.swift",
+		"PX": "Sources/JXLEncoder/PixelBlockEntropyConsumers.swift",
 		"QM": "Sources/JXLEncoder/QuantMatrices.swift",
 		"QR": "Sources/JXLEncoder/QuantizeRoundtrip.swift",
 		"QW": "Sources/JXLEncoder/QuantMatrixWriter.swift",
@@ -646,6 +648,7 @@ enum SourceGroup: String, CaseIterable {
 				"ImageHeader", "PlaneBuffer",
 				"QuantMatrices", "QuantMatrixWriter", "QuantizeRoundtrip",
 				"Quantizer",
+				"PixelBlockEntropyConsumers", "PixelBlockEntropyModel",
 				"ReciprocalEstimate", "SRGBTransfer", "XYB",
 			].map { "Sources/JXLEncoder/\($0).swift" }
 		case .jpeg:

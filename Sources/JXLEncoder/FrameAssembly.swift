@@ -128,9 +128,8 @@ enum FrameAssembly {
 		/// Overrides the distance-derived scales, which a transcode does not use.
 		globalScale: Int? = nil,
 		quantDC: Int? = nil,
-		/// Non-nil writes the adaptive JPEG-transcode block context map in
-		/// place of the fixed one below. Always nil on the pixel path and on
-		/// the JPEG static-table path.
+		/// Non-nil writes the optimized pixel or JPEG-transcode block context
+		/// map in place of the fixed one below. Nil on static-table paths.
 		blockContextMap: JPEGBlockContextMap.Result? = nil,
 		/// Whether `code`'s own context map may use ANS — only ever true when
 		/// `code` was built by `SectionOptimizer.optimize`, never for

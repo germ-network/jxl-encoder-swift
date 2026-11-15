@@ -1,0 +1,20 @@
+[
+  {
+    "directory": "$BUILD",
+    "command": "\"$XCODE_DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++\" -DBROTLI_SHARED_COMPILATION -DHWY_STATIC_DEFINE -DJXL_STATIC_DEFINE -DLIBJXL_COMMIT=\\\"a7a9c787341cf703dede03c2009fa460cae5e5df\\\" -DTOOLCHAIN_MISS_ASM_HWCAP_H -DTOOLCHAIN_MISS_SYS_AUXV_H -I$REPO/Reference/harness/src -I$LIBJXL -I$LIBJXL/third_party/highway -I$LIBJXL/third_party/brotli/c/include -I$BUILD/libjxl/lib/include -I$LIBJXL/lib/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot \"$XCODE_DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\" -o CMakeFiles/jxl-harness.dir/src/cmd_pixel_block_model.cc.o -c $REPO/Reference/harness/src/cmd_pixel_block_model.cc",
+    "file": "$REPO/Reference/harness/src/cmd_pixel_block_model.cc",
+    "output": "CMakeFiles/jxl-harness.dir/src/cmd_pixel_block_model.cc.o"
+  },
+  {
+    "directory": "$BUILD",
+    "command": "\"$XCODE_DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++\" -DBROTLI_SHARED_COMPILATION -DHWY_STATIC_DEFINE -DJXL_STATIC_DEFINE -DLIBJXL_COMMIT=\\\"a7a9c787341cf703dede03c2009fa460cae5e5df\\\" -DTOOLCHAIN_MISS_ASM_HWCAP_H -DTOOLCHAIN_MISS_SYS_AUXV_H -I$REPO/Reference/harness/src -I$LIBJXL -I$LIBJXL/third_party/highway -I$LIBJXL/third_party/brotli/c/include -I$BUILD/libjxl/lib/include -I$LIBJXL/lib/include -O3 -DNDEBUG -std=gnu++17 -arch arm64 -isysroot \"$XCODE_DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\" -o CMakeFiles/jxl-harness.dir/src/cmd_pixel_sort_witness.cc.o -c $REPO/Reference/harness/src/cmd_pixel_sort_witness.cc",
+    "file": "$REPO/Reference/harness/src/cmd_pixel_sort_witness.cc",
+    "output": "CMakeFiles/jxl-harness.dir/src/cmd_pixel_sort_witness.cc.o"
+  },
+  {
+    "directory": "$BUILD/libjxl/lib",
+    "command": "\"$XCODE_DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang++\" -DFJXL_ENABLE_AVX512=0 -DJXL_INTERNAL_LIBRARY_BUILD -D__DATE__=\\\"redacted\\\" -D__TIMESTAMP__=\\\"redacted\\\" -D__TIME__=\\\"redacted\\\" -I$LIBJXL -I$LIBJXL/third_party/highway -I$LIBJXL/third_party/brotli/c/include -I$BUILD/libjxl/lib/include  -fno-rtti -O3 -DNDEBUG -std=c++17 -arch arm64 -isysroot \"$XCODE_DEVELOPER_DIR/Platforms/MacOSX.platform/Developer/SDKs/MacOSX.sdk\" -fPIC -fvisibility=hidden -fvisibility-inlines-hidden \"-DHWY_DISABLED_TARGETS=(HWY_AVX3|HWY_AVX3_SPR|HWY_AVX3_ZEN4|HWY_NEON_BF16|HWY_RVV|HWY_SSSE3|HWY_SVE_256)\" -fmacro-prefix-map=$LIBJXL=. -funwind-tables -Xclang -mrelax-all -fno-omit-frame-pointer -Wno-builtin-macro-redefined -Wall -fmerge-all-constants -fno-builtin-fwrite -fno-builtin-fread -Wextra -Wc++11-compat -Warray-bounds -Wformat-security -Wimplicit-fallthrough -Wno-register -Wno-unused-function -Wno-unused-parameter -Wnon-virtual-dtor -Woverloaded-virtual -Wvla -Wframe-larger-than=5632 -Wdeprecated-increment-bool -Wfloat-overflow-conversion -Wfloat-zero-conversion -Wfor-loop-analysis -Wgnu-redeclared-enum -Winfinite-recursion -Wliteral-conversion -Wno-c++98-compat -Wno-unused-command-line-argument -Wprivate-header -Wself-assign -Wshadow -Wstring-conversion -Wtautological-overlap-compare -Wthread-safety-analysis -Wundefined-func-template -Wunreachable-code -Wunused-comparison -fsized-deallocation -fno-exceptions -fmath-errno -fnew-alignment=8 -fno-cxx-exceptions -fno-slp-vectorize -fno-vectorize -disable-free -disable-llvm-verifier -DJPEGXL_ENABLE_SKCMS=1 -DJPEGXL_ENABLE_TRANSCODE_JPEG=1 -DJPEGXL_ENABLE_BOXES=1 -o CMakeFiles/jxl_enc-obj.dir/jxl/enc_heuristics.cc.o -c $LIBJXL/lib/jxl/enc_heuristics.cc",
+    "file": "$LIBJXL/lib/jxl/enc_heuristics.cc",
+    "output": "libjxl/lib/CMakeFiles/jxl_enc-obj.dir/jxl/enc_heuristics.cc.o"
+  }
+]

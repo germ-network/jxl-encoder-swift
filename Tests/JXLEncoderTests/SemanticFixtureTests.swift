@@ -33,8 +33,6 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 			name: "edge", input: .linear(file: "edge_linear"), distance: 1,
 			knownIssues: [
 				"ac_entropy_alphabet": ["GER-3386"],
-				"block_context": ["GER-3387"],
-				"context_map": ["GER-3387"],
 				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
@@ -43,7 +41,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387"],
-				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"context_map": ["GER-3387"],
 				"frame_flags": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
@@ -53,7 +51,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387"],
-				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"context_map": ["GER-3387"],
 				"image_sample_format": ["GER-3387"],
 				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
@@ -62,7 +60,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 			knownIssues: [
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387"],
-				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
+				"context_map": ["GER-3387"],
 				"image_sample_format": ["GER-3387"],
 				"frame_flags": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
@@ -73,7 +71,6 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387", "GER-3419"],
-				"block_context": ["GER-3387"],
 				"context_map": ["GER-3387", "GER-3419"],
 				"image_sample_format": ["GER-3387"],
 				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],

@@ -125,6 +125,8 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `JT` | JPEGTranscode.swift |
 | `PB` | PlaneBuffer.swift |
 | `PC` | PrefixCodeWriter.swift |
+| `PM` | PixelBlockEntropyModel.swift |
+| `PX` | PixelBlockEntropyConsumers.swift |
 | `QM` | QuantMatrices.swift |
 | `QR` | QuantizeRoundtrip.swift |
 | `QW` | QuantMatrixWriter.swift |
