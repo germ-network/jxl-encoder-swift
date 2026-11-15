@@ -110,7 +110,7 @@ public enum JPEGBlockContextMap {
 			}
 		}
 
-		let qt = transcode.quantTable(channel: luma)
+		let qt = transcode.quantTable(channel: 0)
 		let qtSum = Int(qt[1]) + Int(qt[2]) + Int(qt[3]) + Int(qt[4]) + Int(qt[5])
 		let thresholds = computeThresholds(counts: counts, total: total, qtSum: qtSum)
 

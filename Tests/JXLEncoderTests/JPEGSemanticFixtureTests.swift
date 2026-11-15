@@ -89,14 +89,22 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 		Set(
 			all.map {
 				"Tests/JXLEncoderTests/Fixtures/semantic/\($0.entry.name).sem#\($0.category)"
-			})
+			}
+		)
+		.union([
+			"Tests/JXLEncoderTests/Fixtures/semantic/distinct_quant_tables.sem#block_context"
+		])
 	}
 	static let contextWitnessCategory = "jpeg_context"
 	static var contextWitnessReferences: Set<String> {
 		Set(
 			["420", "422", "440"].map {
 				"Tests/JXLEncoderTests/Fixtures/semantic/jpeg_flower_513x267_\($0)_context.sem#\(contextWitnessCategory)"
-			})
+			}
+		)
+		.union([
+			"Tests/JXLEncoderTests/Fixtures/semantic/distinct_quant_tables_context.sem#jpeg_context"
+		])
 	}
 	static func contextWitnessContains(_ category: String, fixture: String) -> Bool {
 		guard category == contextWitnessCategory,
@@ -498,7 +506,7 @@ struct JPEGSemanticFixtureTests {
 		"known JPEG issues name applicable categories and cannot verify inventory rows",
 	)
 	func jpegKnownIssuesWellFormed() throws {
-		#expect(JPEGSemanticCase.references.count == 156)
+		#expect(JPEGSemanticCase.references.count == 157)
 		#expect(
 			Set(JPEGSemanticCorpusEntry.categories)
 				== SemanticDump.decoderObservableCategories)
@@ -554,6 +562,65 @@ struct JPEGSemanticFixtureTests {
 							fullHeightInBlocks: dim.heightInBlocks))
 			}
 		}
+	}
+
+	@Test(
+		"Distinct JPEG quantization tables match upstream block contexts")
+	func distinctQuantizationTablesMatchUpstreamBlockContexts() throws {
+		let transcode = try JPEGTranscode(
+			JPEGParser.parse(JPEGSemanticCorpusEntry.jpegBytes("distinct_quant_tables"))
+		)
+		let reference = try SemanticDump(fixture: "distinct_quant_tables")
+		let witness = try SemanticDump(fixture: "distinct_quant_tables_context")
+		let actual = JPEGBlockContextMap.compute(transcode)
+		let firstSum = transcode.quantTable(channel: 0)[1...5]
+			.reduce(0) { $0 + Int($1) }
+		let lumaSum = transcode.quantTable(channel: 1)[1...5]
+			.reduce(0) { $0 + Int($1) }
+		let crSum = transcode.quantTable(channel: 2)[1...5]
+			.reduce(0) { $0 + Int($1) }
+		#expect(firstSum == 5)
+		#expect(lumaSum == 600)
+		#expect(crSum == 800)
+		#expect(firstSum != lumaSum && firstSum != crSum)
+		let firstThresholds = JPEGBlockContextMap.computeThresholds(
+			counts: dcHistogram(transcode), total: lumaBlockCount(transcode),
+			qtSum: firstSum)
+		let lumaThresholds = JPEGBlockContextMap.computeThresholds(
+			counts: dcHistogram(transcode), total: lumaBlockCount(transcode),
+			qtSum: lumaSum)
+		#expect(firstThresholds.count != lumaThresholds.count)
+		#expect(actual.thresholds == firstThresholds)
+		#expect(
+			reference.fields["block_context.dc_thresholds.c1"]
+				== .integers(firstThresholds.map(Int64.init)))
+		#expect(
+			reference.fields["block_context.ctx_map"]
+				== .integers(actual.contextMap.map(Int64.init)))
+		#expect(
+			reference.fields["block_context.num_ctxs"]
+				== .integers([Int64(actual.numContexts)]))
+		#expect(
+			try SwiftJPEGSemanticEncoding.contextWitness(
+				transcode, reference: reference)
+				== witness)
+	}
+
+	private func dcHistogram(_ transcode: JPEGTranscode) -> [Int] {
+		var counts = [Int](repeating: 0, count: 2048)
+		for y in 0..<transcode.blocksPerColumn(channel: 1) {
+			for x in 0..<transcode.blocksPerLine(channel: 1) {
+				let dc = UInt32(
+					truncatingIfNeeded: Int(
+						transcode.dc(channel: 1, x: x, y: y)) + 1024)
+				counts[Int(min(dc, 2047))] += 1
+			}
+		}
+		return counts
+	}
+
+	private func lumaBlockCount(_ transcode: JPEGTranscode) -> Int {
+		transcode.blocksPerLine(channel: 1) * transcode.blocksPerColumn(channel: 1)
 	}
 
 	@Test(
