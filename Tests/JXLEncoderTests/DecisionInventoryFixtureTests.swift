@@ -127,7 +127,7 @@ struct DecisionInventoryFixtureTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting active HC cost and distance comparisons."))
+	@Test
 	func histogramCostReferencesHaveTypedProofs() throws {
 		let inventory = try DecisionInventoryTests.committed()
 		for row in inventory.rows where row.id == "HC-01" || row.id == "HC-02" {
@@ -143,7 +143,7 @@ struct DecisionInventoryFixtureTests {
 		}
 	}
 
-	@Test("HC proof descriptors bind real cluster fields without settling disabled consumers")
+	@Test("HC proof descriptors bind active cluster diagnostics")
 	func histogramProofDescriptorsBindNativeFields() throws {
 		for proof in HistogramCostProofCase.all {
 			let fixture = try EntropyReferenceFixture.load(proof.fixture)
@@ -156,7 +156,7 @@ struct DecisionInventoryFixtureTests {
 				Issue.record("invalid cluster proof reference: \(proof.reference)")
 				continue
 			}
-			#expect(Self.committedStatus(reference) == .notCompared)
+			#expect(Self.committedStatus(reference) == .verifies)
 		}
 	}
 

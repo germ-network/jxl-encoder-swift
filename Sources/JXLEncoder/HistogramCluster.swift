@@ -35,22 +35,21 @@ struct Histogram {
 		totalCount += other.totalCount
 	}
 
-	/// Shannon entropy, accumulated in the same four-lane order as libjxl.
+	/// Shannon entropy, accumulated left to right in Swift `Float`.
 	mutating func computeBitCost() {
 		bitCost = 0
 		guard totalCount != 0 else { return }
 		let total = Float(totalCount)
 		let inverseTotal = 1.0 / total
-		var lanes = [Float](repeating: 0, count: 4)
+		var cost: Float = 0
 		for i in counts.indices {
 			let count = counts[i]
 			precondition(count <= UInt32(Int32.max))
 			let value = Float(count)
 			if count == 0 || value == total { continue }
-			let term = -(value * FastMath.log2(inverseTotal * value))
-			lanes[i & 3] += term
+			cost += -(value * FastMath.log2(inverseTotal * value))
 		}
-		bitCost = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
+		bitCost = cost
 	}
 }
 
