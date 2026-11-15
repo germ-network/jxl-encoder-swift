@@ -401,6 +401,32 @@ struct EntropyReferenceFixture {
 				try integers(expected, "entropy.context_entropy.use_prefix_code")
 					== [1]
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "context_entropy_skewed_histograms" {
+			inputFields = ["input.context_entropy.majority_count"]
+			expectedFields = [
+				"entropy.context_entropy.token_count",
+				"entropy.context_entropy.rle_enabled",
+				"entropy.context_entropy.skew_entropy_above_threshold",
+				"entropy.context_entropy.singleton_entropy_above_threshold",
+				"entropy.context_entropy.use_prefix_code",
+			]
+			let majority = try integers(input, "input.context_entropy.majority_count")
+			guard majority == [3_000_000],
+				try integers(expected, "entropy.context_entropy.token_count")
+					== [6_000_001],
+				try integers(expected, "entropy.context_entropy.rle_enabled")
+					== [0],
+				try integers(
+					expected,
+					"entropy.context_entropy.skew_entropy_above_threshold")
+					== [1],
+				try integers(
+					expected,
+					"entropy.context_entropy.singleton_entropy_above_threshold")
+					== [0],
+				try integers(expected, "entropy.context_entropy.use_prefix_code")
+					== [0]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("context_entropy_") {
 			inputFields = ["input.context_entropy.entries"]
 			expectedFields = [

@@ -304,6 +304,24 @@ generate_context_entropy_singleton_contexts() {
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
+generate_context_entropy_skewed_histograms() {
+	local name="$1" majority_count="$2"
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.context_entropy.majority_count i 1 %s\n' "$majority_count"
+	} > "$input"
+	"$harness" context-entropy-skewed-histograms "$majority_count" \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tcompact skewed two-context witness\t-\tmajority_count=%s; alternating contexts prevents repeated adjacent symbols\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$input_hash" "$majority_count" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_context_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tBuildAndEncodeHistograms default RLE, skewed pre-cluster entropy and actual coder choice; hwy=NEON\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
 generate_context_entropy_rle_pattern() {
 	local name="$1" groups="$2" run_length="$3" filler_count="$4" tail_length="$5"
 	local input="$out/$name.input.sem"
@@ -668,6 +686,7 @@ generate_context_map context_ans_100 16 "${context_100[@]}"
 generate_context_entropy context_entropy_prefix_99 "${context_99[@]}"
 generate_context_entropy context_entropy_ans_100 "${context_100[@]}"
 generate_context_entropy_singleton_contexts context_entropy_singleton_contexts 102
+generate_context_entropy_skewed_histograms context_entropy_skewed_histograms 3000000
 context_rle_two_survivors=()
 for ((run = 0; run < 30; run++)); do
 	for ((repeat = 0; repeat < 20; repeat++)); do

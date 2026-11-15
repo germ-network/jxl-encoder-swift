@@ -192,6 +192,49 @@ int RunContextEntropySingletonContexts(const std::vector<std::string>& args) {
   return 0;
 }
 
+int RunContextEntropySkewedHistograms(const std::vector<std::string>& args) {
+  if (args.size() != 1) return 2;
+  uint32_t majority_count = 0;
+  if (!ParseValue(args[0], &majority_count) || majority_count < 100'000 ||
+      majority_count > 5'000'000) return 2;
+  std::vector<std::vector<jxl::Token>> tokens(1);
+  tokens[0].reserve(static_cast<size_t>(majority_count) * 2 + 1);
+  jxl::Histogram majority_histogram;
+  jxl::Histogram singleton_histogram;
+  for (uint32_t i = 0; i < majority_count; ++i) {
+    tokens[0].emplace_back(0, 0);
+    tokens[0].emplace_back(1, 2);
+    majority_histogram.Add(0);
+    singleton_histogram.Add(2);
+  }
+  tokens[0].emplace_back(0, 1);
+  majority_histogram.Add(1);
+
+  JxlMemoryManager manager;
+  if (!jxl::MemoryManagerInit(&manager, nullptr)) return 1;
+  jxl::HistogramParams params;
+  params.uint_method = jxl::HistogramParams::HybridUintMethod::kContextMap;
+  jxl::EntropyEncodingData codes;
+  auto result = jxl::BuildAndEncodeHistograms(
+      &manager, params, 2, tokens, &codes, nullptr,
+      jxl::LayerType::Header, nullptr);
+  if (!result.ok()) return 1;
+
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.context_entropy.token_count",
+                {static_cast<int64_t>(tokens[0].size())});
+  dump.Integers("entropy.context_entropy.rle_enabled",
+                {codes.lz77.enabled ? 1 : 0});
+  dump.Integers("entropy.context_entropy.skew_entropy_above_threshold",
+                {majority_histogram.ShannonEntropy() >= 1e-5 ? 1 : 0});
+  dump.Integers("entropy.context_entropy.singleton_entropy_above_threshold",
+                {singleton_histogram.ShannonEntropy() >= 1e-5 ? 1 : 0});
+  dump.Integers("entropy.context_entropy.use_prefix_code",
+                {codes.use_prefix_code ? 1 : 0});
+  dump.Write(stdout);
+  return 0;
+}
+
 int RunContextEntropyRLEPattern(const std::vector<std::string>& args) {
   if (args.size() != 4) return 2;
   uint32_t groups = 0, run_length = 0, filler_count = 0, tail_length = 0;
@@ -245,6 +288,9 @@ const RegisterSubcommand kRegister(
 const RegisterSubcommand kSingletonContextsRegister(
     {"context-entropy-singleton-contexts", "<majority_count>",
      RunContextEntropySingletonContexts});
+const RegisterSubcommand kSkewedHistogramsRegister(
+    {"context-entropy-skewed-histograms", "<majority_count>",
+     RunContextEntropySkewedHistograms});
 const RegisterSubcommand kRLEPatternRegister(
     {"context-entropy-rle-pattern", "<groups> <run_length> <filler_count> <tail_length>",
      RunContextEntropyRLEPattern});

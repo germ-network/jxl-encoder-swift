@@ -48,6 +48,9 @@ struct ContextMapProofCase: Sendable {
 			fixture: "context_entropy_singleton_contexts",
 			decisions: ["EW-03"], category: "context_entropy"),
 		.init(
+			fixture: "context_entropy_skewed_histograms",
+			decisions: ["EW-03"], category: "context_entropy"),
+		.init(
 			fixture: "context_entropy_rle_cumulative_rounding",
 			decisions: ["EW-07"], category: "context_entropy"),
 		.init(
@@ -605,6 +608,35 @@ struct ContextMapTranslationTests {
 		#expect(
 			ContextMapEntropy.shouldUsePrefixCode(
 				tokenCount: 103, histograms: [majority, minority]) == expected)
+
+		let skewed = try EntropyReferenceFixture.load(
+			"context_entropy_skewed_histograms")
+		let skewedExpected = skewed.expected
+		let tokenCount = Int(
+			try skewed.integers(
+				skewedExpected, "entropy.context_entropy.token_count")[0])
+		let nativeRLE = try skewed.integers(
+			skewedExpected, "entropy.context_entropy.rle_enabled")[0]
+		let nativePrefix =
+			try skewed.integers(
+				skewedExpected, "entropy.context_entropy.use_prefix_code")[0] == 1
+		var skewedHistogram = Histogram()
+		for _ in 0..<3_000_000 { skewedHistogram.add(0) }
+		skewedHistogram.add(1)
+		skewedHistogram.computeBitCost()
+		var singletonHistogram = Histogram()
+		for _ in 0..<3_000_000 { singletonHistogram.add(2) }
+		singletonHistogram.computeBitCost()
+		#expect(tokenCount == 6_000_001)
+		#expect(nativeRLE == 0)
+		#expect(!nativePrefix)
+		#expect(skewedHistogram.bitCost > 1e-5)
+		#expect(
+			skewedHistogram.bitCost / Float(skewedHistogram.totalCount) < 1e-5)
+		#expect(
+			ContextMapEntropy.shouldUsePrefixCode(
+				tokenCount: tokenCount,
+				histograms: [skewedHistogram, singletonHistogram]) == nativePrefix)
 	}
 
 	@Test
