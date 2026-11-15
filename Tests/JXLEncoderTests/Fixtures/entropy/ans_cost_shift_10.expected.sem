@@ -1,0 +1,8 @@
+jxl-semantic-dump 1
+entropy.ans_cost.bytes i 19 124 183 86 56 219 178 107 123 37 64 8 150 226 180 243 108 172 31 88
+entropy.ans_cost.header_bits i 1 151
+entropy.ans_cost.normalized i 14 222 146 64 633 17 386 421 312 109 499 364 172 319 432
+entropy.ans_cost.serialized_method i 1 2
+entropy.ans_cost.serialized_shift i 1 10
+entropy.ans_cost.source_data_bits f 1 6.11400806e+09
+entropy.ans_cost.total_cost f 1 6.11400806e+09

@@ -7,20 +7,8 @@
 //  writer. libjxl-tiny has no ANS at all (prefix codes only); no tiny
 //  counterpart. See docs/gap-closure-plan.md, Phase B.
 //
-//  Deliberately narrower than the reference in two ways, both justified by
-//  the plan's own non-goals (byte-exactness against cjxl is explicitly not a
-//  gate — decode-exactness and size corridors are):
-//
-//  - Histogram *normalization* uses a standard largest-remainder rounding to
-//    a fixed exact-precision distribution, not `RebalanceHistogram`'s greedy
-//    bin-by-bin size search over a precomputed 12x4096 allowed-counts table.
-//    That search chooses *how many bits to drop* per count to shrink the
-//    header; skipping it means always transmitting full precision (real
-//    libjxl's own `shift = ANS_LOG_TAB_SIZE` case, not an invented one) —
-//    larger headers, same wire *shape*, same decodability.
-//  - `ANSCoder` uses plain integer division, not `enc_ans.h`'s
-//    mult-by-reciprocal trick — that trick exists purely to avoid a division
-//    instruction and is bit-exact-equivalent to the division it replaces.
+//  `ANSCoder` uses plain integer division for alias table construction. This
+//  is bit-exact-equivalent to the reference's multiply-by-reciprocal form.
 //
 //  The alias table construction and the rANS state recursion themselves are
 //  zero-tolerance: unlike the above, they are never transmitted, so encoder

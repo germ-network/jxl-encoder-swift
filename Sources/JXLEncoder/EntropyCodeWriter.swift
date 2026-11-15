@@ -62,16 +62,17 @@ enum EntropyCodeWriter {
 		if allowANS && entries.count >= SectionOptimizer.ansMinimumTokens {
 			let histogram = HistogramCluster.buildHistograms(
 				tokens: tokens, contextMap: [0], contextCount: 1)[0]
-			let counts = ANSHistogramNormalizer.normalize(histogram.counts)
-			let alphabetSize = ANSHistogramWriter.alphabetSize(for: counts)
+			let selected = ANSEncodingHistogram.computeBest(
+				counts: histogram.counts, strategy: .precise)
 			let infoTable = ANSInfoTable.build(
-				distribution: counts, alphabetSize: alphabetSize,
+				distribution: selected.normalizedCounts,
+				alphabetSize: selected.alphabetSize,
 				logAlphaSize: ANSConstants.logAlphaSize)
 			writer.write(1, 0)  // use_prefix_code = false
 			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
 			PrefixCodeWriter.writeUintConfigs(
 				count: 1, logAlphaSize: ANSConstants.logAlphaSize, writer: &writer)
-			ANSHistogramWriter.write(counts: counts, writer: &writer)
+			selected.write(to: &writer)
 			ANSTokenWriter.write(
 				tokens: tokens, contextMap: [0], infoTables: [infoTable],
 				writer: &writer)
@@ -91,7 +92,16 @@ enum EntropyCodeWriter {
 		_ code: EntropyCode, allowContextMapANS: Bool = false, writer: inout BitWriter
 	) {
 		writeContextMap(code, allowANS: allowContextMapANS, writer: &writer)
-		if let ansInfoTables = code.ansInfoTables {
+		if let histograms = code.ansHistograms {
+			writer.write(1, 0)  // use_prefix_code = false
+			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+			PrefixCodeWriter.writeUintConfigs(
+				count: histograms.count, logAlphaSize: ANSConstants.logAlphaSize,
+				writer: &writer)
+			for histogram in histograms {
+				histogram.write(to: &writer)
+			}
+		} else if let ansInfoTables = code.ansInfoTables {
 			writer.write(1, 0)  // use_prefix_code = false
 			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
 			PrefixCodeWriter.writeUintConfigs(
