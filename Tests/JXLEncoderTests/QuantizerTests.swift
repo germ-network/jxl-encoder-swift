@@ -147,18 +147,22 @@ struct QuantizerTests {
 		let comparison = SemanticPrimitiveCase.e4Boundary
 		#expect(comparison.knownIssues.isEmpty)
 		let reference = try SemanticDump(fixture: comparison.fixture)
+		let expected = reference.restricted(to: [comparison.category])
 		func integers(_ name: String) -> [Int64]? {
-			guard case .integers(let values)? = reference.fields[name] else {
+			guard
+				case .integers(let values)? = expected.fields[
+					"\(comparison.category).\(name)"]
+			else {
 				return nil
 			}
 			return values
 		}
-		let channels = try #require(integers("e4_boundary.channel"))
-		let referenceIndexes = try #require(integers("e4_boundary.index"))
-		let targets = try #require(integers("e4_boundary.target_bits"))
-		let inputs = try #require(integers("e4_boundary.input_bits"))
-		let scaled = try #require(integers("e4_boundary.scaled_bits"))
-		let outputs = try #require(integers("e4_boundary.output"))
+		let channels = try #require(integers("channel"))
+		let referenceIndexes = try #require(integers("index"))
+		let targets = try #require(integers("target_bits"))
+		let inputs = try #require(integers("input_bits"))
+		let scaled = try #require(integers("scaled_bits"))
+		let outputs = try #require(integers("output"))
 		#expect(channels.count == 72)
 		#expect(referenceIndexes.count == 72)
 		#expect(targets.count == 72)
