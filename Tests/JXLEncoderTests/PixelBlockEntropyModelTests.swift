@@ -389,10 +389,6 @@ private struct TestBitReader {
 		return result
 	}
 
-	mutating func skip(_ count: Int) {
-		bitOffset += count
-	}
-
 	mutating func readPrefixSymbols(count: Int, code: PrefixCode) -> [Int] {
 		let maxDepth = Int(code.depths.max() ?? 0)
 		var symbols: [Int] = []
