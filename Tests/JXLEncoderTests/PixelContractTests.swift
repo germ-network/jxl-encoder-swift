@@ -131,7 +131,9 @@ struct PixelSemanticFixtureTests {
 
 		let swiftGaborish = try distances.map { distance -> Int64 in
 			let params = try DistanceParams(distance: distance)
-			return params.epfIterations == 2 ? 1 : 0
+			let filters = FrameAssembly.LoopFilter(
+				gaborish: false, epfIterations: params.epfIterations)
+			return filters.gaborish ? 1 : 0
 		}
 		let swiftXScale = try distances.map {
 			Int64(try DistanceParams(distance: $0).xQuantMatrixScale)
@@ -139,22 +141,13 @@ struct PixelSemanticFixtureTests {
 		let swiftEPF = try distances.map {
 			Int64(try DistanceParams(distance: $0).epfIterations)
 		}
-		let gaborishIssues = Set(19...27)
 		let xScaleIssues = Set(Array(7...16) + Array(23...44))
 		let epfIssues: Set<Int> = [43, 44]
 		for index in distances.indices {
 			let distance = distances[index]
-			if gaborishIssues.contains(index) {
-				withKnownIssue(Comment(rawValue: "GER-3387")) {
-					#expect(
-						swiftGaborish[index] == gaborish[index],
-						"Gaborish at \(distance)")
-				}
-			} else {
-				#expect(
-					swiftGaborish[index] == gaborish[index],
-					"Gaborish at \(distance)")
-			}
+			#expect(
+				swiftGaborish[index] == gaborish[index],
+				"Gaborish at \(distance)")
 			if xScaleIssues.contains(index) {
 				withKnownIssue(Comment(rawValue: "GER-3387")) {
 					#expect(

@@ -30,7 +30,8 @@ struct YCbCrHeaderTests {
 	static func header(_ mode: FrameAssembly.ColorMode) -> BitWriter {
 		var writer = BitWriter()
 		FrameAssembly.writeFrameHeader(
-			colorMode: mode, epfIterations: 2, writer: &writer)
+			colorMode: mode, loopFilter: .init(gaborish: false, epfIterations: 2),
+			writer: &writer)
 		return writer
 	}
 

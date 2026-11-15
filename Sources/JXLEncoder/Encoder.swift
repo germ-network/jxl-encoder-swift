@@ -357,7 +357,7 @@ public enum Encoder {
 
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
-			epfIterations: params.epfIterations,
+			loopFilter: .init(gaborish: false, epfIterations: params.epfIterations),
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)
@@ -485,7 +485,7 @@ extension Encoder {
 
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
-			epfIterations: params.epfIterations,
+			loopFilter: .init(gaborish: false, epfIterations: params.epfIterations),
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)
@@ -508,7 +508,10 @@ extension Encoder {
 		try ImageHeader.write(
 			width: transcode.width, height: transcode.height,
 			transferFunction: .sRGB, xybEncoded: false, to: &writer)
-		try encodeJPEGFrame(transcode, optimizeCodes: optimizeCodes, writer: &writer)
+		try encodeJPEGFrame(
+			transcode,
+			loopFilter: .init(gaborish: false, epfIterations: 0),
+			optimizeCodes: optimizeCodes, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
 	}
@@ -519,6 +522,7 @@ extension Encoder {
 	@discardableResult
 	static func encodeJPEGFrame(
 		_ transcode: JPEGTranscode,
+		loopFilter: FrameAssembly.LoopFilter,
 		optimizeCodes: Bool,
 		writer: inout BitWriter
 	) throws -> (dc: EntropyCode, ac: EntropyCode) {
@@ -724,7 +728,7 @@ extension Encoder {
 
 		FrameAssembly.writeFrameHeader(
 			colorMode: .ycbcr(subsampling: transcode.subsampling),
-			epfIterations: 0,
+			loopFilter: loopFilter,
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)

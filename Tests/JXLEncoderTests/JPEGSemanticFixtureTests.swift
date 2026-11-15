@@ -275,7 +275,8 @@ struct JPEGSemanticFixtureTests {
 		let changed = SwiftJPEGFrameDecisions(
 			transcode: decisions.transcode, coeffOrder: decisions.coeffOrder,
 			blockContextMap: decisions.blockContextMap, dcCode: decisions.dcCode,
-			acCode: decisions.acCode, acGroups: groups)
+			acCode: decisions.acCode, loopFilter: decisions.loopFilter,
+			acGroups: groups)
 		let changedBytes = try SwiftJPEGSemanticEncoding.recompose(changed)
 		let baselineBytes = try baseline.encoded().codestream
 		let changedCodestream = !changedBytes.elementsEqual(baselineBytes)
@@ -287,7 +288,8 @@ struct JPEGSemanticFixtureTests {
 		let invalid = SwiftJPEGFrameDecisions(
 			transcode: decisions.transcode, coeffOrder: decisions.coeffOrder,
 			blockContextMap: decisions.blockContextMap, dcCode: decisions.dcCode,
-			acCode: invalidCode, acGroups: decisions.acGroups)
+			acCode: invalidCode, loopFilter: decisions.loopFilter,
+			acGroups: decisions.acGroups)
 		let invalidDumpRejected = (try? SemanticDump(swiftJPEGDecisions: invalid)) == nil
 		#expect(invalidDumpRejected)
 	}
@@ -410,6 +412,7 @@ struct JPEGSemanticFixtureTests {
 					coeffOrder: baseline.coeffOrder,
 					blockContextMap: baseline.blockContextMap,
 					dcCode: baseline.dcCode, acCode: acCode,
+					loopFilter: baseline.loopFilter,
 					acGroups: baseline.acGroups))
 		}
 		let invalidOriginalMap = EntropyCode(

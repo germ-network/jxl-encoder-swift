@@ -10,6 +10,7 @@ struct SwiftFrameDecisions {
 	let height: Int
 	let transferFunction: TransferFunction
 	let params: DistanceParams
+	let loopFilter: FrameAssembly.LoopFilter
 	var coeffOrder: CoeffOrder.Result
 	var acCode: EntropyCode
 	/// No category reads it yet; the entropy categories will.
@@ -76,6 +77,8 @@ enum SwiftSemanticEncoding {
 		stripeAt: @Sendable (Rect) -> PaddedStripe, altering: Alterations
 	) throws -> Result {
 		let params = try DistanceParams(distance: distance)
+		let loopFilter = FrameAssembly.LoopFilter(
+			gaborish: false, epfIterations: params.epfIterations)
 		let dim = ImageDim(width: width, height: height)
 		var writer = BitWriter()
 		try ImageHeader.write(
@@ -115,14 +118,15 @@ enum SwiftSemanticEncoding {
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
-			epfIterations: params.epfIterations, writer: &writer)
+			loopFilter: loopFilter,
+			writer: &writer)
 		FrameAssembly.combineSections(sections.map { $0.finished() }, writer: &writer)
 		writer.zeroPadToByte()
 		return Result(
 			codestream: writer.take(),
 			decisions: SwiftFrameDecisions(
 				width: width, height: height, transferFunction: transfer,
-				params: params, coeffOrder: order,
+				params: params, loopFilter: loopFilter, coeffOrder: order,
 				acCode: acCode, dcCode: dcCode,
 				quantFields: computes.map(\.quantField), pixelGroups: computes))
 	}
