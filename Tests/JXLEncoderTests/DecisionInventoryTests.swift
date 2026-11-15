@@ -277,11 +277,13 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
-		"adapted rows carry their equivalence argument in notes")
-	func rejectsAdaptedWithoutEquivalenceArgument() {
-		#expect(Self.rules(["classification": "adapted"]).contains(.equivalenceArgument))
+		"adapted rows carry their boundary or specification rationale in notes")
+	func rejectsAdaptedWithoutRationale() {
+		#expect(Self.rules(["classification": "adapted"]).contains(.adaptationRationale))
 		let argued = [
-			"classification": "adapted", "notes": "division is exact for 12-bit totals",
+			"classification": "adapted",
+			"notes":
+				"Swift division retains the source integer operation; no output delta is expected.",
 		]
 		#expect(Self.check([Self.row(argued)]).isEmpty)
 	}

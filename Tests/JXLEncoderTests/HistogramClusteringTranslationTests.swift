@@ -2,8 +2,226 @@ import Testing
 
 @testable import JXLEncoder
 
+struct HistogramCostProofCase: Sendable {
+	enum Operation: String, Sendable {
+		case floatTotal
+		case reciprocal
+		case perSymbolLog2
+		case termAccumulation
+		case combinedMinusFirstMinusSecond
+		case emptyInputZero
+		case unresolved
+	}
+
+	let fixture: String
+	let nativeFields: [String]
+	let decisions: Set<String>
+	let retainedOperations: [Operation]
+
+	var reference: String {
+		"Tests/JXLEncoderTests/Fixtures/entropy/\(fixture).expected.sem#clusters"
+	}
+
+	static let roundedCost = Self(
+		fixture: "clusters_rounded_float_total_fast",
+		nativeFields: ["entropy.clusters.input_shannon_entropy"],
+		decisions: ["HC-01"],
+		retainedOperations: [.floatTotal, .reciprocal, .perSymbolLog2, .termAccumulation])
+	static let roundedDistance = Self(
+		fixture: "clusters_rounded_float_total_fast",
+		nativeFields: ["entropy.clusters.input_shannon_entropy"],
+		decisions: ["HC-02"],
+		retainedOperations: [.combinedMinusFirstMinusSecond, .emptyInputZero])
+	static let all = [
+		roundedCost, roundedDistance,
+		Self(
+			fixture: "clusters_distance_48_fast",
+			nativeFields: ["entropy.clusters.input_shannon_entropy"],
+			decisions: ["HC-02"],
+			retainedOperations: [.combinedMinusFirstMinusSecond, .emptyInputZero]),
+		Self(
+			fixture: "clusters_distance_56_fast",
+			nativeFields: ["entropy.clusters.input_shannon_entropy"],
+			decisions: ["HC-02"],
+			retainedOperations: [.combinedMinusFirstMinusSecond, .emptyInputZero]),
+		Self(
+			fixture: "clusters_distance_64_fast",
+			nativeFields: ["entropy.clusters.input_shannon_entropy"],
+			decisions: ["HC-02"],
+			retainedOperations: [.combinedMinusFirstMinusSecond, .emptyInputZero]),
+	]
+
+	static func proves(_ reference: DecisionInventory.FixtureReference, decision: String)
+		-> Bool
+	{
+		all.contains {
+			$0.reference == "\(reference.path)#\(reference.category ?? "")"
+				&& $0.decisions.contains(decision)
+		}
+	}
+
+	static func hasActiveConsumer(_ reference: String) -> Bool {
+		false
+	}
+}
+
+private struct FloatCostDiagnostic: Sendable {
+	let proof: HistogramCostProofCase
+	let nativeField: String
+	let swiftValue: Float
+	let nativeValue: Float
+	let signedDelta: Float
+	let signedULPDelta: Int64
+	let firstDivergingOperation: HistogramCostProofCase.Operation?
+}
+
 @Suite("Upstream e4 histogram clustering")
 struct HistogramClusteringTranslationTests {
+	@Test(.disabled("Awaiting independent review of the Swift-native cost contract."))
+	func shannonCostUsesAnalyticTermsAndSwiftReduction() throws {
+		let analyticCounts: [[UInt32]] = [[], [8], [4, 4], [2, 2, 2, 2]]
+		let perTermCounts: [UInt32] = [3, 0, 5, 7, 9]
+		let proof = HistogramCostProofCase.roundedCost
+		let roundedTotal = try EntropyReferenceFixture.load(
+			proof.fixture)
+		var sourceHistograms = try histograms(from: roundedTotal)
+		for index in sourceHistograms.indices {
+			sourceHistograms[index].computeBitCost()
+		}
+		var roundedCombined = sourceHistograms[0]
+		roundedCombined.add(sourceHistograms[1])
+		roundedCombined.computeBitCost()
+		#expect(roundedCombined.totalCount == 16_799_852)
+		#expect(Float(roundedCombined.totalCount) == 16_799_852)
+		#expect(Float(roundedCombined.counts[0]) == Float(roundedCombined.totalCount))
+		#expect(sourceHistograms[0].bitCost.bitPattern == 0)
+		let roundedTotalAsFloat = Float(roundedCombined.totalCount)
+		let roundedInverseTotal = 1.0 / roundedTotalAsFloat
+		let oneCountTerm = -FastMath.log2(roundedInverseTotal)
+		#expect(roundedCombined.bitCost.bitPattern == oneCountTerm.bitPattern)
+		var ascendingMaskedCost: Float = 0
+		for count in roundedCombined.counts {
+			let value = Float(count)
+			if count == 0 || value == roundedTotalAsFloat { continue }
+			ascendingMaskedCost += -(value * FastMath.log2(roundedInverseTotal * value))
+		}
+		#expect(roundedCombined.bitCost.bitPattern == ascendingMaskedCost.bitPattern)
+		var analyticCosts: [Float] = []
+		for counts in analyticCounts {
+			var histogram = Histogram()
+			for (symbol, count) in counts.enumerated() {
+				histogram.counts[symbol] = count
+				histogram.totalCount += Int(count)
+			}
+			histogram.computeBitCost()
+			analyticCosts.append(histogram.bitCost)
+		}
+		var perTerm = Histogram()
+		for (symbol, count) in perTermCounts.enumerated() {
+			perTerm.counts[symbol] = count
+			perTerm.totalCount += Int(count)
+		}
+		perTerm.computeBitCost()
+		let inverseTotal = 1.0 / Float(perTerm.totalCount)
+		var perBinTerms: [Float] = []
+		for count in perTermCounts {
+			let value = Float(count)
+			if count == 0 || value == Float(perTerm.totalCount) {
+				perBinTerms.append(0)
+				continue
+			}
+			perBinTerms.append(-(value * FastMath.log2(inverseTotal * value)))
+		}
+		var leftToRight: Float = 0
+		for term in perBinTerms { leftToRight += term }
+		let nativeValues = try floats(
+			roundedTotal.expected, "entropy.clusters.input_shannon_entropy")
+		let diagnostics = zip(sourceHistograms.indices, nativeValues).map {
+			index, nativeValue -> FloatCostDiagnostic in
+			let swiftValue = sourceHistograms[index].bitCost
+			return FloatCostDiagnostic(
+				proof: proof,
+				nativeField: "entropy.clusters.input_shannon_entropy[\(index)]",
+				swiftValue: swiftValue, nativeValue: nativeValue,
+				signedDelta: swiftValue - nativeValue,
+				signedULPDelta: Int64(swiftValue.bitPattern)
+					- Int64(nativeValue.bitPattern),
+				firstDivergingOperation: swiftValue.bitPattern
+					== nativeValue.bitPattern
+					? nil : .unresolved)
+		}
+		#expect(
+			analyticCosts == [
+				0, 0, -8 * FastMath.log2(0.5), -8 * FastMath.log2(0.25),
+			])
+		#expect(perTerm.bitCost.bitPattern == leftToRight.bitPattern)
+		#expect(diagnostics.count == nativeValues.count)
+		#expect(
+			diagnostics.allSatisfy {
+				$0.proof.nativeFields.contains(
+					"entropy.clusters.input_shannon_entropy")
+			})
+	}
+
+	@Test(.disabled("Awaiting independent review of the cost-delta diagnostics."))
+	func entropyCostDeltasAndDistanceKeepSourceCausality() throws {
+		var empty = Histogram()
+		empty.computeBitCost()
+		var nonempty = Histogram()
+		nonempty.add(1)
+		nonempty.add(3)
+		nonempty.computeBitCost()
+		#expect(HistogramCluster.distance(empty, nonempty).bitPattern == 0)
+		#expect(HistogramCluster.distance(nonempty, empty).bitPattern == 0)
+
+		let distanceProofs = HistogramCostProofCase.all.filter {
+			$0.decisions.contains("HC-02")
+		}
+		var diagnostics: [FloatCostDiagnostic] = []
+		for proof in distanceProofs {
+			let fixture = try EntropyReferenceFixture.load(proof.fixture)
+			var sourceHistograms = try histograms(from: fixture)
+			for index in sourceHistograms.indices {
+				sourceHistograms[index].computeBitCost()
+			}
+			guard sourceHistograms.count >= 2,
+				case .floats(let nativeValues)? = fixture.expected.fields[
+					"entropy.clusters.input_shannon_entropy"],
+				nativeValues.count == sourceHistograms.count
+			else { throw SemanticDumpError.unimplemented }
+			for index in sourceHistograms.indices {
+				let swiftValue = sourceHistograms[index].bitCost
+				let nativeValue = nativeValues[index]
+				diagnostics.append(
+					FloatCostDiagnostic(
+						proof: proof,
+						nativeField:
+							"entropy.clusters.input_shannon_entropy[\(index)]",
+						swiftValue: swiftValue, nativeValue: nativeValue,
+						signedDelta: swiftValue - nativeValue,
+						signedULPDelta: Int64(swiftValue.bitPattern)
+							- Int64(nativeValue.bitPattern),
+						firstDivergingOperation: swiftValue.bitPattern
+							== nativeValue.bitPattern
+							? nil : .unresolved))
+			}
+			var combined = sourceHistograms[0]
+			combined.add(sourceHistograms[1])
+			combined.computeBitCost()
+			let expectedDistance =
+				(combined.bitCost - sourceHistograms[0].bitCost)
+				- sourceHistograms[1].bitCost
+			let actualDistance = HistogramCluster.distance(
+				sourceHistograms[0], sourceHistograms[1])
+			#expect(actualDistance.bitPattern == expectedDistance.bitPattern)
+		}
+		#expect(diagnostics.count >= distanceProofs.count * 2)
+		#expect(
+			diagnostics.allSatisfy {
+				$0.proof.retainedOperations.contains(.combinedMinusFirstMinusSecond)
+			})
+	}
+
 	@Test
 	func shannonCostsMatchPinnedNEONIntermediates() throws {
 		var empty = Histogram()
@@ -213,6 +431,13 @@ private func histograms(from fixture: EntropyReferenceFixture) throws -> [Histog
 	}
 	guard offset == counts.count else { throw SemanticDumpError.unimplemented }
 	return result
+}
+
+private func floats(_ dump: SemanticDump, _ field: String) throws -> [Float] {
+	guard case .floats(let values)? = dump.fields[field] else {
+		throw SemanticDumpError.unimplemented
+	}
+	return values
 }
 
 private let shannonFields: Set<String> = [

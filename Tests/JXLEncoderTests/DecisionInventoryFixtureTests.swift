@@ -1,9 +1,8 @@
 import Foundation
 import Testing
 
-/// A `faithful` or `adapted` decision whose upstream output is pinned by a
-/// full-libjxl fixture, compared without a known issue, no longer needs
-/// GER-3392 to verify it; the inventory's `fixture` column names that fixture.
+/// A fixture proves that a bounded comparison is consumed. It supports only the
+/// named finite witness and does not define general source correspondence.
 @Suite("Decision inventory fixture references")
 struct DecisionInventoryFixtureTests {
 	static let path = "Tests/JXLEncoderTests/Fixtures/semantic/example.sem#frame"
@@ -71,6 +70,10 @@ struct DecisionInventoryFixtureTests {
 				} ? .verifies : .notCompared
 				} ? .verifies : .notCompared
 			}
+			if category == "clusters" {
+				return HistogramCostProofCase.hasActiveConsumer(key)
+					? .verifies : .notCompared
+			}
 			if category == "ans_cost" || category == "histogram" {
 				return ANSHistogramProofCase.all.contains {
 					$0.reference == key
@@ -108,14 +111,52 @@ struct DecisionInventoryFixtureTests {
 		#expect(DecisionInventory.columns.count == 14)
 	}
 
-	@Test("a cited faithful or adapted row with a verifying fixture needs no GER-3392")
-	func fixtureSettlesUnprovenClaim() {
+	@Test("a cited source and consumed fixture cover a bounded witness")
+	func citedFixtureCoversBoundedWitness() {
 		for classification in ["faithful", "adapted"] {
+			let notes =
+				classification == "adapted"
+				? "Swift Float order retains source terms; low-order output deltas expected"
+				: "Source algorithm/config cited; bounded witness only"
 			#expect(
 				Self.check([
 					"classification": classification, "verification": "cited",
-					"notes": "equivalent", "fixture": Self.path,
+					"notes": notes,
+					"fixture": Self.path,
 				]).isEmpty)
+		}
+	}
+
+	@Test(.disabled("Awaiting active HC cost and distance comparisons."))
+	func histogramCostReferencesHaveTypedProofs() throws {
+		let inventory = try DecisionInventoryTests.committed()
+		for row in inventory.rows where row.id == "HC-01" || row.id == "HC-02" {
+			for text in row.fixture.split(separator: ",").map(String.init) {
+				guard let reference = DecisionInventory.FixtureReference(text)
+				else {
+					Issue.record(
+						"malformed histogram cost proof reference: \(text)")
+					continue
+				}
+				#expect(HistogramCostProofCase.proves(reference, decision: row.id))
+			}
+		}
+	}
+
+	@Test("HC proof descriptors bind real cluster fields without settling disabled consumers")
+	func histogramProofDescriptorsBindNativeFields() throws {
+		for proof in HistogramCostProofCase.all {
+			let fixture = try EntropyReferenceFixture.load(proof.fixture)
+			#expect(proof.reference.hasSuffix("#clusters"))
+			#expect(
+				proof.nativeFields.allSatisfy { fixture.expected.fields[$0] != nil }
+			)
+			guard let reference = DecisionInventory.FixtureReference(proof.reference)
+			else {
+				Issue.record("invalid cluster proof reference: \(proof.reference)")
+				continue
+			}
+			#expect(Self.committedStatus(reference) == .notCompared)
 		}
 	}
 

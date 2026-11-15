@@ -56,7 +56,7 @@ struct EntropyReferenceFixture {
 			return values
 		}
 		var inputFields: Set<String>
-		let expectedFields: Set<String>
+		var expectedFields: Set<String>
 		if name == "tree_entropy_cheetah" {
 			inputFields = [
 				"input.tree_entropy.speed_tier", "input.tree_entropy.decoding_tier",
@@ -448,6 +448,9 @@ struct EntropyReferenceFixture {
 				"entropy.context_entropy.bit_count",
 				"entropy.context_entropy.bytes",
 			]
+			if name == "context_entropy_prefix_99_fixed_wire" {
+				expectedFields.insert("entropy.context_entropy.table_bits")
+			}
 			let entries = try integers(input, "input.context_entropy.entries")
 			let outputEntries = try integers(
 				expected, "entropy.context_entropy.entries")
@@ -471,6 +474,9 @@ struct EntropyReferenceFixture {
 			let histogramCounts = try integers(
 				expected, "entropy.context_entropy.histogram_counts")
 			let tables = try integers(expected, "entropy.context_entropy.tables")
+			let tableBits =
+				name == "context_entropy_prefix_99_fixed_wire"
+				? try integers(expected, "entropy.context_entropy.table_bits") : []
 			let usePrefix = try integers(
 				expected, "entropy.context_entropy.use_prefix_code")
 			let logAlpha = try integers(
@@ -499,6 +505,16 @@ struct EntropyReferenceFixture {
 				checkedSum(histogramCounts, limit: Int64(UInt32.max))
 					== Int64(tokens.count / 3),
 				tables.count == histogramCounts.count * 2,
+				name != "context_entropy_prefix_99_fixed_wire"
+					|| (tableBits.count == histogramCounts.count
+						&& stride(from: 0, to: tables.count, by: 2)
+							.allSatisfy { index in
+								let depth = tables[index]
+								let bits = tableBits[index / 2]
+								return depth == 0
+									? bits == 0
+									: bits < (1 << depth)
+							}),
 				usePrefix.count == 1, (0...1).contains(usePrefix[0]),
 				logAlpha.count == 1, (7...15).contains(logAlpha[0]),
 				cost.count == 1, cost[0] >= 0, bitCount.count == 1,
