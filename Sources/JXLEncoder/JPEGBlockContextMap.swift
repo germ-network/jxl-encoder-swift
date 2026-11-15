@@ -33,11 +33,13 @@ public enum JPEGBlockContextMap {
 	}
 
 	public struct Result: Sendable {
-		/// Ascending luma DC-value thresholds; 1 to 7 of them.
+		/// Ascending luma DC thresholds; empty for pixel models, 1 to 7 for JPEG.
 		let thresholds: [Int]
+		/// Ascending raw-quant thresholds; empty for JPEG models.
+		var qfThresholds: [UInt32] = []
 		var numDCContexts: Int { thresholds.count + 1 }
-		/// Size `3 * numOrders * numDCContexts`, order-0 slots populated,
-		/// the rest left at zero — dead weight the decoder still expects.
+		/// Size `3 * numOrders * (qfThresholds.count + 1) * numDCContexts`.
+		/// Pixel models retain all source order slots, including unused orders.
 		let contextMap: [UInt8]
 		let numContexts: Int
 
