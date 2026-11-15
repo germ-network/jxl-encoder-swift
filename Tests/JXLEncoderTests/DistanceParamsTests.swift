@@ -201,7 +201,7 @@ struct DistanceParamsTests {
 			let dcMul: Float = 0.3
 			let dcQuantPow: Float = 0.83
 			let dcQuant: Float = 1.095_924_047_623_553
-			var effective = dcMul * Float.pow(distance / dcMul, dcQuantPow)
+			var effective = dcMul * Float.pow((1 / dcMul) * distance, dcQuantPow)
 			effective = clamp1(effective, 0.5 * distance, distance)
 			let expected = min(dcQuant / effective, 50)
 			#expect(
@@ -238,24 +238,244 @@ struct DistanceParamsTests {
 		}
 	}
 
-	@Test(
-		"QuantDC preserves its effective-distance clamps and cap",
-		.disabled("Pending clamp boundary coverage"))
-	func quantDCClampsAtNativeBoundaries() {}
+	@Test("QuantDC preserves its effective-distance clamps and cap")
+	func quantDCClampsAtNativeBoundaries() {
+		let upperBoundary = Self.adjacentUpperClampWitness(
+			center: Float(0.3).bitPattern, searchRadius: 4096)
+		guard let upperBoundary else {
+			Issue.record("native upper-clamp transition not found in bounded search")
+			return
+		}
+		#expect(
+			Self.rawEffectiveDistance(
+				Float(bitPattern: upperBoundary.predecessor),
+				sourceOperandOrder: true)
+				> Float(bitPattern: upperBoundary.predecessor))
+		#expect(
+			Self.rawEffectiveDistance(
+				Float(bitPattern: upperBoundary.successor), sourceOperandOrder: true
+			)
+				<= Float(bitPattern: upperBoundary.successor))
+		for bits in [
+			upperBoundary.predecessor - 1, upperBoundary.predecessor,
+			upperBoundary.successor,
+		] {
+			let distance = Float(bitPattern: bits)
+			let raw = Self.rawEffectiveDistance(distance, sourceOperandOrder: true)
+			let effective = min(max(raw, 0.5 * distance), distance)
+			#expect(
+				DistanceParams.quantDC(distance: distance).bitPattern
+					== Self.expectedQuantDC(distance, sourceOperandOrder: true)
+					.bitPattern)
+			#expect(effective <= distance)
+		}
+		#expect(
+			Self.rawEffectiveDistance(0.1, sourceOperandOrder: true) > 0.1)
+		#expect(
+			Self.rawEffectiveDistance(1, sourceOperandOrder: true) < 1
+				&& Self.rawEffectiveDistance(1, sourceOperandOrder: true) > 0.5)
 
-	@Test(
-		"QuantDC preserves source reciprocal-times-distance order",
-		.disabled("Pending arithmetic witness coverage"))
-	func quantDCUsesSourceOperandOrder() {}
+		let lowerBoundary = Self.adjacentClampWitness(
+			center: Float(17.69644).bitPattern, searchRadius: 4096)
+		guard let lowerBoundary else {
+			Issue.record("native lower-clamp transition not found in bounded search")
+			return
+		}
+		#expect(
+			!(Self.rawEffectiveDistance(
+				Float(bitPattern: lowerBoundary.predecessor),
+				sourceOperandOrder: true)
+				< 0.5 * Float(bitPattern: lowerBoundary.predecessor)))
+		#expect(
+			Self.rawEffectiveDistance(
+				Float(bitPattern: lowerBoundary.successor), sourceOperandOrder: true
+			)
+				< 0.5 * Float(bitPattern: lowerBoundary.successor))
+		for bits in [
+			lowerBoundary.predecessor - 1, lowerBoundary.predecessor,
+			lowerBoundary.successor,
+		] {
+			let distance = Float(bitPattern: bits)
+			#expect(
+				DistanceParams.quantDC(distance: distance).bitPattern
+					== Self.expectedQuantDC(distance, sourceOperandOrder: true)
+					.bitPattern)
+		}
 
-	@Test(
-		"Native DC quantization reaches frame parameters",
-		.disabled("Pending parameter propagation coverage"))
-	func nativeDCQuantFlowsThroughDistanceParams() {}
+		let capBoundary = Self.adjacentCapWitness(
+			center: Float(0.02191848).bitPattern, searchRadius: 8192)
+		guard let capBoundary else {
+			Issue.record("native cap transition not found in bounded search")
+			return
+		}
+		#expect(
+			Self.uncappedQuantDC(
+				Float(bitPattern: capBoundary.predecessor), sourceOperandOrder: true
+			) > 50)
+		#expect(
+			Self.uncappedQuantDC(
+				Float(bitPattern: capBoundary.successor), sourceOperandOrder: true)
+				<= 50)
+		for bits in [
+			capBoundary.predecessor - 1, capBoundary.predecessor, capBoundary.successor,
+		] {
+			let distance = Float(bitPattern: bits)
+			let uncapped = Self.uncappedQuantDC(distance, sourceOperandOrder: true)
+			#expect(DistanceParams.quantDC(distance: distance) == min(uncapped, 50))
+		}
+		#expect(DistanceParams.quantDC(distance: 0.001) == 50)
+		let admitted = try? DistanceParams(distance: 0.03)
+		#expect(admitted?.distance == 0.03)
+		#expect(DistanceParams.quantDC(distance: 0.03) < 50)
+	}
 
-	@Test(
-		"Native DC scale reaches production coefficient quantization",
-		.disabled("Pending production propagation coverage"))
-	func nativeDCScaleFlowsThroughProductionQuantization() {}
+	@Test("QuantDC preserves source reciprocal-times-distance order")
+	func quantDCUsesSourceOperandOrder() {
+		// libjxl a7a9c787341cf703dede03c2009fa460cae5e5df uses
+		// pow((1 / kDcMul) * distance, kDcQuantPow) at InitialQuantDC:1250-1261.
+		// The division-based results stay diagnostic; Float.pow remains native.
+		let witnesses: [UInt32] = [0x3E9A_29C7, 0x3E99_A327]
+		for bits in witnesses {
+			let distance = Float(bitPattern: bits)
+			let multiplier: Float = 0.3
+			let sourceBase = (1 / multiplier) * distance
+			let divisionBase = distance / multiplier
+			#expect(sourceBase.bitPattern != divisionBase.bitPattern)
+			let source = Self.expectedQuantDC(distance, sourceOperandOrder: true)
+			let division = Self.expectedQuantDC(distance, sourceOperandOrder: false)
+			#expect(source.bitPattern != division.bitPattern)
+			#expect(
+				DistanceParams.quantDC(distance: distance).bitPattern
+					== source.bitPattern)
+		}
+	}
+
+	@Test("Native DC quantization reaches frame parameters")
+	func nativeDCQuantFlowsThroughDistanceParams() {
+		let distance = Float(bitPattern: 0x3E99_A327)
+		let expected = Self.expectedParameters(distance, sourceOperandOrder: true)
+		let division = Self.expectedParameters(distance, sourceOperandOrder: false)
+		let actual = try! DistanceParams(distance: distance)
+		#expect(actual.globalScale == expected.globalScale)
+		#expect(actual.quantDC == expected.quantDC)
+		#expect(actual.scaleDC.bitPattern == expected.scaleDC.bitPattern)
+		#expect(division.globalScale != expected.globalScale)
+		#expect(division.scaleDC.bitPattern != expected.scaleDC.bitPattern)
+	}
+
+	@Test("Native DC scale reaches production coefficient quantization")
+	func nativeDCScaleFlowsThroughProductionQuantization() {
+		let distance = Float(bitPattern: 0x3E99_A327)
+		let expected = Self.expectedParameters(distance, sourceOperandOrder: true)
+		let stale = Self.expectedParameters(distance, sourceOperandOrder: false)
+		let params = try! DistanceParams(distance: distance)
+		let yPlane = [Float](repeating: 16, count: DCT.blockSize)
+		let stripe = PaddedStripe(
+			width: DCT.blockDim, height: DCT.blockDim,
+			planes: [
+				[Float](repeating: 0, count: DCT.blockSize), yPlane,
+				[Float](repeating: 0, count: DCT.blockSize),
+			])
+		var dc = [[Int16]](repeating: [Int16](repeating: 0, count: 1), count: 3)
+		_ = ACGroupEncoder.computeGroup(
+			xyb: stripe, widthInBlocks: 1, heightInBlocks: 1,
+			quantField: [5], scale: params.scale, scaleDC: params.scaleDC,
+			xQuantMatrixScale: 2, quantDC: &dc)
+		let coefficient = DCT.forward8x8(
+			pixels: yPlane, stride: DCT.blockDim, originX: 0, originY: 0)[0]
+		let independentlyRounded = Int16(
+			(Float(512) * expected.scaleDC * coefficient)
+				.rounded(.toNearestOrAwayFromZero))
+		let staleRounded = Int16(
+			(Float(512) * stale.scaleDC * coefficient)
+				.rounded(.toNearestOrAwayFromZero))
+		#expect(dc[1][0] == independentlyRounded)
+		#expect(independentlyRounded != staleRounded)
+	}
+
+	static func rawEffectiveDistance(_ distance: Float, sourceOperandOrder: Bool) -> Float {
+		let dcMul: Float = 0.3
+		let base =
+			sourceOperandOrder
+			? (1 / dcMul) * distance
+			: distance / dcMul
+		return dcMul * Float.pow(base, 0.83)
+	}
+
+	static func uncappedQuantDC(_ distance: Float, sourceOperandOrder: Bool) -> Float {
+		let effective = clamp1(
+			rawEffectiveDistance(distance, sourceOperandOrder: sourceOperandOrder),
+			0.5 * distance, distance)
+		return 1.095_924_047_623_553 / effective
+	}
+
+	static func expectedQuantDC(_ distance: Float, sourceOperandOrder: Bool) -> Float {
+		min(uncappedQuantDC(distance, sourceOperandOrder: sourceOperandOrder), 50)
+	}
+
+	static func expectedParameters(
+		_ distance: Float, sourceOperandOrder: Bool
+	) -> (globalScale: Int, quantDC: Int, scaleDC: Float, scale: Float) {
+		let qdc = expectedQuantDC(distance, sourceOperandOrder: sourceOperandOrder)
+		var nominalScale = Float(1 << 16) * 0.79 / (distance * 5)
+		nominalScale = clamp1(nominalScale, 1, Float(1 << 15))
+		let scaledQuantDC = Int(Double(qdc * 4096) * 1.6)
+		let globalScale = clamp1(Int(nominalScale), 1, scaledQuantDC)
+		let scale = Float(globalScale) * (1 / Float(1 << 16))
+		let quantDC = clamp1(Int(qdc / scale + 0.5), 1, 1 << 16)
+		return (globalScale, quantDC, Float(quantDC) * scale, scale)
+	}
+
+	static func adjacentClampWitness(
+		center: UInt32, searchRadius: UInt32
+	) -> (predecessor: UInt32, successor: UInt32)? {
+		let start = center - searchRadius
+		let end = center + searchRadius
+		for bits in start..<end {
+			let first = Float(bitPattern: bits)
+			let second = Float(bitPattern: bits + 1)
+			let firstBinds =
+				rawEffectiveDistance(first, sourceOperandOrder: true) < 0.5 * first
+			let secondBinds =
+				rawEffectiveDistance(second, sourceOperandOrder: true) < 0.5
+				* second
+			if !firstBinds && secondBinds { return (bits, bits + 1) }
+		}
+		return nil
+	}
+
+	static func adjacentCapWitness(
+		center: UInt32, searchRadius: UInt32
+	) -> (predecessor: UInt32, successor: UInt32)? {
+		let start = center - searchRadius
+		let end = center + searchRadius
+		for bits in start..<end {
+			let first =
+				uncappedQuantDC(Float(bitPattern: bits), sourceOperandOrder: true)
+				> 50
+			let second =
+				uncappedQuantDC(
+					Float(bitPattern: bits + 1), sourceOperandOrder: true) > 50
+			if first && !second { return (bits, bits + 1) }
+		}
+		return nil
+	}
+
+	static func adjacentUpperClampWitness(
+		center: UInt32, searchRadius: UInt32
+	) -> (predecessor: UInt32, successor: UInt32)? {
+		let start = center - searchRadius
+		let end = center + searchRadius
+		for bits in start..<end {
+			let first = Float(bitPattern: bits)
+			let second = Float(bitPattern: bits + 1)
+			let firstBinds =
+				rawEffectiveDistance(first, sourceOperandOrder: true) > first
+			let secondBinds =
+				rawEffectiveDistance(second, sourceOperandOrder: true) > second
+			if firstBinds && !secondBinds { return (bits, bits + 1) }
+		}
+		return nil
+	}
 
 }

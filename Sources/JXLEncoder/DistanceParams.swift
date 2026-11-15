@@ -99,7 +99,7 @@ public struct DistanceParams: Equatable, Sendable {
 		// Butteraugli target where the non-linearity kicks in.
 		let dcMul: Float = 0.3
 
-		var effective = dcMul * Float.pow(distance / dcMul, dcQuantPow)
+		var effective = dcMul * Float.pow((1 / dcMul) * distance, dcQuantPow)
 		effective = clamp1(effective, 0.5 * distance, distance)
 		return min(dcQuant / effective, 50)
 	}
