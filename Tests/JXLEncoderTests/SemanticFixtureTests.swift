@@ -32,10 +32,9 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 		SemanticCorpusEntry(
 			name: "edge", input: .linear(file: "edge_linear"), distance: 1,
 			knownIssues: [
-				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
 				"block_context": ["GER-3387"],
-				"context_map": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"context_map": ["GER-3387"],
 				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
@@ -45,7 +44,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
-				"x_matrix_scale": ["GER-3387"], "frame_flags": ["GER-3387"],
+				"frame_flags": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
@@ -55,7 +54,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
-				"image_sample_format": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"image_sample_format": ["GER-3387"],
 				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
@@ -65,7 +64,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
-				"image_sample_format": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"image_sample_format": ["GER-3387"],
 				"frame_flags": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
@@ -77,7 +76,7 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 				"coeff_order": ["GER-3386", "GER-3387", "GER-3419"],
 				"block_context": ["GER-3387"],
 				"context_map": ["GER-3387", "GER-3419"],
-				"image_sample_format": ["GER-3387"], "x_matrix_scale": ["GER-3387"],
+				"image_sample_format": ["GER-3387"],
 				"frame_flags": ["GER-3387"], "inverse_quant_matrix": ["GER-3387"],
 			]),
 	]
@@ -112,7 +111,16 @@ struct SemanticPrimitiveCase: CustomTestStringConvertible, Sendable {
 		fixture: "quant_bias", category: "quant_bias", knownIssues: [],
 		inputs: [0, 1, -1, 2, -2, 3, -3, 20, -20, 255, -255, 1024, -1024],
 		channels: [0, 1, 2])
-	static let all = [quantBias]
+	static let e4BoundedQuantization = SemanticPrimitiveCase(
+		fixture: "e4_bounded_quantized", category: "quantized_ac",
+		knownIssues: [], inputs: [], channels: [])
+	static let e4Boundary = SemanticPrimitiveCase(
+		fixture: "e4_bounded_quantized", category: "e4_boundary",
+		knownIssues: [], inputs: [], channels: [])
+	static let e4CallerPolicy = SemanticPrimitiveCase(
+		fixture: "e4_caller_witness", category: "e4_caller",
+		knownIssues: [], inputs: [], channels: [])
+	static let all = [quantBias, e4BoundedQuantization, e4Boundary, e4CallerPolicy]
 }
 
 struct StageFixtureCase: Sendable {

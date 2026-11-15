@@ -2,19 +2,17 @@ name: Apple
 
 on:
   push:
-    # branches:
-    #   - main
+    branches:
+      - main
     paths-ignore:
       - 'README.md'
       - 'CODE_OF_CONDUCT.md'
       - '.editorconfig'
       - '.spi.yml'
   pull_request:
-    branches:
-      - main
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # These jobs only need to read the repository.
@@ -37,5 +35,7 @@ jobs:
           - "platform=iOS Simulator,name=iPhone Air"
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Test platform ${{ matrix.destination }}
         run: set -o pipefail && xcodebuild -skipMacroValidation -scheme jxl-encoder-swift-Package -destination "${{ matrix.destination }}" test | xcbeautify

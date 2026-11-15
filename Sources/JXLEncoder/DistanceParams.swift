@@ -77,12 +77,8 @@ public struct DistanceParams: Equatable, Sendable {
 		let q = Self.acQuant / distance
 		uniformQuant = UInt8(clamp1(Int(q * inverseScale + 0.5), 1, Self.quantMax))
 
-		var xScale: UInt32 = 2
-		for step in [Float(1.25), 9.0] where distance > step {
-			xScale += 1
-		}
-		if distance < 0.299 {
-			// Favours chroma preservation so heavily zoomed images stay faithful.
+		var xScale: UInt32 = 3
+		for step in [Float(2.5), 5.5, 9.5] where distance > step {
 			xScale += 1
 		}
 		xQuantMatrixScale = xScale

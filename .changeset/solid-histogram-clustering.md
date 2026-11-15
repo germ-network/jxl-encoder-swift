@@ -1,5 +1,5 @@
 ---
-'jxl-encoder-swift': patch
+'@germ-network/jxl-encoder-swift': patch
 ---
 
-Match pinned libjxl e4 histogram clustering costs, limits, and thresholds.
+Match pinned libjxl e4 clustering costs and original-context coder selection.

@@ -2,23 +2,16 @@
 //  Quantizer.swift
 //  JXLEncoder
 //
-//  Port of `QuantizeBlockAC` from libjxl-tiny's encoder/enc_group.cc.
+//  Port of full libjxl `QuantizeBlockAC` for the e4 Cheetah path.
 //
 
 enum Quantizer {
-	/// Per-quadrant thresholds below which a coefficient is dropped to zero.
-	/// The reference indexes these as `thres[yfix + (x >= half)]`, so they form
-	/// a 2x2 pattern over the block: low frequencies keep a smaller threshold
-	/// than high ones.
+	/// Per-quadrant e4 dead zones, indexed by row and column half-block.
 	static func thresholds(channel: Int) -> (Float, Float, Float, Float) {
-		var thres: [Float] = [0.58, 0.635, 0.66, 0.7]
-		if channel == 0 {
-			for i in 1..<4 { thres[i] += 0.08 }
+		if channel == 1 {
+			return (0.56, 0.62, 0.62, 0.62)
 		}
-		if channel == 2 {
-			for i in 1..<4 { thres[i] = 0.75 }
-		}
-		return (thres[0], thres[1], thres[2], thres[3])
+		return (0.58, 0.62, 0.62, 0.62)
 	}
 
 	/// Quantizes one 8x8 block of DCT coefficients.

@@ -3,7 +3,7 @@ set -euo pipefail
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROOT="$(cd "$HERE/.." && pwd)"
 OUT="${1:-$ROOT/Tests/JXLEncoderTests/Fixtures/semantic}"
-HARNESS="$HERE/build/harness/jxl-harness"
+HARNESS="${HARNESS:-$HERE/build/harness/jxl-harness}"
 LINKED="$(sed -n 's/^LIBJXL_DIR:[^=]*=//p' "$HERE/build/harness/CMakeCache.txt")"
 "$HERE/pin-check.sh" "$LINKED"
 mkdir -p "$OUT"
@@ -15,6 +15,16 @@ SCRATCH="$(mktemp -d)"
 trap 'rm -rf "$SCRATCH"' EXIT
 "$HARNESS" quantized-ac "$SCRATCH/bounded_quantized.sem"
 "$HARNESS" quantized-edge-ac "$ROOT/Tests/JXLEncoderTests/Fixtures/edge_dct.dump" "$SCRATCH/edge_fixed_quantized.sem"
+"$HARNESS" e4-quantized-ac "$SCRATCH/e4_bounded_quantized.sem"
+"$HARNESS" e4-quantized-edge-ac "$ROOT/Tests/JXLEncoderTests/Fixtures/edge_dct.dump" "$SCRATCH/e4_edge_quantized.sem"
+python3 - "$SCRATCH/e4_policy.ppm" <<'PYCODE'
+from pathlib import Path
+import sys
+Path(sys.argv[1]).write_bytes(b"P6\n8 80\n255\n" + bytes([0, 0, 0]) * 8 * 80)
+PYCODE
+"$HARNESS" encode "$SCRATCH/e4_policy.ppm" 1 "$SCRATCH/e4_policy.jxl"
+"$HARNESS" e4-caller-witness "$SCRATCH/e4_policy.jxl" \
+  "$SCRATCH/e4_caller_witness.sem" "$SCRATCH/e4_caller_witness.dump"
 "$HARNESS" coded-dimensions "$SCRATCH/coded_dimensions.sem"
 "$HARNESS" quant-bias "$SCRATCH/quant_bias.sem"
 "$HARNESS" distance-params "$SCRATCH/distance_params.sem"
@@ -22,6 +32,10 @@ python3 "$HERE/make_distance_filter_fixture.py" "$HARNESS" "$SCRATCH/distance_pa
 python3 "$HERE/make_dc_boundary_fixture.py" "$HARNESS" "$SCRATCH/distance_params.sem" "$SCRATCH"
 cp "$SCRATCH/bounded_quantized.sem" "$OUT/bounded_quantized.sem"
 cp "$SCRATCH/edge_fixed_quantized.sem" "$OUT/edge_fixed_quantized.sem"
+cp "$SCRATCH/e4_bounded_quantized.sem" "$OUT/e4_bounded_quantized.sem"
+cp "$SCRATCH/e4_edge_quantized.sem" "$OUT/e4_edge_quantized.sem"
+cp "$SCRATCH/e4_caller_witness.sem" "$OUT/e4_caller_witness.sem"
+cp "$SCRATCH/e4_caller_witness.dump" "$(dirname "$OUT")/e4_caller_witness.dump"
 cp "$SCRATCH/coded_dimensions.sem" "$OUT/coded_dimensions.sem"
 cp "$SCRATCH/quant_bias.sem" "$OUT/quant_bias.sem"
 cp "$SCRATCH/distance_params.sem" "$OUT/distance_params.sem"
