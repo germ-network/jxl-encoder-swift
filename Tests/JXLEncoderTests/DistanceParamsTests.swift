@@ -334,42 +334,52 @@ struct DistanceParamsTests {
 		// libjxl a7a9c787341cf703dede03c2009fa460cae5e5df uses
 		// pow((1 / kDcMul) * distance, kDcQuantPow) at InitialQuantDC:1250-1261.
 		// The division-based results stay diagnostic; Float.pow remains native.
-		let witnesses: [UInt32] = [0x3E9A_29C7, 0x3E99_A327]
-		for bits in witnesses {
-			let distance = Float(bitPattern: bits)
-			let multiplier: Float = 0.3
-			let sourceBase = (1 / multiplier) * distance
-			let divisionBase = distance / multiplier
-			#expect(sourceBase.bitPattern != divisionBase.bitPattern)
-			let source = Self.expectedQuantDC(distance, sourceOperandOrder: true)
-			let division = Self.expectedQuantDC(distance, sourceOperandOrder: false)
-			#expect(source.bitPattern != division.bitPattern)
-			#expect(
-				DistanceParams.quantDC(distance: distance).bitPattern
-					== source.bitPattern)
+		guard let distance = Self.sourceOrderWitness(searchRadius: 65_536) else {
+			Issue.record("native source-order witness not found in bounded search")
+			return
 		}
+		let multiplier: Float = 0.3
+		let sourceBase = (1 / multiplier) * distance
+		let divisionBase = distance / multiplier
+		let source = Self.expectedQuantDC(distance, sourceOperandOrder: true)
+		let division = Self.expectedQuantDC(distance, sourceOperandOrder: false)
+		#expect(sourceBase.bitPattern != divisionBase.bitPattern)
+		#expect(source.bitPattern != division.bitPattern)
+		#expect(DistanceParams.quantDC(distance: distance).bitPattern == source.bitPattern)
 	}
 
 	@Test("Native DC quantization reaches frame parameters")
 	func nativeDCQuantFlowsThroughDistanceParams() {
-		let distance = Float(bitPattern: 0x3E99_A327)
+		guard let witness = Self.integerPropagationWitness(searchRadius: 131_072) else {
+			Issue.record(
+				"native integer-propagation witness not found in bounded search")
+			return
+		}
+		let distance = witness.distance
 		let expected = Self.expectedParameters(distance, sourceOperandOrder: true)
 		let division = Self.expectedParameters(distance, sourceOperandOrder: false)
 		let actual = try! DistanceParams(distance: distance)
 		#expect(actual.globalScale == expected.globalScale)
 		#expect(actual.quantDC == expected.quantDC)
 		#expect(actual.scaleDC.bitPattern == expected.scaleDC.bitPattern)
-		#expect(division.globalScale != expected.globalScale)
-		#expect(division.scaleDC.bitPattern != expected.scaleDC.bitPattern)
+		#expect(
+			division.globalScale != expected.globalScale
+				|| division.quantDC != expected.quantDC
+				|| division.scaleDC.bitPattern != expected.scaleDC.bitPattern)
 	}
 
 	@Test("Native DC scale reaches production coefficient quantization")
 	func nativeDCScaleFlowsThroughProductionQuantization() {
-		let distance = Float(bitPattern: 0x3E99_A327)
+		guard let witness = Self.integerPropagationWitness(searchRadius: 131_072) else {
+			Issue.record(
+				"native production-rounding witness not found in bounded search")
+			return
+		}
+		let distance = witness.distance
 		let expected = Self.expectedParameters(distance, sourceOperandOrder: true)
 		let stale = Self.expectedParameters(distance, sourceOperandOrder: false)
 		let params = try! DistanceParams(distance: distance)
-		let yPlane = [Float](repeating: 16, count: DCT.blockSize)
+		let yPlane = [Float](repeating: witness.magnitude, count: DCT.blockSize)
 		let stripe = PaddedStripe(
 			width: DCT.blockDim, height: DCT.blockDim,
 			planes: [
@@ -400,6 +410,68 @@ struct DistanceParamsTests {
 			? (1 / dcMul) * distance
 			: distance / dcMul
 		return dcMul * Float.pow(base, 0.83)
+	}
+
+	// Candidate bits seed bounded searches; individual inputs are not contractual.
+	static let arithmeticWitnessSeeds: [UInt32] = [0x3E9A_29C7, 0x3E99_A327]
+
+	static func sourceOrderWitness(searchRadius: UInt32) -> Float? {
+		for seed in arithmeticWitnessSeeds {
+			let start = seed - searchRadius
+			let end = seed + searchRadius
+			for bits in start...end {
+				let distance = Float(bitPattern: bits)
+				let sourceBase = (1 / Float(0.3)) * distance
+				let divisionBase = distance / Float(0.3)
+				guard sourceBase.bitPattern != divisionBase.bitPattern else {
+					continue
+				}
+				let source = expectedQuantDC(distance, sourceOperandOrder: true)
+				let division = expectedQuantDC(distance, sourceOperandOrder: false)
+				if source.bitPattern != division.bitPattern { return distance }
+			}
+		}
+		return nil
+	}
+
+	static func integerPropagationWitness(searchRadius: UInt32) -> (
+		distance: Float, magnitude: Float
+	)? {
+		for seed in arithmeticWitnessSeeds {
+			let start = seed - searchRadius
+			let end = seed + searchRadius
+			for bits in start...end {
+				let distance = Float(bitPattern: bits)
+				let sourceQDC = expectedQuantDC(distance, sourceOperandOrder: true)
+				let divisionQDC = expectedQuantDC(
+					distance, sourceOperandOrder: false)
+				guard sourceQDC.bitPattern != divisionQDC.bitPattern else {
+					continue
+				}
+				let source = expectedParameters(distance, sourceOperandOrder: true)
+				let division = expectedParameters(
+					distance, sourceOperandOrder: false)
+				guard
+					source.globalScale != division.globalScale
+						|| source.quantDC != division.quantDC
+						|| source.scaleDC.bitPattern
+							!= division.scaleDC.bitPattern
+				else { continue }
+				for step in 1...32 {
+					let magnitude = Float(step) * 0.5
+					let sourceRounded = Int16(
+						(Float(512) * source.scaleDC * magnitude)
+							.rounded(.toNearestOrAwayFromZero))
+					let divisionRounded = Int16(
+						(Float(512) * division.scaleDC * magnitude)
+							.rounded(.toNearestOrAwayFromZero))
+					if sourceRounded != divisionRounded {
+						return (distance, magnitude)
+					}
+				}
+			}
+		}
+		return nil
 	}
 
 	static func uncappedQuantDC(_ distance: Float, sourceOperandOrder: Bool) -> Float {
