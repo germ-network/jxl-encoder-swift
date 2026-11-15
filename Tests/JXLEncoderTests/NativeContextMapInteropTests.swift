@@ -129,38 +129,43 @@ private enum NativeDecoderHarness {
 	private static func run(_ arguments: [String], using harness: URL) throws
 		-> [String: String]
 	{
-		let process = Process()
-		let output = Pipe()
-		let errors = Pipe()
-		process.executableURL = harness
-		process.arguments = arguments
-		process.standardOutput = output
-		process.standardError = errors
-		try process.run()
-		let outputData = output.fileHandleForReading.readDataToEndOfFile()
-		process.waitUntilExit()
-		let errorData = errors.fileHandleForReading.readDataToEndOfFile()
-		guard process.terminationStatus == 0 else {
-			let message = String(decoding: errorData, as: UTF8.self)
-			throw NativeInteropGateError.commandFailed(
-				process.terminationStatus, message)
-		}
-		let text = String(decoding: outputData, as: UTF8.self)
-		var fields: [String: String] = [:]
-		for line in text.split(whereSeparator: \.isNewline) {
-			let pair = line.split(
-				separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
-			guard pair.count == 2 else {
-				throw NativeInteropGateError.malformedOutput(String(line))
+		#if os(Linux) || os(macOS)
+			let process = Process()
+			let output = Pipe()
+			let errors = Pipe()
+			process.executableURL = harness
+			process.arguments = arguments
+			process.standardOutput = output
+			process.standardError = errors
+			try process.run()
+			let outputData = output.fileHandleForReading.readDataToEndOfFile()
+			process.waitUntilExit()
+			let errorData = errors.fileHandleForReading.readDataToEndOfFile()
+			guard process.terminationStatus == 0 else {
+				let message = String(decoding: errorData, as: UTF8.self)
+				throw NativeInteropGateError.commandFailed(
+					process.terminationStatus, message)
 			}
-			let key = String(pair[0])
-			guard fields[key] == nil else {
-				throw NativeInteropGateError.malformedOutput(
-					"duplicate field: \(key)")
+			let text = String(decoding: outputData, as: UTF8.self)
+			var fields: [String: String] = [:]
+			for line in text.split(whereSeparator: \.isNewline) {
+				let pair = line.split(
+					separator: "=", maxSplits: 1,
+					omittingEmptySubsequences: false)
+				guard pair.count == 2 else {
+					throw NativeInteropGateError.malformedOutput(String(line))
+				}
+				let key = String(pair[0])
+				guard fields[key] == nil else {
+					throw NativeInteropGateError.malformedOutput(
+						"duplicate field: \(key)")
+				}
+				fields[key] = String(pair[1])
 			}
-			fields[key] = String(pair[1])
-		}
-		return fields
+			return fields
+		#else
+			throw NativeInteropGateError.requiredHarnessMissingOrInvalid
+		#endif
 	}
 
 	private static func required(_ fields: [String: String], _ key: String) throws -> String {
@@ -243,142 +248,149 @@ struct NativeContextMapInteropTests {
 		#expect(optionalHarness == nil)
 	}
 
-	@Test
-	func nativeContextMapDecoderConsumesExactBits() throws {
-		let environment = ProcessInfo.processInfo.environment
-		let harnessPath = try NativeInteropGate.harnessURL(
-			required: environment["JXL_REQUIRE_NATIVE_INTEROP"] == "1",
-			path: environment["JXL_HARNESS_PATH"])
-		guard let harness = harnessPath else { return }
-		var representations: Set<String> = []
-		var simpleEntryBits: Set<Int> = []
-		var entropyModes: Set<String> = []
-		var hasRunLength = false
-		for name in Self.contextMapFixtures {
-			let fixture = try EntropyReferenceFixture.load(name)
-			let fixtureEntries = try fixture.integers(
-				fixture.input, "input.context_map.entries"
-			).map(UInt8.init)
-			let claimedHistograms = Int(
-				try fixture.integers(
-					fixture.input, "input.context_map.num_histograms")[0])
-			let entries: [UInt8]
-			let numHistograms: Int
-			if name == "context_full_256" {
-				// The fixture tests endpoint values; a decoder requires all 256 IDs.
-				entries = (0...255).map(UInt8.init)
-				numHistograms = 256
-			} else {
-				// DecodeContextMap rejects sparse cluster IDs.
-				let canonical = HistogramCluster.reindex(
-					symbols: fixtureEntries.map(UInt32.init),
-					clusters: [Histogram](
-						repeating: Histogram(), count: claimedHistograms))
-				entries = canonical.contextMap
-				numHistograms = canonical.clusters.count
-			}
-			let prepared = ContextMapEncoding.prepare(
-				entries, numHistograms: numHistograms)
-			if name == "context_raw_rle" {
-				#expect(prepared.representation == .raw)
-			}
-			if name == "context_mtf_ans" {
-				#expect(prepared.representation == .moveToFront)
-			}
-			let selectedEntropy: ContextMapEntropy.Prepared?
-			switch prepared.representation {
-			case .simple(let entryBits):
-				representations.insert("simple")
-				simpleEntryBits.insert(entryBits)
-				selectedEntropy = nil
-			case .raw:
-				representations.insert("raw")
-				selectedEntropy = prepared.raw
-			case .moveToFront:
-				representations.insert("moveToFront")
-				selectedEntropy = prepared.moveToFront
-			}
-			if let selectedEntropy {
-				entropyModes.insert(
-					selectedEntropy.usesPrefixCode ? "prefix" : "ans")
-				hasRunLength = hasRunLength || selectedEntropy.runLength.enabled
+	#if os(Linux) || os(macOS)
+		@Test
+		func nativeContextMapDecoderConsumesExactBits() throws {
+			let environment = ProcessInfo.processInfo.environment
+			let harnessPath = try NativeInteropGate.harnessURL(
+				required: environment["JXL_REQUIRE_NATIVE_INTEROP"] == "1",
+				path: environment["JXL_HARNESS_PATH"])
+			guard let harness = harnessPath else { return }
+			var representations: Set<String> = []
+			var simpleEntryBits: Set<Int> = []
+			var entropyModes: Set<String> = []
+			var hasRunLength = false
+			for name in Self.contextMapFixtures {
+				let fixture = try EntropyReferenceFixture.load(name)
+				let fixtureEntries = try fixture.integers(
+					fixture.input, "input.context_map.entries"
+				).map(UInt8.init)
+				let claimedHistograms = Int(
+					try fixture.integers(
+						fixture.input, "input.context_map.num_histograms")[
+							0])
+				let entries: [UInt8]
+				let numHistograms: Int
+				if name == "context_full_256" {
+					// The fixture tests endpoint values; a decoder requires all 256 IDs.
+					entries = (0...255).map(UInt8.init)
+					numHistograms = 256
+				} else {
+					// DecodeContextMap rejects sparse cluster IDs.
+					let canonical = HistogramCluster.reindex(
+						symbols: fixtureEntries.map(UInt32.init),
+						clusters: [Histogram](
+							repeating: Histogram(),
+							count: claimedHistograms))
+					entries = canonical.contextMap
+					numHistograms = canonical.clusters.count
+				}
+				let prepared = ContextMapEncoding.prepare(
+					entries, numHistograms: numHistograms)
 				if name == "context_raw_rle" {
-					#expect(selectedEntropy.usesPrefixCode)
-					#expect(selectedEntropy.runLength.enabled)
+					#expect(prepared.representation == .raw)
 				}
 				if name == "context_mtf_ans" {
-					#expect(!selectedEntropy.usesPrefixCode)
+					#expect(prepared.representation == .moveToFront)
 				}
+				let selectedEntropy: ContextMapEntropy.Prepared?
+				switch prepared.representation {
+				case .simple(let entryBits):
+					representations.insert("simple")
+					simpleEntryBits.insert(entryBits)
+					selectedEntropy = nil
+				case .raw:
+					representations.insert("raw")
+					selectedEntropy = prepared.raw
+				case .moveToFront:
+					representations.insert("moveToFront")
+					selectedEntropy = prepared.moveToFront
+				}
+				if let selectedEntropy {
+					entropyModes.insert(
+						selectedEntropy.usesPrefixCode ? "prefix" : "ans")
+					hasRunLength =
+						hasRunLength || selectedEntropy.runLength.enabled
+					if name == "context_raw_rle" {
+						#expect(selectedEntropy.usesPrefixCode)
+						#expect(selectedEntropy.runLength.enabled)
+					}
+					if name == "context_mtf_ans" {
+						#expect(!selectedEntropy.usesPrefixCode)
+					}
+				}
+				var writer = BitWriter()
+				ContextMapEncoding.write(prepared, to: &writer)
+				let decodeCase = NativeContextMapDecodeCase(
+					name: name,
+					input: NativeContextMapDecodeInput(
+						entryCount: entries.count,
+						bitCount: writer.bitsWritten,
+						bytes: writer.bytes),
+					expectedEntries: entries,
+					expectedNumHistograms: Int(entries.max() ?? 0) + 1)
+				let decoded = try NativeDecoderHarness.decodeContextMap(
+					decodeCase.input, using: harness)
+				#expect(decoded.decodeSucceeded, Comment(rawValue: decodeCase.name))
+				#expect(
+					decoded.entries == decodeCase.expectedEntries,
+					Comment(rawValue: decodeCase.name))
+				#expect(
+					decoded.numHistograms == decodeCase.expectedNumHistograms,
+					Comment(rawValue: decodeCase.name))
+				#expect(
+					decoded.totalBitsConsumed == decodeCase.input.bitCount,
+					Comment(rawValue: decodeCase.name))
+				#expect(decoded.closeSucceeded, Comment(rawValue: decodeCase.name))
 			}
-			var writer = BitWriter()
-			ContextMapEncoding.write(prepared, to: &writer)
-			let decodeCase = NativeContextMapDecodeCase(
-				name: name,
-				input: NativeContextMapDecodeInput(
-					entryCount: entries.count, bitCount: writer.bitsWritten,
-					bytes: writer.bytes),
-				expectedEntries: entries,
-				expectedNumHistograms: Int(entries.max() ?? 0) + 1)
-			let decoded = try NativeDecoderHarness.decodeContextMap(
-				decodeCase.input, using: harness)
-			#expect(decoded.decodeSucceeded, Comment(rawValue: decodeCase.name))
-			#expect(
-				decoded.entries == decodeCase.expectedEntries,
-				Comment(rawValue: decodeCase.name))
-			#expect(
-				decoded.numHistograms == decodeCase.expectedNumHistograms,
-				Comment(rawValue: decodeCase.name))
-			#expect(
-				decoded.totalBitsConsumed == decodeCase.input.bitCount,
-				Comment(rawValue: decodeCase.name))
-			#expect(decoded.closeSucceeded, Comment(rawValue: decodeCase.name))
+			#expect(representations == ["simple", "raw", "moveToFront"])
+			#expect(simpleEntryBits.contains(0) && simpleEntryBits.contains(1))
+			#expect(entropyModes == ["prefix", "ans"])
+			#expect(hasRunLength)
 		}
-		#expect(representations == ["simple", "raw", "moveToFront"])
-		#expect(simpleEntryBits.contains(0) && simpleEntryBits.contains(1))
-		#expect(entropyModes == ["prefix", "ans"])
-		#expect(hasRunLength)
-	}
 
-	@Test
-	func nativeBlockContextMapDecoderConsumesExactBits() throws {
-		var quantCounts = [Int](repeating: 0, count: 256)
-		for quant in 0..<250 { quantCounts[quant] = 200 }
-		let model = PixelBlockEntropyModel.compute(
-			quantCounts: quantCounts, params: try DistanceParams(distance: 1))
-		var writer = BitWriter()
-		JPEGBlockContextMap.write(model, writer: &writer)
-		let decodeCase = NativeBlockContextMapDecodeCase(
-			input: NativeBlockContextMapDecodeInput(
-				bitCount: writer.bitsWritten, bytes: writer.bytes),
-			expectedDCThresholds: [[], [], []],
-			expectedQFThresholds: model.qfThresholds,
-			expectedNumDC: model.numDCContexts,
-			expectedNumContexts: model.numContexts,
-			expectedContextMap: model.contextMap)
-		let environment = ProcessInfo.processInfo.environment
-		let harnessPath = try NativeInteropGate.harnessURL(
-			required: environment["JXL_REQUIRE_NATIVE_INTEROP"] == "1",
-			path: environment["JXL_HARNESS_PATH"])
-		guard let harness = harnessPath else { return }
-		let decoded = try NativeDecoderHarness.decodeBlockContextMap(
-			decodeCase.input, using: harness)
-		#expect(decoded.decodeSucceeded)
-		#expect(
-			[
-				decoded.dcThresholds0, decoded.dcThresholds1, decoded.dcThresholds2,
-			] == decodeCase.expectedDCThresholds)
-		#expect(decoded.qfThresholds == decodeCase.expectedQFThresholds)
-		#expect(decoded.numDC == decodeCase.expectedNumDC)
-		#expect(decoded.numContexts == decodeCase.expectedNumContexts)
-		#expect(decoded.contextMap == decodeCase.expectedContextMap)
-		#expect(decoded.totalBitsConsumed == decodeCase.input.bitCount)
-		#expect(decoded.closeSucceeded)
-	}
+		@Test
+		func nativeBlockContextMapDecoderConsumesExactBits() throws {
+			var quantCounts = [Int](repeating: 0, count: 256)
+			for quant in 0..<250 { quantCounts[quant] = 200 }
+			let model = PixelBlockEntropyModel.compute(
+				quantCounts: quantCounts, params: try DistanceParams(distance: 1))
+			var writer = BitWriter()
+			JPEGBlockContextMap.write(model, writer: &writer)
+			let decodeCase = NativeBlockContextMapDecodeCase(
+				input: NativeBlockContextMapDecodeInput(
+					bitCount: writer.bitsWritten, bytes: writer.bytes),
+				expectedDCThresholds: [[], [], []],
+				expectedQFThresholds: model.qfThresholds,
+				expectedNumDC: model.numDCContexts,
+				expectedNumContexts: model.numContexts,
+				expectedContextMap: model.contextMap)
+			let environment = ProcessInfo.processInfo.environment
+			let harnessPath = try NativeInteropGate.harnessURL(
+				required: environment["JXL_REQUIRE_NATIVE_INTEROP"] == "1",
+				path: environment["JXL_HARNESS_PATH"])
+			guard let harness = harnessPath else { return }
+			let decoded = try NativeDecoderHarness.decodeBlockContextMap(
+				decodeCase.input, using: harness)
+			#expect(decoded.decodeSucceeded)
+			#expect(
+				[
+					decoded.dcThresholds0, decoded.dcThresholds1,
+					decoded.dcThresholds2,
+				] == decodeCase.expectedDCThresholds)
+			#expect(decoded.qfThresholds == decodeCase.expectedQFThresholds)
+			#expect(decoded.numDC == decodeCase.expectedNumDC)
+			#expect(decoded.numContexts == decodeCase.expectedNumContexts)
+			#expect(decoded.contextMap == decodeCase.expectedContextMap)
+			#expect(decoded.totalBitsConsumed == decodeCase.input.bitCount)
+			#expect(decoded.closeSucceeded)
+		}
 
-	private static let contextMapFixtures = [
-		"context_single_histogram", "context_simple_two_histograms",
-		"context_full_256", "context_tie_raw_mtf", "context_mtf_ans",
-		"context_raw_ans", "context_prefix_99", "context_ans_100",
-		"context_raw_rle",
-	]
+		private static let contextMapFixtures = [
+			"context_single_histogram", "context_simple_two_histograms",
+			"context_full_256", "context_tie_raw_mtf", "context_mtf_ans",
+			"context_raw_ans", "context_prefix_99", "context_ans_100",
+			"context_raw_rle",
+		]
+	#endif
 }
