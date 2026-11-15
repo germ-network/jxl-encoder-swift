@@ -62,18 +62,117 @@ struct HistogramClusteringTranslationTests {
 		#expect(clustered.contextMap == [0, 0, 0])
 	}
 
-	@Test(.disabled("Pending implementation"))
+	@Test
 	func prefixSelectionMatchesOriginalHistogramSingletonFixtures() throws {
-		Issue.record(
-			"Pin 99/100 tokens and original singleton/empty versus mixed histograms")
+		let short = mixedHistogram(first: 50, second: 49)
+		#expect(
+			SectionOptimizer.usesPrefixCode(
+				originalHistograms: [short], totalTokens: 99))
+
+		let mixed = mixedHistogram(first: 50, second: 50)
+		#expect(
+			!SectionOptimizer.usesPrefixCode(
+				originalHistograms: [Histogram(), mixed], totalTokens: 100))
+
+		let originalSingletons = (0..<100).map { index in
+			var histogram = Histogram()
+			histogram.add(UInt32(index % StaticEntropyCodes.alphabetSize))
+			return histogram
+		}
+		let singletonSelection = SectionOptimizer.usesPrefixCode(
+			originalHistograms: originalSingletons, totalTokens: 100)
+		#expect(singletonSelection)
+		let merged = HistogramCluster.cluster(
+			originalSingletons, limit: SectionOptimizer.clustersLimit)
+		#expect(merged.clusters.count == 1)
+		#expect(merged.clusters[0].counts.filter { $0 > 0 }.count > 1)
+
+		var singletonSection = SectionWriter(mode: .staging(.staticAC))
+		for context in 0..<100 {
+			singletonSection.write(
+				token: Token(
+					context: UInt32(context),
+					value: UInt32(context % StaticEntropyCodes.alphabetSize)))
+		}
+		var singletonSections = [singletonSection]
+		let singletonOptimization = SectionOptimizer.optimize(
+			sections: &singletonSections, range: 0..<singletonSections.count,
+			baseCode: .staticAC, allowANS: true)
+		#expect(singletonOptimization.contextMap.count == EntropyCode.staticAC.contextCount)
+		#expect(singletonOptimization.contextMap.allSatisfy { $0 == 0 })
+		#expect(singletonOptimization.ansHistograms == nil)
+		#expect(singletonOptimization.ansInfoTables == nil)
+
+		#expect(
+			SectionOptimizer.usesPrefixCode(
+				originalHistograms: [Histogram(), Histogram()], totalTokens: 0))
 	}
 
-	@Test(.disabled("Pending implementation"))
+	@Test
 	func sectionOptimizerUsesUpstreamDecisionAndSelectedANSHistograms() throws {
-		Issue.record(
-			"Pin full-context integration, immutable approximate ANS result and raw-bit fallback"
-		)
+		let fixture = try EntropyReferenceFixture.load("ans_cost_approx_step2_witness")
+		let counts = try fixture.integers(
+			fixture.input, "input.histogram.counts"
+		).map(UInt32.init)
+		let selected = ANSEncodingHistogram.computeBest(
+			counts: counts, strategy: .approximate)
+		var section = SectionWriter(mode: .staging(.staticAC))
+		for (symbol, count) in counts.enumerated() {
+			for _ in 0..<count {
+				section.write(token: Token(context: 0, value: UInt32(symbol)))
+			}
+		}
+		var sections = [section]
+		let optimized = SectionOptimizer.optimize(
+			sections: &sections, range: 0..<sections.count,
+			baseCode: .staticAC, allowANS: true)
+		#expect(optimized.ansHistograms?.count == 1)
+		#expect(optimized.ansHistograms?.first?.method == selected.method)
+		#expect(
+			optimized.ansHistograms?.first?.alphabetSize == selected.alphabetSize)
+		#expect(
+			Array(
+				optimized.ansHistograms?.first?.normalizedCounts.prefix(
+					selected.alphabetSize) ?? []) == selected.normalizedCounts)
+		#expect(
+			optimized.ansInfoTables?.first?.map(\.freq)
+				== selected.normalizedCounts.prefix(selected.alphabetSize).map {
+					$0
+				})
+		#expect(selected.method == 7)
+		#expect(sections[0].staged.isEmpty)
+
+		var rawSection = section
+		rawSection.writeRaw(1, 1)
+		var rawSections = [rawSection]
+		let prefixFallback = SectionOptimizer.optimize(
+			sections: &rawSections, range: 0..<rawSections.count,
+			baseCode: .staticAC, allowANS: true)
+		#expect(prefixFallback.ansInfoTables == nil)
+		#expect(prefixFallback.ansHistograms == nil)
+
+		var eligibleSections = [section]
+		let eligible = SectionOptimizer.optimize(
+			sections: &eligibleSections, range: 0..<eligibleSections.count,
+			baseCode: .staticAC, allowANS: true)
+		#expect(eligible.ansHistograms?.count == 1)
+
+		var forcedPrefixSections = [section]
+		let forcedPrefix = SectionOptimizer.optimize(
+			sections: &forcedPrefixSections,
+			range: 0..<forcedPrefixSections.count,
+			baseCode: .staticAC, allowANS: false)
+		#expect(forcedPrefix.ansInfoTables == nil)
+		#expect(forcedPrefix.ansHistograms == nil)
 	}
+}
+
+private func mixedHistogram(first: UInt32, second: UInt32) -> Histogram {
+	var histogram = Histogram()
+	histogram.counts[0] = first
+	histogram.counts[1] = second
+	histogram.totalCount = Int(first + second)
+	return histogram
 }
 
 private func histograms(from fixture: EntropyReferenceFixture) throws -> [Histogram] {
