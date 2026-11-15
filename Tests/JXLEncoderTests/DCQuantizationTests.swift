@@ -78,10 +78,6 @@ struct DCQuantizationTests {
 		#expect(quantDC[2] == [-257])
 	}
 
-	/// Quantizer values for distance 1.0: scale = 7340 / 2^16, quantDC = 10.
-	static let scaleDC: Float = Float(10) * (Float(7340) * (1.0 / Float(1 << 16)))
-	static var inverseFactorB: Float { 256.0 * scaleDC }
-
 	@Test("rounds ties away from zero, unlike AC quantization")
 	func tiesAwayFromZero() {
 		// coefficient * 1 - 0 == 2.5 and -2.5
