@@ -126,7 +126,7 @@ struct DecisionInventoryFixtureTests {
 		}
 	}
 
-	@Test
+	@Test(.enabled(if: PackageCheckout.isAvailable))
 	func histogramCostReferencesHaveTypedProofs() throws {
 		let inventory = try DecisionInventoryTests.committed()
 		for row in inventory.rows where row.id == "HC-01" || row.id == "HC-02" {
@@ -155,7 +155,9 @@ struct DecisionInventoryFixtureTests {
 				Issue.record("invalid cluster proof reference: \(proof.reference)")
 				continue
 			}
-			#expect(Self.committedStatus(reference) == .verifies)
+			if PackageCheckout.isAvailable {
+				#expect(Self.committedStatus(reference) == .verifies)
+			}
 		}
 	}
 
