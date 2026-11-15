@@ -16,7 +16,9 @@ for pair in \
   'sharpness_jpeg_422 small_422' \
   'sharpness_jpeg_440 small_440' \
   'sharpness_jpeg_420_odd hopper_420_odd' \
-  'sharpness_jpeg_gray_odd hopper_gray_odd'; do
+  'sharpness_jpeg_gray_odd hopper_gray_odd' \
+  'sharpness_jpeg_flower_513x267_420 semantic/jpeg_flower_513x267_420' \
+  'sharpness_jpeg_flower_513x267_440 semantic/jpeg_flower_513x267_440'; do
   read -r name jpeg <<< "$pair"
   "$HARNESS" encode-jpeg "$ROOT/Tests/JXLEncoderTests/Fixtures/$jpeg.jpg" "$SCRATCH/$name.jxl"
   "$HARNESS" dump "$SCRATCH/$name.jxl" epf_sharpness > "$OUT/$name.sem"

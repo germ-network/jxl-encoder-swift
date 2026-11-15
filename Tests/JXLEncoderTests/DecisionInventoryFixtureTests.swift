@@ -54,7 +54,12 @@ struct DecisionInventoryFixtureTests {
 			let key = reference.path + "#" + category
 			if category == "epf_sharpness" {
 				return SharpnessProofCase.all.contains {
-					$0.reference == key && $0.proves(key)
+					let consumer: SharpnessProofCase.Consumer =
+						$0.decision == "DG-08"
+						? .selectedSharpnessTokens
+						: .jpegSharpnessMatchesReference
+					return $0.reference == key
+						&& $0.verifies(key, consumer: consumer)
 				} ? .verifies : .notCompared
 			}
 			if category == "ans_cost" || category == "histogram" {
