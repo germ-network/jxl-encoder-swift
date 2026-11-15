@@ -269,6 +269,7 @@ AC-global histogram count. It does not infer selectors from image group count.
 | `entropy_layout` | `group_grid`, `group_count`, `dc_group_count`, `pass_count`, `histogram_set_count`, `selector_bits` | decoded frame dimensions and actual AC histogram selection state |
 | `entropy_layout` | `section_ids`, `section_indices`, `section_offsets`, `section_sizes` | TOC logical IDs and physical stream order, with offsets/sizes in codestream bytes |
 | `entropy_layout` | `ac_selectors` | repeated pass, group, logical section ID, selector tuples read from each AC section |
+| `epf_sharpness` | `dimensions`, `values` | decoded `shared.epf_sharpness` width/height and every row-major block value; opt-in and omitted from the default dump |
 
 The opt-in `jxl-harness entropy-verify-streams <expected.sem>` consumer reads
 the shared serialized code with pinned `DecodeHistograms`, then creates a fresh

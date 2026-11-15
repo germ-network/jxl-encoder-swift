@@ -103,7 +103,8 @@ enum SwiftJPEGSemanticEncoding {
 				width: rect.width, height: rect.height, blockAlignment: alignment)
 			return DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
-				heightInBlocks: groupDim.heightInBlocks, subsampling: t.subsampling)
+				heightInBlocks: groupDim.heightInBlocks, subsampling: t.subsampling,
+				epfSharpness: 0)
 		}
 		for by in 0..<dim.heightInBlocks {
 			for bx in 0..<dim.widthInBlocks {

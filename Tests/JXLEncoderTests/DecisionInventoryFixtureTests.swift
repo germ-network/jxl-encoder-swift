@@ -55,6 +55,16 @@ struct DecisionInventoryFixtureTests {
 			if PixelBlockContextProofCase.proves(key, decision: "PX-01") {
 				return .verifies
 			}
+			if category == "epf_sharpness" {
+				return SharpnessProofCase.all.contains {
+					let consumer: SharpnessProofCase.Consumer =
+						$0.decision == "DG-08"
+						? .selectedSharpnessTokens
+						: .jpegSharpnessMatchesReference
+					return $0.reference == key
+						&& $0.verifies(key, consumer: consumer)
+				} ? .verifies : .notCompared
+			}
 			if category == "ans_cost" || category == "histogram" {
 				return ANSHistogramProofCase.all.contains {
 					$0.reference == key
