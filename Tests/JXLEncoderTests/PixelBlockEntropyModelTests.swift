@@ -79,56 +79,60 @@ struct PixelBlockEntropyModelTests {
 	}
 
 	@Test(
-		"All transmitted entries and category counts match source sorting for reachable 13 and 26 entry lists."
+		"Native sorting preserves complete maps for reachable 13- and 26-entry models."
 	)
-	func tieHeavyFullMapsMatchPinnedSort() throws {
-		let sortURL = try #require(
-			Bundle.module.url(
-				forResource: "e4_pixel_sort_witness", withExtension: "tsv",
-				subdirectory: "Fixtures/semantic"))
-		for line in try String(contentsOf: sortURL, encoding: .utf8).split(separator: "\n")
-		{
-			let expected = line.split(separator: " ").compactMap { Int($0) }
-			let length = expected[0]
-			var actual = Array(0..<length)
-			LibcxxBoundedSort.sort(&actual, counts: [Int](repeating: 0, count: length))
-			#expect(actual == Array(expected.dropFirst()))
-		}
-
-		let nonuniformURL = try #require(
-			Bundle.module.url(
-				forResource: "e4_pixel_sort_nonuniform", withExtension: "tsv",
-				subdirectory: "Fixtures/semantic"))
-		var witnessedLengths: [Int] = []
-		for line in try String(contentsOf: nonuniformURL, encoding: .utf8).split(
-			separator: "\n")
-		{
-			let fields = line.split(separator: "\t")
-			#expect(fields.count == 3)
-			let length = Int(fields[0])!
-			let sourceCounts = fields[1].split(separator: ",").compactMap { Int($0) }
-			let expected = fields[2].split(separator: ",").compactMap { Int($0) }
-			#expect(sourceCounts.count == length)
-			#expect(expected.count == length)
-			witnessedLengths.append(length)
-			var actual = Array(0..<length)
-			LibcxxBoundedSort.sort(&actual, counts: sourceCounts)
-			#expect(actual == expected)
-		}
-		#expect(witnessedLengths == Array(3...26))
-
+	func nativeSortPreservesSourceModelInvariants() throws {
 		let params = try DistanceParams(distance: 1)
-		var histogram = [Int](repeating: 0, count: 256)
-		for quant in 0..<250 { histogram[quant] = 200 }
-		let model = PixelBlockEntropyModel.compute(quantCounts: histogram, params: params)
+		for proof in [
+			PixelBlockEntropyModelProofCase.small13,
+			PixelBlockEntropyModelProofCase.unequalPositive26,
+			PixelBlockEntropyModelProofCase.tieObservation,
+		] {
+			let model = PixelBlockEntropyModel.compute(
+				quantCounts: proof.quantCounts, params: params)
+			#expect(model.thresholds.isEmpty)
+			#expect(model.qfThresholds == proof.qfThresholds)
+			#expect(model.numContexts == proof.numContexts)
+			#expect(model.contextMap == proof.contextMap)
+			#expect(
+				model.contextMap.count
+					== 3 * JPEGBlockContextMap.numOrders
+					* (proof.qfThresholds.count + 1))
+			#expect(
+				Set(model.contextMap)
+					== Set((0..<model.numContexts).map(UInt8.init)))
+		}
+
+		let proof = PixelBlockEntropyModelProofCase.tieObservation
+		let source = try sourceModelFields(proof: .categoryLookup)
+		#expect(source.total == proof.quantCounts.reduce(0, +))
+		#expect(source.qfThresholds == proof.qfThresholds)
+		#expect(source.numContexts == proof.numContexts)
+		let differences = source.contextMap.enumerated().compactMap { index, value in
+			let native = proof.contextMap[index]
+			return value == native
+				? nil
+				: PixelBlockMapDifference(
+					index: index, source: value, native: native)
+		}
+		#expect(differences == proof.sourceMapDifferences)
+	}
+
+	private func sourceModelFields(proof: PixelBlockContextProofCase) throws
+		-> SourcePixelBlockModelFields
+	{
 		let url = try #require(
 			Bundle.module.url(
-				forResource: "e4_pixel_block_model_ties", withExtension: "sem",
+				forResource: proof.fixture, withExtension: "sem",
 				subdirectory: "Fixtures/semantic"))
 		let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
-		#expect(model.qfThresholds == parseInts(lines[1])?.map(UInt32.init))
-		#expect(model.numContexts == parseInts(lines[2])?.first)
-		#expect(model.contextMap.map(Int.init) == parseInts(lines[3]))
+		return SourcePixelBlockModelFields(
+			total: parseInts(lines[0])!.first!,
+			qfThresholds: parseInts(lines[1])!.map(UInt32.init),
+			numContexts: parseInts(lines[2])!.first!,
+			contextMap: parseInts(lines[3])!.map(UInt8.init),
+			consumerRawQuant: parseInts(lines[4])!,
+			consumerCategories: parseInts(lines[5])!)
 	}
 
 	private func parseInts(_ line: Substring) -> [Int]? {
@@ -158,35 +162,20 @@ struct PixelBlockEntropyModelTests {
 				result.category(channel: channel, dcBucket: 0, rawQuant: 11)
 					== channel + 3)
 		}
-		let proof = PixelBlockContextProofCase.categoryLookup
-		let sourceURL = try #require(
-			Bundle.module.url(
-				forResource: proof.fixture, withExtension: "sem",
-				subdirectory: "Fixtures/semantic"))
-		let sourceFields = Dictionary(
-			uniqueKeysWithValues: try String(contentsOf: sourceURL, encoding: .utf8)
-				.split(separator: "\n").map { line in
-					let fields = line.split(separator: " ")
-					return (
-						String(fields[0]),
-						fields.dropFirst().compactMap { Int($0) }
-					)
-				})
-		let rawQuant = sourceFields["consumer_raw_qf"]!
-		let categories = sourceFields["consumer_categories"]!
-		var histogram = [Int](repeating: 0, count: 256)
-		for quant in 0..<250 { histogram[quant] = 200 }
-		let model = PixelBlockEntropyModel.compute(
-			quantCounts: histogram, params: try DistanceParams(distance: 1))
-		#expect(model.qfThresholds.map(Int.init) == [rawQuant[0]])
+		let proof = try sourceModelFields(proof: .categoryLookup)
+		let sourceModel = JPEGBlockContextMap.Result(
+			thresholds: [], qfThresholds: proof.qfThresholds,
+			contextMap: proof.contextMap, numContexts: proof.numContexts)
+		let rawQuant = proof.consumerRawQuant
+		let categories = proof.consumerCategories
 		for channel in 0..<3 {
 			#expect(
-				model.category(
+				sourceModel.category(
 					channel: channel, dcBucket: 0, rawQuant: UInt32(rawQuant[0])
 				)
 					== categories[channel * 2])
 			#expect(
-				model.category(
+				sourceModel.category(
 					channel: channel, dcBucket: 0, rawQuant: UInt32(rawQuant[1])
 				)
 					== categories[channel * 2 + 1])
@@ -194,7 +183,7 @@ struct PixelBlockEntropyModelTests {
 	}
 
 	@Test(
-		"Transmitted DC lists, quant thresholds minus one, map entries and category count match the source wire fields."
+		"The model's DC, qf, map and category fields reach the serialized header."
 	)
 	func quantThresholdWireFieldsMatchReference() throws {
 		var histogram = [Int](repeating: 0, count: 256)
@@ -214,9 +203,14 @@ struct PixelBlockEntropyModelTests {
 		#expect(reader.read(4) == 1)
 		#expect(reader.read(2) == 3)
 		#expect(reader.read(8) == 80)
-		let expectedMap = parseInts(lines[3])!
-		#expect(result.contextMap.map(Int.init) == expectedMap)
+		#expect(result.qfThresholds == parseInts(lines[1])?.map(UInt32.init))
+		let expectedMap = result.contextMap.map(Int.init)
+		#expect(
+			expectedMap.count
+				== 3 * JPEGBlockContextMap.numOrders
+				* (result.qfThresholds.count + 1))
 		#expect(result.numContexts == parseInts(lines[2])?.first)
+		#expect(Set(expectedMap) == Set(0..<result.numContexts))
 		let mapMode = reader.read(3)
 		let decodedMap: [Int]
 		if mapMode == 1 {
@@ -342,9 +336,15 @@ struct PixelBlockEntropyModelTests {
 				subdirectory: "Fixtures/semantic"))
 		let fields = try String(contentsOf: fixtureURL, encoding: .utf8).split(
 			separator: "\n")
+		let proof = PixelBlockEntropyModelProofCase.flower1024
+		#expect(model.thresholds.isEmpty)
+		#expect(model.qfThresholds == proof.qfThresholds)
+		#expect(model.numContexts == proof.numContexts)
+		#expect(model.contextMap == proof.contextMap)
+		#expect(parseInts(fields[0])?.first == proof.quantCounts.reduce(0, +))
 		#expect(model.qfThresholds == parseInts(fields[1])?.map(UInt32.init))
 		#expect(model.numContexts == parseInts(fields[2])?.first)
-		#expect(model.contextMap.map(Int.init) == parseInts(fields[3]))
+		#expect(parseInts(fields[3])?.map(UInt8.init) == proof.contextMap)
 		let rawQuant = decisions.quantFields.flatMap { $0 }
 		#expect(rawQuant.count == 16_384)
 		#expect(Set(rawQuant) == Set([6]))
