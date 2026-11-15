@@ -60,7 +60,6 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 		SemanticCorpusEntry(
 			name: "flower_512_d3", input: .srgb8(file: "flower_512"), distance: 3,
 			knownIssues: [
-				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
 				"coeff_order": ["GER-3386", "GER-3387"],
 				"block_context": ["GER-3387"], "context_map": ["GER-3387"],
