@@ -52,6 +52,11 @@ struct DecisionInventoryFixtureTests {
 		else { return .notFullLibjxl }
 		if let category = reference.category {
 			let key = reference.path + "#" + category
+			if category == "epf_sharpness" {
+				return SharpnessProofCase.all.contains {
+					$0.reference == key && $0.proves(key)
+				} ? .verifies : .notCompared
+			}
 			if category == "ans_cost" || category == "histogram" {
 				return ANSHistogramProofCase.all.contains {
 					$0.reference == key

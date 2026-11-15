@@ -23,7 +23,9 @@ int RunDump(const std::vector<std::string>& args) {
   if (!DecodeFirstFrame(bytes, &frame, wanted.count("entropy_layout") != 0)) return 1;
   SemanticDumpWriter out;
   for (const auto &category : categories) {
-    if (wanted.empty() && std::string_view(category.name) == "entropy_layout")
+    if (wanted.empty() &&
+        (std::string_view(category.name) == "entropy_layout" ||
+         std::string_view(category.name) == "epf_sharpness"))
       continue;
     if (!wanted.empty() && !wanted.count(category.name))
       continue;

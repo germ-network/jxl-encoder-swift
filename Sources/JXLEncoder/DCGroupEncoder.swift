@@ -167,7 +167,9 @@ public enum DCGroupEncoder {
 
 		// Edge-preserving filter sharpness, constant across the image.
 		for _ in 0..<(data.widthInBlocks * data.heightInBlocks) {
-			writer.write(token: Token(context: 0, value: packSigned(4)))
+			writer.write(
+				token: Token(
+					context: 0, value: packSigned(Int32(data.epfSharpness))))
 		}
 	}
 

@@ -586,7 +586,7 @@ extension Encoder {
 			return DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks,
-				subsampling: transcode.subsampling)
+				subsampling: transcode.subsampling, epfSharpness: 0)
 		}
 
 		// No meaning without per-image code optimisation to carry it — the
