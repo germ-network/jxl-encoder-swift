@@ -2,19 +2,17 @@ name: Linux
 
 on:
   push:
-    # branches:
-    #   - main
+    branches:
+      - main
     paths-ignore:
       - 'README.md'
       - 'CODE_OF_CONDUCT.md'
       - '.editorconfig'
       - '.spi.yml'
   pull_request:
-    branches:
-      - main
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.head_ref || github.ref }}
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
   cancel-in-progress: true
 
 # These jobs only need to read the repository.
@@ -32,6 +30,8 @@ jobs:
     container: swift:6.1
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build core
         run: swift build --target JXLEncoder
       - name: Test core
@@ -44,5 +44,7 @@ jobs:
     container: swift:6.1
     steps:
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: swift-format lint
         run: swift format lint --recursive --configuration .swift-format --strict Sources Tests
