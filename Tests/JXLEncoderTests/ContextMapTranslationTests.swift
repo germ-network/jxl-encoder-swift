@@ -840,7 +840,7 @@ struct ContextMapTranslationTests {
 		#expect(composedActual.bytes == composedExpected.bytes)
 	}
 
-	@Test
+	@Test(.enabled(if: PackageCheckout.isAvailable))
 	func inventoryReferencesHaveContextMapProofs() throws {
 		let inventory = try DecisionInventoryTests.committed()
 		#expect(inventory.parseViolations.isEmpty)
