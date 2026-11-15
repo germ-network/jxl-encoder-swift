@@ -215,4 +215,34 @@ struct DistanceParamsTests {
 		}
 	}
 
+	@Test(
+		"QuantDC follows the native Float pow data flow",
+		.disabled("Pending native formula coverage"))
+	func quantDCUsesNativePowFormula() {}
+
+	@Test(
+		"Native quantization retains complete C++ diagnostics",
+		.disabled("Pending diagnostic preservation coverage"))
+	func preservesCppQuantizationDiagnostics() {}
+
+	@Test(
+		"QuantDC preserves its effective-distance clamps and cap",
+		.disabled("Pending clamp boundary coverage"))
+	func quantDCClampsAtNativeBoundaries() {}
+
+	@Test(
+		"QuantDC preserves source reciprocal-times-distance order",
+		.disabled("Pending arithmetic witness coverage"))
+	func quantDCUsesSourceOperandOrder() {}
+
+	@Test(
+		"Native DC quantization reaches frame parameters",
+		.disabled("Pending parameter propagation coverage"))
+	func nativeDCQuantFlowsThroughDistanceParams() {}
+
+	@Test(
+		"Native DC scale reaches production coefficient quantization",
+		.disabled("Pending production propagation coverage"))
+	func nativeDCScaleFlowsThroughProductionQuantization() {}
+
 }
