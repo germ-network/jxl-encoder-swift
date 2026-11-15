@@ -160,6 +160,11 @@ generate_cluster() {
 	if [[ "$mode" == fast ]]; then
 		test_file=Tests/JXLEncoderTests/HistogramClusteringTranslationTests.swift
 	fi
+	case "$name" in
+		clusters_best_survive|clusters_best_pair_merge)
+			test_file=Tests/JXLEncoderTests/ContextMapTranslationTests.swift
+			;;
+	esac
 	case "$mode" in fast) encoded_mode=0 ;; best) encoded_mode=1 ;; esac
 	local lengths=() flat=() row
 	for row in "$@"; do
@@ -260,6 +265,26 @@ generate_context_map_with_candidates() {
 	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map candidates in generator\t-\tnum_histograms=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
 		"$name" "$input_hash" "$num_histograms" >> "$tmp"
 	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap selected mode/bytes; BuildAndEncodeHistograms candidate costs and post-LZ77 token counts with default context-map params; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
+}
+
+generate_context_entropy() {
+	local name="$1"; shift
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.context_entropy.entries i %s' "$#"
+		printf ' %s' "$@"
+		printf '\n'
+	} > "$input"
+	"$harness" context-entropy "$@" > "$out/$name.expected.sem"
+	local input_hash expected_hash input_list
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	input_list="${*// /;}"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context entropy entries\t-\tentries=%s\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$input_hash" "$input_list" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_context_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tBuildAndEncodeHistograms post-RLE candidate state and serialization; hwy=NEON\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
@@ -547,11 +572,14 @@ generate ans_alphabet48_fast 7 fast "${threshold48[@]}"
 generate ans_alphabet64_fast 7 fast "${threshold64[@]}"
 generate_cluster clusters_fast_identical fast 4 16,0 16,0
 generate_cluster clusters_best_identical best 4 16,0 16,0
+generate_cluster clusters_best_survive best 2 100,0 0,100
 generate_cluster clusters_fast_merge fast 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
 generate_cluster clusters_rounded_float_total_fast fast 1 16799851,0 0,1
 generate_cluster clusters_best_merge best 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
+generate_cluster clusters_best_pair_merge best 2 \
+	23,24,113,132,138,100 27,2,142,84,128,21
 generate_cluster clusters_ties_fast fast 2 \
 	40,40,0 40,0,40 0,40,40
 generate_cluster clusters_farthest_fast fast 2 \
@@ -601,6 +629,8 @@ for ((index = 0; index < 100; index++)); do
 done
 generate_context_map context_prefix_99 16 1 "${context_99[@]}"
 generate_context_map context_ans_100 16 1 "${context_100[@]}"
+generate_context_entropy context_entropy_prefix_99 "${context_99[@]}"
+generate_context_entropy context_entropy_ans_100 "${context_100[@]}"
 generate_context_map_with_candidates context_simple_profitability 2 0 1 0 1 0 1 --mtf 0 1 1 1 1 1
 generate_context_map_with_candidates context_tie_raw_mtf 16 0 1 --mtf 0 1
 context_simple_tie_entries=(1 1 0 1 1 1 1 1 1 2 2 1 1 2 2 1 2 1 0 1 1 2 1 1 0 0 2 1 1 1 1 0 0 0 1 0 2 2 2 1 0 1 1 0 1 1 0 0)
@@ -614,6 +644,7 @@ for ((symbol = 0; symbol < 4; symbol++)); do
 	for ((repeat = 1; repeat < 20; repeat++)); do context_rle_mtf+=(0); done
 done
 generate_context_map_with_candidates context_raw_rle 4 "${context_rle_entries[@]}" --mtf "${context_rle_mtf[@]}"
+generate_context_entropy context_entropy_rle "${context_rle_entries[@]}"
 
 generate_tree tree_gradient_fixed_8192_dc1 6 8192 8 0 1 2
 generate_tree tree_gradient_fixed_8193_dc2 6 8193 8 0 2 2

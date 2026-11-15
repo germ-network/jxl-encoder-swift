@@ -41,7 +41,7 @@ struct ContextMapTranslationTests {
 		#expect(length.encode(UInt32.max).bitCount == 29)
 	}
 
-	@Test(.disabled("Awaiting context-map translation"))
+	@Test
 	func runLengthsAndDistanceContextsMatchPinnedReference() throws {
 		let result = ContextMapEntropy.runLengthEncode(
 			Array(repeating: 0, count: 100) + Array(repeating: 1, count: 100))
@@ -51,22 +51,89 @@ struct ContextMapTranslationTests {
 			result.tokens.contains {
 				!$0.isLength && $0.token.context == 1 && $0.token.value == 0
 			})
+
+		let shortRuns = ContextMapEntropy.runLengthEncode([0, 1, 1, 2, 2, 2])
+		#expect(!shortRuns.enabled)
+		#expect(shortRuns.tokens.allSatisfy { !$0.isLength })
 	}
 
-	@Test(.disabled("Awaiting context-map translation"))
+	@Test
 	func bestClusteringMatchesPinnedReference() throws {
-		var first = Histogram()
-		first.add(0)
-		var second = Histogram()
-		second.add(0)
-		let merged = ContextMapEntropy.cluster([first, second])
-		#expect(merged.contextMap == [0, 0])
+		let fixture = try EntropyReferenceFixture.load("context_entropy_rle")
+		let entries = try fixture.integers(
+			fixture.input, "input.context_entropy.entries"
+		).map(UInt8.init)
+		let prepared = ContextMapEntropy.prepare(entries)
+		#expect(
+			prepared.contextMap.map(Int64.init)
+				== (try fixture.integers(
+					fixture.expected, "entropy.context_entropy.context_map")))
+		#expect(
+			prepared.histograms.count
+				== Int(
+					try fixture.integers(
+						fixture.expected,
+						"entropy.context_entropy.histogram_count")[0]))
+		#expect(prepared.histograms.count == 1)
+		#expect(prepared.histograms[0].totalCount == prepared.runLength.tokens.count)
+		let mergeFixture = try EntropyReferenceFixture.load("clusters_best_pair_merge")
+		let mergeLengths = try mergeFixture.integers(
+			mergeFixture.input, "input.clusters.lengths")
+		let mergeCounts = try mergeFixture.integers(
+			mergeFixture.input, "input.clusters.counts")
+		var mergeOffset = 0
+		let mergeSources = mergeLengths.map { length -> Histogram in
+			var histogram = Histogram()
+			for symbol in 0..<Int(length) {
+				for _ in 0..<Int(mergeCounts[mergeOffset + symbol]) {
+					histogram.add(UInt32(symbol))
+				}
+			}
+			mergeOffset += Int(length)
+			return histogram
+		}
+		let merged = ContextMapEntropy.cluster(mergeSources)
+		#expect(
+			merged.contextMap.map(Int64.init)
+				== (try mergeFixture.integers(
+					mergeFixture.expected, "entropy.clusters.map")))
 		#expect(merged.histograms.count == 1)
-		Issue.record(
-			"Add pinned native merge and survive witnesses, including length symbols")
+
+		let survivorFixture = try EntropyReferenceFixture.load("clusters_best_survive")
+		let lengths = try survivorFixture.integers(
+			survivorFixture.input, "input.clusters.lengths")
+		let counts = try survivorFixture.integers(
+			survivorFixture.input, "input.clusters.counts")
+		var offset = 0
+		let sourceHistograms = lengths.map { length -> Histogram in
+			var histogram = Histogram()
+			for symbol in 0..<Int(length) {
+				for _ in 0..<Int(counts[offset + symbol]) {
+					histogram.add(UInt32(symbol))
+				}
+			}
+			offset += Int(length)
+			return histogram
+		}
+		let survivors = ContextMapEntropy.cluster(sourceHistograms)
+		#expect(
+			survivors.contextMap.map(Int64.init)
+				== (try survivorFixture.integers(
+					survivorFixture.expected, "entropy.clusters.map")))
+		#expect(survivors.histograms.count == 2)
+		let survivorLengths = try survivorFixture.integers(
+			survivorFixture.expected, "entropy.clusters.alphabet_lengths")
+		let survivorCounts = survivors.histograms.enumerated().flatMap { index, histogram in
+			histogram.counts.prefix(Int(survivorLengths[index])).map(Int64.init)
+		}
+		#expect(
+			survivorCounts
+				== (try survivorFixture.integers(
+					survivorFixture.expected,
+					"entropy.clusters.histogram_counts")))
 	}
 
-	@Test(.disabled("Awaiting context-map translation"))
+	@Test
 	func candidateCostsMatchPinnedReference() throws {
 		let prepared = ContextMapEntropy.prepare([0, 1, 0, 1])
 		#expect(
@@ -80,12 +147,170 @@ struct ContextMapTranslationTests {
 		#expect(prepared.logAlphabetSize == PrefixCodeWriter.prefixMaxBits)
 		var writer = BitWriter()
 		ContextMapEntropy.write(prepared, to: &writer)
-		Issue.record(
-			"Compare estimatedCost, selected histograms and written bits independently with native candidates"
+		#expect(prepared.estimatedCost > 0)
+		#expect(writer.bitsWritten > 0)
+
+		let rlePrepared = ContextMapEntropy.prepare(
+			Array(repeating: 0, count: 100) + Array(repeating: 1, count: 100))
+		var rleWriter = BitWriter()
+		ContextMapEntropy.write(rlePrepared, to: &rleWriter)
+		#expect(rlePrepared.runLength.enabled)
+		#expect(rlePrepared.estimatedCost != rleWriter.bitsWritten)
+		#expect(rlePrepared.runLength.tokens.filter(\.isLength).count == 2)
+		#expect(rlePrepared.contextMap.count == 2)
+		#expect(
+			rlePrepared.histograms.contains {
+				$0.counts.dropFirst(224).contains { $0 > 0 }
+			}
 		)
+
+		let fixture = try EntropyReferenceFixture.load("context_raw_rle")
+		let nativeRawEntries = try fixture.integers(
+			fixture.input, "input.context_map.entries"
+		).map(UInt8.init)
+		let nativeMTFEntries = try fixture.integers(
+			fixture.input, "input.context_map.mtf_entries"
+		).map(UInt8.init)
+		let nativeRaw = ContextMapEntropy.prepare(nativeRawEntries)
+		let nativeMTF = ContextMapEntropy.prepare(nativeMTFEntries)
+		#expect(
+			nativeRaw.estimatedCost
+				== Int(
+					try fixture.integers(
+						fixture.expected, "entropy.context_map.raw_cost")[0]
+				))
+		#expect(
+			nativeMTF.estimatedCost
+				== Int(
+					try fixture.integers(
+						fixture.expected, "entropy.context_map.mtf_cost")[0]
+				))
+
+		let state = try EntropyReferenceFixture.load("context_entropy_rle")
+		let entries = try state.integers(
+			state.input, "input.context_entropy.entries"
+		).map(UInt8.init)
+		let native = state.expected
+		let candidate = ContextMapEntropy.prepare(entries)
+		let nativeTokens = try state.integers(native, "entropy.context_entropy.tokens")
+		let swiftTokens = candidate.runLength.tokens.flatMap { token -> [Int64] in
+			[
+				Int64(token.token.context), Int64(token.token.value),
+				Int64(token.isLength ? 1 : 0),
+			]
+		}
+		#expect(swiftTokens == nativeTokens)
+		#expect(candidate.runLength.enabled)
+		#expect(
+			candidate.contextMap.map(Int64.init)
+				== (try state.integers(
+					native, "entropy.context_entropy.context_map")))
+		#expect(
+			candidate.estimatedCost
+				== Int(
+					try state.integers(native, "entropy.context_entropy.cost")[
+						0]))
+		#expect(
+			candidate.uintConfigurations.flatMap {
+				[
+					Int64($0.splitExponent), Int64($0.msbInToken),
+					Int64($0.lsbInToken),
+				]
+			}
+				== (try state.integers(
+					native, "entropy.context_entropy.uint_configs")))
+		#expect(
+			try state.integers(native, "entropy.context_entropy.length_uint_config")
+				== [0, 0, 0])
+		#expect(
+			try state.integers(native, "entropy.context_entropy.min_length_symbol") == [
+				224
+			])
+		#expect(try state.integers(native, "entropy.context_entropy.min_length") == [3])
+		#expect(
+			try state.integers(native, "entropy.context_entropy.distance_context") == [
+				1
+			])
+		#expect(
+			candidate.histograms.count
+				== Int(
+					try state.integers(
+						native, "entropy.context_entropy.histogram_count")[
+							0]))
+		let lengths = try state.integers(
+			native, "entropy.context_entropy.histogram_lengths")
+		let histogramCounts = candidate.histograms.flatMap { histogram in
+			let alphabetSize = (histogram.counts.lastIndex(where: { $0 > 0 }) ?? 0) + 1
+			return histogram.counts.prefix(alphabetSize).map(Int64.init)
+		}
+		#expect(
+			histogramCounts
+				== (try state.integers(
+					native, "entropy.context_entropy.histogram_counts")))
+		let tables: [Int64] = candidate.prefixCodes.enumerated().flatMap { index, code in
+			(0..<Int(lengths[index])).flatMap { symbol in
+				[Int64(code.depths[symbol]), Int64(0)]
+			}
+		}
+		#expect(tables == (try state.integers(native, "entropy.context_entropy.tables")))
+		#expect(
+			try state.integers(native, "entropy.context_entropy.use_prefix_code") == [1]
+		)
+		#expect(
+			try state.integers(native, "entropy.context_entropy.log_alpha_size") == [15]
+		)
+		var serialized = BitWriter()
+		ContextMapEntropy.write(candidate, to: &serialized)
+		#expect(
+			serialized.bitsWritten
+				== Int(
+					try state.integers(
+						native, "entropy.context_entropy.bit_count")[0]))
+		#expect(
+			serialized.bytes.map(Int64.init)
+				== (try state.integers(native, "entropy.context_entropy.bytes")))
+
+		for (name, expectedPrefix, expectedLogAlpha) in [
+			("context_entropy_prefix_99", 1, 15),
+			("context_entropy_ans_100", 0, 7),
+		] {
+			let boundary = try EntropyReferenceFixture.load(name)
+			let boundaryEntries = try boundary.integers(
+				boundary.input, "input.context_entropy.entries"
+			).map(UInt8.init)
+			let boundaryCandidate = ContextMapEntropy.prepare(boundaryEntries)
+			let boundaryTokens = boundaryCandidate.runLength.tokens.flatMap {
+				[
+					Int64($0.token.context), Int64($0.token.value),
+					Int64($0.isLength ? 1 : 0),
+				]
+			}
+			#expect(
+				boundaryTokens
+					== (try boundary.integers(
+						boundary.expected, "entropy.context_entropy.tokens"))
+			)
+			#expect(boundaryCandidate.usesPrefixCode == (expectedPrefix == 1))
+			#expect(
+				boundaryCandidate.logAlphabetSize == expectedLogAlpha)
+			#expect(
+				boundaryCandidate.estimatedCost
+					== Int(
+						try boundary.integers(
+							boundary.expected,
+							"entropy.context_entropy.cost")[0]))
+			var boundaryWriter = BitWriter()
+			ContextMapEntropy.write(boundaryCandidate, to: &boundaryWriter)
+			let expectedBits = try boundary.integers(
+				boundary.expected, "entropy.context_entropy.bit_count")[0]
+			let expectedBytes = try boundary.integers(
+				boundary.expected, "entropy.context_entropy.bytes")
+			#expect(boundaryWriter.bitsWritten == Int(expectedBits))
+			#expect(boundaryWriter.bytes.map(Int64.init) == expectedBytes)
+		}
 	}
 
-	@Test(.disabled("Awaiting context-map translation"))
+	@Test
 	func representationAndSerializationMatchPinnedReference() throws {
 		let prepared = ContextMapEncoding.prepare([0, 1], numHistograms: 2)
 		#expect(prepared.representation == .simple(entryBits: 1))
@@ -94,9 +319,86 @@ struct ContextMapTranslationTests {
 		var writer = BitWriter()
 		ContextMapEncoding.write(prepared, to: &writer)
 		#expect(writer.bitsWritten == 5)
-		Issue.record(
-			"Compare raw, MTF, ties, RLE and coder threshold fixtures including padded bytes"
-		)
+
+		for name in [
+			"context_single_histogram",
+			"context_simple_profitability", "context_simple_tie_candidate",
+			"context_tie_raw_mtf", "context_mtf_ans", "context_raw_ans",
+			"context_prefix_99", "context_ans_100", "context_raw_rle",
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			let entries = try fixture.integers(
+				fixture.input, "input.context_map.entries"
+			).map(UInt8.init)
+			let numHistograms = Int(
+				try fixture.integers(
+					fixture.input, "input.context_map.num_histograms")[0])
+			let candidate = ContextMapEncoding.prepare(
+				entries, numHistograms: numHistograms)
+			let expected = fixture.expected
+			#expect(candidate.entries == entries)
+			if expected.fields["entropy.context_map.mtf_entries"] != nil {
+				#expect(
+					candidate.transformedEntries.map(Int64.init)
+						== (try fixture.integers(
+							expected, "entropy.context_map.mtf_entries"))
+				)
+			}
+			if numHistograms == 1 {
+				#expect(candidate.raw == nil && candidate.moveToFront == nil)
+			} else {
+				#expect(candidate.raw != nil && candidate.moveToFront != nil)
+			}
+			if expected.fields["entropy.context_map.raw_cost"] != nil,
+				let raw = candidate.raw, let moveToFront = candidate.moveToFront
+			{
+				#expect(
+					raw.estimatedCost
+						== Int(
+							try fixture.integers(
+								expected,
+								"entropy.context_map.raw_cost")[0]))
+				#expect(
+					moveToFront.estimatedCost
+						== Int(
+							try fixture.integers(
+								expected,
+								"entropy.context_map.mtf_cost")[0]))
+			}
+			let expectedSimple =
+				try fixture.integers(
+					expected, "entropy.context_map.simple")[0] == 1
+			let expectedMTF =
+				try fixture.integers(
+					expected, "entropy.context_map.use_mtf")[0] == 1
+			switch candidate.representation {
+			case .simple(let bits):
+				#expect(expectedSimple)
+				#expect(
+					bits
+						== Int(
+							try fixture.integers(
+								expected,
+								"entropy.context_map.entry_bits")[0]
+						))
+			case .raw:
+				#expect(!expectedSimple && !expectedMTF)
+			case .moveToFront:
+				#expect(!expectedSimple && expectedMTF)
+			}
+			var serialized = BitWriter()
+			ContextMapEncoding.write(candidate, to: &serialized)
+			#expect(
+				serialized.bitsWritten
+					== Int(
+						try fixture.integers(
+							expected, "entropy.context_map.bit_count")[
+								0]))
+			#expect(
+				serialized.bytes.map(Int64.init)
+					== (try fixture.integers(
+						expected, "entropy.context_map.bytes")))
+		}
 	}
 
 	@Test(.disabled("Awaiting context-map translation"))

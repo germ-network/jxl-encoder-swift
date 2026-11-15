@@ -18,12 +18,20 @@ struct Histogram {
 	var bitCost: Float = 0
 
 	mutating func add(_ symbol: UInt32) {
-		counts[Int(symbol)] += 1
+		let index = Int(symbol)
+		if index >= counts.count {
+			counts += [UInt32](
+				repeating: 0, count: ((index + 8) / 8) * 8 - counts.count)
+		}
+		counts[index] += 1
 		totalCount += 1
 	}
 
 	mutating func add(_ other: Histogram) {
-		for i in 0..<StaticEntropyCodes.alphabetSize { counts[i] += other.counts[i] }
+		if counts.count < other.counts.count {
+			counts += [UInt32](repeating: 0, count: other.counts.count - counts.count)
+		}
+		for i in other.counts.indices { counts[i] += other.counts[i] }
 		totalCount += other.totalCount
 	}
 
@@ -34,7 +42,7 @@ struct Histogram {
 		let total = Float(totalCount)
 		let inverseTotal = 1.0 / total
 		var lanes = [Float](repeating: 0, count: 4)
-		for i in 0..<StaticEntropyCodes.alphabetSize {
+		for i in counts.indices {
 			let count = counts[i]
 			precondition(count <= UInt32(Int32.max))
 			let value = Float(count)
@@ -158,7 +166,7 @@ enum HistogramCluster {
 
 	static func buildPrefixCodes(_ histograms: [Histogram]) -> [PrefixCode] {
 		histograms.map { histogram in
-			var length = StaticEntropyCodes.alphabetSize
+			var length = histogram.counts.count
 			while length > 0 && histogram.counts[length - 1] == 0 { length -= 1 }
 			let depths = HuffmanTree.createTree(
 				counts: histogram.counts, length: length, treeLimit: 15)
@@ -169,11 +177,11 @@ enum HistogramCluster {
 				depths: depths
 					+ [UInt8](
 						repeating: 0,
-						count: StaticEntropyCodes.alphabetSize - length),
+						count: histogram.counts.count - length),
 				bits: bits
 					+ [UInt16](
 						repeating: 0,
-						count: StaticEntropyCodes.alphabetSize - length))
+						count: histogram.counts.count - length))
 		}
 	}
 
