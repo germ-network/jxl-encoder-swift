@@ -70,7 +70,8 @@ struct NativeBlockContextMapDecodeCase: Sendable {
 
 enum NativeInteropGateError: Error, Equatable {
 	case requiredHarnessMissingOrInvalid
-	case decoderCommandsNotImplemented
+	case commandFailed(Int32, String)
+	case malformedOutput(String)
 }
 
 enum NativeInteropGate {
@@ -91,15 +92,138 @@ private enum NativeDecoderHarness {
 	static func decodeContextMap(
 		_ input: NativeContextMapDecodeInput, using harness: URL
 	) throws -> DecodedContextMap {
-		_ = (input, harness)
-		throw NativeInteropGateError.decoderCommandsNotImplemented
+		let fields = try run(input.arguments, using: harness)
+		let decodeSucceeded = try boolean(fields, "decode_succeeded")
+		return DecodedContextMap(
+			entries: decodeSucceeded ? try byteValues(required(fields, "entries")) : [],
+			numHistograms: decodeSucceeded
+				? try integer(fields, "num_histograms") : 0,
+			decodeSucceeded: decodeSucceeded,
+			totalBitsConsumed: try integer(fields, "total_bits_consumed"),
+			closeSucceeded: try boolean(fields, "close_succeeded"))
 	}
 
 	static func decodeBlockContextMap(
 		_ input: NativeBlockContextMapDecodeInput, using harness: URL
 	) throws -> DecodedBlockContextMap {
-		_ = (input, harness)
-		throw NativeInteropGateError.decoderCommandsNotImplemented
+		let fields = try run(input.arguments, using: harness)
+		let decodeSucceeded = try boolean(fields, "decode_succeeded")
+		return DecodedBlockContextMap(
+			dcThresholds0: decodeSucceeded
+				? try int32Values(required(fields, "dc0")) : [],
+			dcThresholds1: decodeSucceeded
+				? try int32Values(required(fields, "dc1")) : [],
+			dcThresholds2: decodeSucceeded
+				? try int32Values(required(fields, "dc2")) : [],
+			qfThresholds: decodeSucceeded
+				? try uint32Values(required(fields, "qf_thresholds")) : [],
+			numDC: decodeSucceeded ? try integer(fields, "num_dc") : 0,
+			numContexts: decodeSucceeded ? try integer(fields, "num_contexts") : 0,
+			contextMap: decodeSucceeded
+				? try byteValues(required(fields, "context_map")) : [],
+			decodeSucceeded: decodeSucceeded,
+			totalBitsConsumed: try integer(fields, "total_bits_consumed"),
+			closeSucceeded: try boolean(fields, "close_succeeded"))
+	}
+
+	private static func run(_ arguments: [String], using harness: URL) throws
+		-> [String: String]
+	{
+		let process = Process()
+		let output = Pipe()
+		let errors = Pipe()
+		process.executableURL = harness
+		process.arguments = arguments
+		process.standardOutput = output
+		process.standardError = errors
+		try process.run()
+		let outputData = output.fileHandleForReading.readDataToEndOfFile()
+		process.waitUntilExit()
+		let errorData = errors.fileHandleForReading.readDataToEndOfFile()
+		guard process.terminationStatus == 0 else {
+			let message = String(decoding: errorData, as: UTF8.self)
+			throw NativeInteropGateError.commandFailed(
+				process.terminationStatus, message)
+		}
+		let text = String(decoding: outputData, as: UTF8.self)
+		var fields: [String: String] = [:]
+		for line in text.split(whereSeparator: \.isNewline) {
+			let pair = line.split(
+				separator: "=", maxSplits: 1, omittingEmptySubsequences: false)
+			guard pair.count == 2 else {
+				throw NativeInteropGateError.malformedOutput(String(line))
+			}
+			let key = String(pair[0])
+			guard fields[key] == nil else {
+				throw NativeInteropGateError.malformedOutput(
+					"duplicate field: \(key)")
+			}
+			fields[key] = String(pair[1])
+		}
+		return fields
+	}
+
+	private static func required(_ fields: [String: String], _ key: String) throws -> String {
+		guard let value = fields[key] else {
+			throw NativeInteropGateError.malformedOutput("missing field: \(key)")
+		}
+		return value
+	}
+
+	private static func integer(
+		_ fields: [String: String], _ key: String
+	) throws -> Int {
+		guard let value = fields[key], let parsed = Int(value)
+		else { throw NativeInteropGateError.malformedOutput("invalid integer: \(key)") }
+		return parsed
+	}
+
+	private static func boolean(_ fields: [String: String], _ key: String) throws -> Bool {
+		switch fields[key] {
+		case "1": return true
+		case "0": return false
+		default: throw NativeInteropGateError.malformedOutput("invalid boolean: \(key)")
+		}
+	}
+
+	private static func values<T: LosslessStringConvertible>(_ value: String) throws -> [T] {
+		guard !value.isEmpty else { return [] }
+		let parts = value.split(separator: ",")
+		let parsed = parts.compactMap { T(String($0)) }
+		guard parsed.count == parts.count else {
+			throw NativeInteropGateError.malformedOutput("invalid value list")
+		}
+		return parsed
+	}
+
+	private static func byteValues(_ value: String) throws -> [UInt8] {
+		let parsed: [Int] = try values(value)
+		return try parsed.map {
+			guard let byte = UInt8(exactly: $0) else {
+				throw NativeInteropGateError.malformedOutput("invalid byte value")
+			}
+			return byte
+		}
+	}
+
+	private static func int32Values(_ value: String) throws -> [Int32] {
+		let parsed: [Int] = try values(value)
+		return try parsed.map {
+			guard let threshold = Int32(exactly: $0) else {
+				throw NativeInteropGateError.malformedOutput("invalid DC threshold")
+			}
+			return threshold
+		}
+	}
+
+	private static func uint32Values(_ value: String) throws -> [UInt32] {
+		let parsed: [Int] = try values(value)
+		return try parsed.map {
+			guard let threshold = UInt32(exactly: $0) else {
+				throw NativeInteropGateError.malformedOutput("invalid QF threshold")
+			}
+			return threshold
+		}
 	}
 }
 
@@ -119,23 +243,60 @@ struct NativeContextMapInteropTests {
 		#expect(optionalHarness == nil)
 	}
 
-	@Test(.disabled("Awaiting native decoder commands and the required host interop gate."))
+	@Test
 	func nativeContextMapDecoderConsumesExactBits() throws {
 		let environment = ProcessInfo.processInfo.environment
 		let harnessPath = try NativeInteropGate.harnessURL(
 			required: environment["JXL_REQUIRE_NATIVE_INTEROP"] == "1",
 			path: environment["JXL_HARNESS_PATH"])
 		guard let harness = harnessPath else { return }
+		var representations: Set<String> = []
+		var simpleEntryBits: Set<Int> = []
+		var entropyModes: Set<String> = []
+		var hasRunLength = false
 		for name in Self.contextMapFixtures {
 			let fixture = try EntropyReferenceFixture.load(name)
-			let entries = try fixture.integers(
+			let fixtureEntries = try fixture.integers(
 				fixture.input, "input.context_map.entries"
 			).map(UInt8.init)
 			let claimedHistograms = Int(
 				try fixture.integers(
 					fixture.input, "input.context_map.num_histograms")[0])
+			let entries: [UInt8]
+			let numHistograms: Int
+			if name == "context_full_256" {
+				// The fixture tests endpoint values; a decoder requires all 256 IDs.
+				entries = (0...255).map(UInt8.init)
+				numHistograms = 256
+			} else {
+				// DecodeContextMap rejects sparse cluster IDs.
+				let canonical = HistogramCluster.reindex(
+					symbols: fixtureEntries.map(UInt32.init),
+					clusters: [Histogram](
+						repeating: Histogram(), count: claimedHistograms))
+				entries = canonical.contextMap
+				numHistograms = canonical.clusters.count
+			}
 			let prepared = ContextMapEncoding.prepare(
-				entries, numHistograms: claimedHistograms)
+				entries, numHistograms: numHistograms)
+			let selectedEntropy: ContextMapEntropy.Prepared?
+			switch prepared.representation {
+			case .simple(let entryBits):
+				representations.insert("simple")
+				simpleEntryBits.insert(entryBits)
+				selectedEntropy = nil
+			case .raw:
+				representations.insert("raw")
+				selectedEntropy = prepared.raw
+			case .moveToFront:
+				representations.insert("moveToFront")
+				selectedEntropy = prepared.moveToFront
+			}
+			if let selectedEntropy {
+				entropyModes.insert(
+					selectedEntropy.usesPrefixCode ? "prefix" : "ans")
+				hasRunLength = hasRunLength || selectedEntropy.runLength.enabled
+			}
 			var writer = BitWriter()
 			ContextMapEncoding.write(prepared, to: &writer)
 			let decodeCase = NativeContextMapDecodeCase(
@@ -159,9 +320,13 @@ struct NativeContextMapInteropTests {
 				Comment(rawValue: decodeCase.name))
 			#expect(decoded.closeSucceeded, Comment(rawValue: decodeCase.name))
 		}
+		#expect(representations == ["simple", "raw", "moveToFront"])
+		#expect(simpleEntryBits.contains(0) && simpleEntryBits.contains(1))
+		#expect(entropyModes == ["prefix", "ans"])
+		#expect(hasRunLength)
 	}
 
-	@Test(.disabled("Awaiting native decoder commands and the required host interop gate."))
+	@Test
 	func nativeBlockContextMapDecoderConsumesExactBits() throws {
 		var quantCounts = [Int](repeating: 0, count: 256)
 		for quant in 0..<250 { quantCounts[quant] = 200 }
