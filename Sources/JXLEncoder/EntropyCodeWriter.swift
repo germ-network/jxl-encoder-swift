@@ -116,3 +116,80 @@ enum EntropyCodeWriter {
 		}
 	}
 }
+
+struct HybridUintConfiguration: Equatable, Sendable {
+	let splitExponent: Int
+	let msbInToken: Int
+	let lsbInToken: Int
+
+	func encode(_ value: UInt32) -> (symbol: UInt32, bitCount: UInt32, bits: UInt32) {
+		fatalError("Hybrid uint encoding is not implemented")
+	}
+}
+
+enum ContextMapEntropy {
+	struct EncodedToken: Equatable, Sendable {
+		let token: Token
+		let isLength: Bool
+	}
+
+	struct RunLengthResult {
+		let enabled: Bool
+		let tokens: [EncodedToken]
+	}
+
+	struct Prepared {
+		let runLength: RunLengthResult
+		let contextMap: [UInt8]
+		let histograms: [Histogram]
+		let uintConfigurations: [HybridUintConfiguration]
+		let usesPrefixCode: Bool
+		let logAlphabetSize: Int
+		let prefixCodes: [PrefixCode]
+		let ansHistograms: [ANSEncodingHistogram]
+		let estimatedCost: Int
+	}
+
+	static func runLengthEncode(_ entries: [UInt8]) -> RunLengthResult {
+		fatalError("Context-map run length encoding is not implemented")
+	}
+
+	static func cluster(_ histograms: [Histogram]) -> (
+		histograms: [Histogram], contextMap: [UInt8]
+	) {
+		fatalError("Context-map clustering is not implemented")
+	}
+
+	static func prepare(_ entries: [UInt8]) -> Prepared {
+		fatalError("Context-map entropy preparation is not implemented")
+	}
+
+	static func write(_ prepared: Prepared, to writer: inout BitWriter) {
+		fatalError("Context-map entropy serialization is not implemented")
+	}
+}
+
+enum ContextMapEncoding {
+	enum Representation: Equatable {
+		case simple(entryBits: Int)
+		case raw
+		case moveToFront
+	}
+
+	struct Prepared {
+		let entries: [UInt8]
+		let numHistograms: Int
+		let transformedEntries: [UInt8]
+		let raw: ContextMapEntropy.Prepared?
+		let moveToFront: ContextMapEntropy.Prepared?
+		let representation: Representation
+	}
+
+	static func prepare(_ entries: [UInt8], numHistograms: Int) -> Prepared {
+		fatalError("Context-map representation selection is not implemented")
+	}
+
+	static func write(_ prepared: Prepared, to writer: inout BitWriter) {
+		fatalError("Context-map serialization is not implemented")
+	}
+}
