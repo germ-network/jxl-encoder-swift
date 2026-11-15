@@ -223,7 +223,7 @@ int RunContextMap(const std::vector<std::string>& args) {
   if (args.size() < 2) return 2;
   int num_histograms = 0;
   if (!ParseInt(args[0], &num_histograms) || num_histograms < 1 ||
-      num_histograms > 255) return 2;
+      num_histograms > 256) return 2;
   auto mtf_marker = std::find(args.begin() + 1, args.end(), "--mtf");
   const bool measure_mtf = mtf_marker != args.end();
   const size_t entries_end = measure_mtf
@@ -286,7 +286,8 @@ int RunContextMap(const std::vector<std::string>& args) {
       reader.ReadBits(2);
       jxl::LZ77Params lz77;
       if (!jxl::Bundle::Read(&reader, &lz77)) return 1;
-      use_prefix_code = static_cast<int>(reader.ReadBits(1));
+      const int parsed_prefix_code = static_cast<int>(reader.ReadBits(1));
+      use_prefix_code = lz77.enabled ? -1 : parsed_prefix_code;
       if (!reader.Close()) return 1;
     }
   }

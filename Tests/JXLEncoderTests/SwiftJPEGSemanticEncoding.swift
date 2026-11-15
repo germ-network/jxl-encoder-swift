@@ -165,14 +165,13 @@ enum SwiftJPEGSemanticEncoding {
 			code: d.dcCode,
 			dcQuantization: (0..<3).map { t.dcQuantization(channel: $0) },
 			globalScale: FrameAssembly.jpegGlobalScale, quantDC: 1,
-			blockContextMap: d.blockContextMap, allowContextMapANS: true,
-			writer: &dcGlobal)
+			blockContextMap: d.blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: d.acCode,
 			quantTables: (0..<3).map { t.quantTable(channel: $0) },
-			coeffOrder: d.coeffOrder, allowContextMapANS: true, writer: &acGlobal)
+			coeffOrder: d.coeffOrder, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 		var writer = BitWriter()
 		try ImageHeader.write(

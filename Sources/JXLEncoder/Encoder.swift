@@ -382,14 +382,13 @@ public enum Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			blockContextMap: blockContextMap,
-			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
-			allowContextMapANS: optimizeCodes, writer: &acGlobal)
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -523,14 +522,13 @@ extension Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			blockContextMap: blockContextMap,
-			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
-			allowContextMapANS: optimizeCodes, writer: &acGlobal)
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -764,16 +762,14 @@ extension Encoder {
 			dcQuantization: (0..<3).map { transcode.dcQuantization(channel: $0) },
 			globalScale: FrameAssembly.jpegGlobalScale,
 			quantDC: 1,
-			blockContextMap: blockContextMap,
-			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode,
 			quantTables: (0..<3).map { transcode.quantTable(channel: $0) },
-			coeffOrder: coeffOrder,
-			allowContextMapANS: optimizeCodes, writer: &acGlobal)
+			coeffOrder: coeffOrder, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(

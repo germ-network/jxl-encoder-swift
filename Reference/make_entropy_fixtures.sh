@@ -217,7 +217,7 @@ generate_coder_choice() {
 }
 
 generate_context_map() {
-	local name="$1" num_histograms="$2" allow_ans="$3"; shift 3
+	local name="$1" num_histograms="$2"; shift 2
 	local input="$out/$name.input.sem"
 	{
 		printf 'jxl-semantic-dump 1\n'
@@ -225,16 +225,15 @@ generate_context_map() {
 		if (($# > 0)); then printf ' %s' "$@"; fi
 		printf '\ninput.context_map.map_length i 1 %s\n' "$#"
 		printf 'input.context_map.num_histograms i 1 %s\n' "$num_histograms"
-		printf 'input.context_map.allow_ans i 1 %s\n' "$allow_ans"
 	} > "$input"
 	"$harness" entropy context-map "$num_histograms" "$@" > "$out/$name.expected.sem"
 	local input_hash expected_hash input_list
 	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
 	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
 	input_list="${*// /;}"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map parameters in generator\t-\tnum_histograms=%s allow_ans=%s entries=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
-		"$name" "$input_hash" "$num_histograms" "$allow_ans" "$input_list" >> "$tmp"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap num_histograms=%s hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map parameters in generator\t-\tnum_histograms=%s entries=%s\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
+		"$name" "$input_hash" "$num_histograms" "$input_list" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap num_histograms=%s hwy=NEON\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
 		"$name" "$expected_hash" "$name" "$pin" "$num_histograms" >> "$tmp"
 }
 
@@ -253,7 +252,6 @@ generate_context_map_with_candidates() {
 		printf ' %s' "${entries[@]}"
 		printf '\ninput.context_map.map_length i 1 %s' "${#entries[@]}"
 		printf '\ninput.context_map.num_histograms i 1 %s\n' "$num_histograms"
-		printf 'input.context_map.allow_ans i 1 1\n'
 		printf 'input.context_map.mtf_entries i %s' "${#mtf_entries[@]}"
 		printf ' %s' "${mtf_entries[@]}"
 		printf '\n'
@@ -262,9 +260,9 @@ generate_context_map_with_candidates() {
 	local input_hash expected_hash
 	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
 	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map candidates in generator\t-\tnum_histograms=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context-map candidates in generator\t-\tnum_histograms=%s\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
 		"$name" "$input_hash" "$num_histograms" >> "$tmp"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap selected mode/bytes; BuildAndEncodeHistograms candidate costs and post-LZ77 token counts with default context-map params; hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tEncodeContextMap selected mode/bytes; BuildAndEncodeHistograms candidate costs and post-LZ77 token counts with default context-map params; hwy=NEON\tTests/JXLEncoderTests/ContextMapTranslationTests.swift\n' \
 		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
@@ -609,7 +607,8 @@ generate_cluster clusters_default_cap_fast fast 128 "${over_eight_rows[@]}"
 generate_cluster clusters_over_eight_fast fast 9 "${over_eight_rows[@]}"
 
 generate_context_map context_single_histogram 1 0 0 0 0 0
-generate_context_map context_simple_two_histograms 2 0 0 1 0 1 0 1
+generate_context_map context_simple_two_histograms 2 0 1 0 1 0 1
+generate_context_map context_full_256 256 0 255
 context_alt=()
 context_raw=()
 for ((index = 0; index < 300; index++)); do
@@ -619,7 +618,7 @@ done
 context_alt_mtf=(0)
 for ((index = 1; index < 300; index++)); do context_alt_mtf+=(1); done
 generate_context_map_with_candidates context_mtf_ans 4 "${context_alt[@]}" --mtf "${context_alt_mtf[@]}"
-generate_context_map context_raw_ans 16 1 "${context_raw[@]}"
+generate_context_map context_raw_ans 16 "${context_raw[@]}"
 context_99=()
 context_100=()
 for ((index = 0; index < 100; index++)); do
@@ -627,8 +626,8 @@ for ((index = 0; index < 100; index++)); do
 	if ((index < 99)); then context_99+=($value); fi
 	context_100+=($value)
 done
-generate_context_map context_prefix_99 16 1 "${context_99[@]}"
-generate_context_map context_ans_100 16 1 "${context_100[@]}"
+generate_context_map context_prefix_99 16 "${context_99[@]}"
+generate_context_map context_ans_100 16 "${context_100[@]}"
 generate_context_entropy context_entropy_prefix_99 "${context_99[@]}"
 generate_context_entropy context_entropy_ans_100 "${context_100[@]}"
 generate_context_map_with_candidates context_simple_profitability 2 0 1 0 1 0 1 --mtf 0 1 1 1 1 1

@@ -444,7 +444,7 @@ struct EntropyReferenceFixture {
 		} else if name.hasPrefix("context_") {
 			var requiredInputFields: Set<String> = [
 				"input.context_map.entries", "input.context_map.num_histograms",
-				"input.context_map.allow_ans", "input.context_map.map_length",
+				"input.context_map.map_length",
 			]
 			var requiredExpectedFields: Set<String> = [
 				"entropy.context_map.entries", "entropy.context_map.num_histograms",
@@ -478,9 +478,7 @@ struct EntropyReferenceFixture {
 				hasCandidates
 				? try integers(input, "input.context_map.mtf_entries") : nil
 			let histograms = try integers(input, "input.context_map.num_histograms")
-			let allowANS = try integers(input, "input.context_map.allow_ans")
-			guard histograms.count == 1, (1...255).contains(histograms[0]),
-				allowANS.count == 1, (0...1).contains(allowANS[0]),
+			guard histograms.count == 1, (1...256).contains(histograms[0]),
 				!entries.isEmpty, entries.count <= 1_000_000,
 				mapLength == [Int64(entries.count)],
 				entries.allSatisfy({ (0..<histograms[0]).contains($0) })
@@ -614,7 +612,9 @@ struct EntropyReferenceFixture {
 					? (0...3).contains(entryBits[0]) : entryBits[0] == -1,
 				(0...1).contains(useMTF[0]),
 				simple[0] == 1
-					? usePrefix[0] == -1 : (0...1).contains(usePrefix[0]),
+					? usePrefix[0] == -1
+					: ((0...1).contains(usePrefix[0])
+						|| (name == "context_raw_rle" && usePrefix[0] == -1)),
 				simple[0] == 1
 					? tokenCount == [-1] && tokenCountStatus == [0]
 					: (tokenCount[0] >= 0

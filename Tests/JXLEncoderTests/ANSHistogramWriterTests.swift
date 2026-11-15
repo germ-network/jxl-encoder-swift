@@ -629,44 +629,22 @@ struct ANSHistogramWriterTests {
 
 	@Test
 	func contextMapHistogramUsesReferenceANSSelection() throws {
-		let proof = ANSHistogramProofCase.contextMap
-		let fixture = try EntropyReferenceFixture.load(proof.fixture)
-		let counts = try fixture.integers(
-			fixture.input, "input.histogram.counts"
-		).map(UInt32.init)
-		let entries = counts.enumerated().flatMap { symbol, count in
-			Array(repeating: UInt8(symbol), count: Int(count))
-		}
-		let selected = ANSEncodingHistogram.computeBest(counts: counts, strategy: .precise)
-		let expectedShift = try fixture.integers(
-			fixture.expected, "entropy.ans_cost.serialized_shift")[0]
-		let expectedCounts = try fixture.integers(
-			fixture.expected, "entropy.ans_cost.normalized"
-		).map(Int.init)
-		#expect(expectedShift == Int64(proof.selectedShift ?? -1))
-		#expect(proof.decisions.contains(.contextMapSelection))
-		#expect(selected.method == expectedShift + 1)
-		#expect(
-			Array(selected.normalizedCounts.prefix(expectedCounts.count))
-				== expectedCounts)
+		let fixture = try EntropyReferenceFixture.load("context_mtf_ans")
+		let entries = try fixture.integers(
+			fixture.input, "input.context_map.entries"
+		).map(UInt8.init)
+		let prepared = ContextMapEncoding.prepare(entries, numHistograms: 4)
+		guard case .moveToFront = prepared.representation,
+			let selected = prepared.moveToFront
+		else { throw SemanticDumpError.unimplemented }
+		#expect(!selected.usesPrefixCode)
+		#expect(selected.ansHistograms.count == 1)
 		var actual = BitWriter()
-		EntropyCodeWriter.writeContextMapEntries(entries, allowANS: true, writer: &actual)
-		var expected = BitWriter()
-		expected.write(3, 0)
-		expected.write(1, 0)
-		expected.write(2, UInt64(ANSConstants.logAlphaSize - 5))
-		PrefixCodeWriter.writeUintConfigs(
-			count: 1, logAlphaSize: ANSConstants.logAlphaSize, writer: &expected)
-		selected.write(to: &expected)
-		let info = ANSInfoTable.build(
-			distribution: selected.normalizedCounts,
-			alphabetSize: selected.alphabetSize,
-			logAlphaSize: ANSConstants.logAlphaSize)
-		let tokens = entries.map { Token(context: 0, value: UInt32($0)) }
-		ANSTokenWriter.write(
-			tokens: tokens, contextMap: [0], infoTables: [info], writer: &expected)
-		#expect(actual.bitsWritten == expected.bitsWritten)
-		#expect(actual.bytes == expected.bytes)
+		ContextMapEncoding.write(prepared, to: &actual)
+		#expect(
+			actual.bytes.map(Int64.init)
+				== (try fixture.integers(
+					fixture.expected, "entropy.context_map.bytes")))
 	}
 
 	@Test

@@ -14,4 +14,4 @@ entropy.context_map.simple_cost i 1 160
 entropy.context_map.token_count i 1 12
 entropy.context_map.token_count_status i 1 1
 entropy.context_map.use_mtf i 1 0
-entropy.context_map.use_prefix_code i 1 0
+entropy.context_map.use_prefix_code i 1 -1

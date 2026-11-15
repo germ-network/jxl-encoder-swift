@@ -119,13 +119,12 @@ enum SwiftSemanticEncoding {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			blockContextMap: blockContextMap,
-			allowContextMapANS: true, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: order,
-			allowContextMapANS: true, writer: &acGlobal)
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),

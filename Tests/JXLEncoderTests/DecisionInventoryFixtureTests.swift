@@ -65,6 +65,12 @@ struct DecisionInventoryFixtureTests {
 						&& $0.verifies(key, consumer: consumer)
 				} ? .verifies : .notCompared
 			}
+			if category == "context_map" || category == "context_entropy" {
+				return ContextMapProofCase.all.contains {
+					$0.reference == key
+				} ? .verifies : .notCompared
+				} ? .verifies : .notCompared
+			}
 			if category == "ans_cost" || category == "histogram" {
 				return ANSHistogramProofCase.all.contains {
 					$0.reference == key
@@ -81,6 +87,7 @@ struct DecisionInventoryFixtureTests {
 			let references = SemanticCase.references
 				.union(JPEGSemanticCase.references)
 				.union(JPEGSemanticCase.contextWitnessReferences)
+				.union(Set(ContextMapProofCase.all.map(\.reference)))
 			guard references.contains(key) else { return .notCompared }
 			let knownIssues = SemanticCase.knownIssueReferences
 				.union(JPEGSemanticCase.knownIssueReferences)
@@ -280,9 +287,12 @@ struct DecisionInventoryFixtureTests {
 					Issue.record("malformed ANS proof reference: \(text)")
 					continue
 				}
-				#expect(
-					ANSHistogramProofCase.proves(reference, decision: row.id),
-					"\(text) does not prove \(row.id)")
+				let proves =
+					(reference.category == "context_map"
+						|| reference.category == "context_entropy")
+					? ContextMapProofCase.proves(reference, decision: row.id)
+					: ANSHistogramProofCase.proves(reference, decision: row.id)
+				#expect(proves, "\(text) does not prove \(row.id)")
 			}
 		}
 	}

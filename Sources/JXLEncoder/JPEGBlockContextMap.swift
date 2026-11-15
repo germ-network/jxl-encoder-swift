@@ -204,6 +204,6 @@ public enum JPEGBlockContextMap {
 		// reference to stay byte-exact against, unlike the pixel/JPEG
 		// static-table path's fixed context map.
 		EntropyCodeWriter.writeContextMapEntries(
-			result.contextMap, allowANS: true, writer: &writer)
+			result.contextMap, numHistograms: result.numContexts, writer: &writer)
 	}
 }

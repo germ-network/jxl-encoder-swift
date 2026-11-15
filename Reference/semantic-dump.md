@@ -355,10 +355,10 @@ records the simple-code choice, `entry_bits` is its fixed width or -1 when the
 simple code was not selected, `use_mtf` records the upstream move-to-front
 choice, and `use_prefix_code` records the subsequent entropy-code choice or -1
 for a simple map. `bit_count` and `bytes` preserve the exact resulting stream.
-The fixture input also records whether the Swift writer permits ANS; upstream
-always applies its own `HistogramParams()` policy. Context-map entry count and
-histogram count are distinct inputs. The 99/100 token cases pin the upstream
-prefix/ANS threshold after its RLE preprocessing.
+Fixture inputs record only entries and histogram count; every production path
+uses the same prepared source policy. Context-map entry count and histogram
+count are distinct, and the full 256-histogram range is supported. The 99/100
+token cases pin the upstream prefix/ANS threshold after its RLE preprocessing.
 Candidate fixtures additionally record `mtf_entries`, raw/MTF histogram costs
 returned by `BuildAndEncodeHistograms`, and `simple_cost` (or -1 when the
 simple form is unavailable). `context_simple_profitability` verifies that the

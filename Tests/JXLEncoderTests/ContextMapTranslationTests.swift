@@ -2,6 +2,57 @@ import Testing
 
 @testable import JXLEncoder
 
+struct ContextMapProofCase: Sendable {
+	let fixture: String
+	let decisions: Set<String>
+	let category: String
+
+	init(fixture: String, decisions: Set<String>, category: String = "context_map") {
+		self.fixture = fixture
+		self.decisions = decisions
+		self.category = category
+	}
+
+	var reference: String {
+		"Tests/JXLEncoderTests/Fixtures/entropy/\(fixture).expected.sem#\(category)"
+	}
+
+	static let all: [ContextMapProofCase] = [
+		.init(
+			fixture: "context_single_histogram",
+			decisions: ["EW-01", "EW-02", "EW-04", "EW-09"]),
+		.init(fixture: "context_simple_two_histograms", decisions: ["EW-02", "EW-04"]),
+		.init(fixture: "context_simple_profitability", decisions: ["EW-02"]),
+		.init(fixture: "context_tie_raw_mtf", decisions: ["EW-02"]),
+		.init(
+			fixture: "context_mtf_ans",
+			decisions: ["EW-02", "EW-03", "EW-08", "EW-09"]),
+		.init(fixture: "context_raw_ans", decisions: ["EW-03", "EW-08"]),
+		.init(fixture: "context_prefix_99", decisions: ["EW-03", "EW-04"]),
+		.init(fixture: "context_ans_100", decisions: ["EW-03", "EW-08"]),
+		.init(fixture: "context_raw_rle", decisions: ["EW-06", "EW-07"]),
+		.init(
+			fixture: "context_entropy_rle", decisions: ["EW-06", "EW-07"],
+			category: "context_entropy"),
+		.init(
+			fixture: "context_entropy_prefix_99", decisions: ["EW-03", "EW-04"],
+			category: "context_entropy"),
+		.init(
+			fixture: "context_entropy_ans_100", decisions: ["EW-03", "EW-08"],
+			category: "context_entropy"),
+		.init(fixture: "context_full_256", decisions: ["EW-02", "EW-04"]),
+	]
+
+	static func proves(_ reference: DecisionInventory.FixtureReference, decision: String)
+		-> Bool
+	{
+		all.contains {
+			$0.reference == "\(reference.path)#\(reference.category ?? "")"
+				&& $0.decisions.contains(decision)
+		}
+	}
+}
+
 @Suite("Upstream context-map encoding")
 struct ContextMapTranslationTests {
 	@Test
@@ -322,6 +373,8 @@ struct ContextMapTranslationTests {
 
 		for name in [
 			"context_single_histogram",
+			"context_simple_two_histograms",
+			"context_full_256",
 			"context_simple_profitability", "context_simple_tie_candidate",
 			"context_tie_raw_mtf", "context_mtf_ans", "context_raw_ans",
 			"context_prefix_99", "context_ans_100", "context_raw_rle",
@@ -337,6 +390,45 @@ struct ContextMapTranslationTests {
 				entries, numHistograms: numHistograms)
 			let expected = fixture.expected
 			#expect(candidate.entries == entries)
+			let semantic = try SwiftEntropySemanticEncoding.contextMap(
+				entries: entries, numHistograms: numHistograms)
+			#expect(
+				semantic.fields["entropy.context_map.bit_count"]
+					== expected.fields["entropy.context_map.bit_count"])
+			#expect(
+				semantic.fields["entropy.context_map.bytes"]
+					== expected.fields["entropy.context_map.bytes"])
+			#expect(
+				semantic.fields["entropy.context_map.use_mtf"]
+					== expected.fields["entropy.context_map.use_mtf"])
+			#expect(
+				semantic.fields["entropy.context_map.simple"]
+					== expected.fields["entropy.context_map.simple"])
+			for field in [
+				"entry_bits", "token_count", "token_count_status",
+			] {
+				#expect(
+					semantic.fields["entropy.context_map.\(field)"]
+						== expected.fields["entropy.context_map.\(field)"],
+					"\(name): \(field)")
+			}
+			if expected.fields["entropy.context_map.use_prefix_code"] != .integers([-1])
+			{
+				#expect(
+					semantic.fields["entropy.context_map.use_prefix_code"]
+						== expected.fields[
+							"entropy.context_map.use_prefix_code"],
+					"\(name): use_prefix_code")
+			}
+			for field in ["raw_cost", "mtf_cost", "simple_cost", "mtf_entries"] {
+				if expected.fields["entropy.context_map.\(field)"] != nil {
+					#expect(
+						semantic.fields["entropy.context_map.\(field)"]
+							== expected.fields[
+								"entropy.context_map.\(field)"],
+						"\(name): \(field)")
+				}
+			}
 			if expected.fields["entropy.context_map.mtf_entries"] != nil {
 				#expect(
 					candidate.transformedEntries.map(Int64.init)
@@ -401,23 +493,101 @@ struct ContextMapTranslationTests {
 		}
 	}
 
-	@Test(.disabled("Awaiting context-map translation"))
+	@Test
 	func productionUsesPreparedContextMaps() throws {
 		let prepared = ContextMapEncoding.prepare([0, 1], numHistograms: 2)
 		var direct = BitWriter()
 		ContextMapEncoding.write(prepared, to: &direct)
 		var production = BitWriter()
-		EntropyCodeWriter.writeContextMapEntries([0, 1], writer: &production)
+		EntropyCodeWriter.writeContextMapEntries(
+			[0, 1], numHistograms: 2, writer: &production)
 		#expect(production.bitsWritten == direct.bitsWritten)
 		#expect(production.bytes == direct.bytes)
+
+		for name in [
+			"context_mtf_ans", "context_prefix_99", "context_ans_100",
+			"context_raw_rle", "context_full_256",
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			let entries = try fixture.integers(
+				fixture.input, "input.context_map.entries"
+			).map(UInt8.init)
+			let numHistograms = Int(
+				try fixture.integers(
+					fixture.input, "input.context_map.num_histograms")[0])
+			let prepared = ContextMapEncoding.prepare(
+				entries, numHistograms: numHistograms)
+			var expected = BitWriter()
+			ContextMapEncoding.write(prepared, to: &expected)
+			var actual = BitWriter()
+			EntropyCodeWriter.writeContextMapEntries(
+				entries, numHistograms: numHistograms, writer: &actual)
+			#expect(actual.bitsWritten == expected.bitsWritten)
+			#expect(actual.bytes == expected.bytes)
+		}
+
+		for code in [EntropyCode.staticDC, EntropyCode.staticAC] {
+			let entries =
+				code.originalContextMap.map { original in
+					original.map { code.contextMap[Int($0)] }
+				} ?? code.contextMap
+			let numHistograms =
+				code.ansHistograms?.count
+				?? code.ansInfoTables?.count ?? code.prefixCodeCount
+			var expected = BitWriter()
+			ContextMapEncoding.write(
+				ContextMapEncoding.prepare(entries, numHistograms: numHistograms),
+				to: &expected)
+			var actual = BitWriter()
+			EntropyCodeWriter.writeContextMap(code, writer: &actual)
+			#expect(actual.bitsWritten == expected.bitsWritten)
+			#expect(actual.bytes == expected.bytes)
+		}
+
+		let composed = EntropyCode(
+			contextMap: [0, 1],
+			prefixCodes: [
+				EntropyCode.staticDC.prefixCodes[0],
+				EntropyCode.staticDC.prefixCodes[0],
+			],
+			originalContextMap: [1, 0, 1])
+		var composedExpected = BitWriter()
+		ContextMapEncoding.write(
+			ContextMapEncoding.prepare([1, 0, 1], numHistograms: 2),
+			to: &composedExpected)
+		var composedActual = BitWriter()
+		EntropyCodeWriter.writeContextMap(composed, writer: &composedActual)
+		#expect(composedActual.bitsWritten == composedExpected.bitsWritten)
+		#expect(composedActual.bytes == composedExpected.bytes)
 	}
 
-	@Test(.disabled("Awaiting context-map translation"))
+	@Test
 	func inventoryReferencesHaveContextMapProofs() throws {
 		let inventory = try DecisionInventoryTests.committed()
 		#expect(inventory.parseViolations.isEmpty)
-		Issue.record(
-			"Require consumed typed native context-map proofs for each settled EW descriptor"
-		)
+		let translated = Set(
+			["EW-01", "EW-02", "EW-03", "EW-04", "EW-06", "EW-07", "EW-08", "EW-09"])
+		for row in inventory.rows where translated.contains(row.id) {
+			let references =
+				row.fixture == "-" ? [] : row.fixture.components(separatedBy: ",")
+			#expect(!references.isEmpty, "\(row.id) needs bounded context-map evidence")
+			let contextReferences = references.filter {
+				$0.hasSuffix("#context_map") || $0.hasSuffix("#context_entropy")
+			}
+			#expect(
+				!contextReferences.isEmpty,
+				"\(row.id) needs context-map proof references")
+			for text in contextReferences {
+				guard let reference = DecisionInventory.FixtureReference(text)
+				else {
+					Issue.record(
+						"malformed context-map proof reference: \(text)")
+					continue
+				}
+				#expect(
+					ContextMapProofCase.proves(reference, decision: row.id),
+					"\(text) does not prove \(row.id)")
+			}
+		}
 	}
 }

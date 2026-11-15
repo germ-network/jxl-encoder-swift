@@ -8,12 +8,14 @@ import Testing
 /// clustering, context-map coding and prefix-code serialization together.
 @Suite("Context tree and entropy code")
 struct ContextTreeTests {
-	static func loadReference() throws -> [String: (bits: Int, bytes: [UInt8])] {
+	static func loadReference(
+		_ name: String = "context_tree"
+	) throws -> [String: (bits: Int, bytes: [UInt8])] {
 		guard
 			let url = Bundle.module.url(
-				forResource: "context_tree", withExtension: "txt",
+				forResource: name, withExtension: "txt",
 				subdirectory: "Fixtures")
-		else { throw StageDump.DumpError.fixtureNotFound("context_tree") }
+		else { throw StageDump.DumpError.fixtureNotFound(name) }
 		var result: [String: (Int, [UInt8])] = [:]
 		for line in try String(contentsOf: url, encoding: .utf8).split(separator: "\n") {
 			let parts = line.split(separator: " ").map(String.init)
@@ -59,7 +61,7 @@ struct ContextTreeTests {
 
 	@Test("entropy code serializes identically", arguments: ["DC", "AC"])
 	func entropyCode(which: String) throws {
-		let reference = try Self.loadReference()
+		let reference = try Self.loadReference("context_entropy_code")
 		let expected = try #require(reference["EC\(which)"])
 		let code: EntropyCode = which == "DC" ? .staticDC : .staticAC
 
