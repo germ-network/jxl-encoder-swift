@@ -321,12 +321,20 @@ struct PixelSemanticFixtureTests {
 				let acDifferenceCount = acDifferences.count
 				let firstACDifference = acDifferences.first?.offset
 				#expect(swift.ac[channel].count == expectedAC[channel].count)
-				withKnownIssue(Comment(rawValue: acIssues.joined(separator: ", ")))
-				{
+				if name == "flower_1024" && channel > 0 {
 					#expect(
 						acDifferenceCount == 0,
 						"\(name)#ac.c\(channel): \(acDifferenceCount) differences; first \(firstACDifference?.description ?? "none")"
 					)
+				} else {
+					withKnownIssue(
+						Comment(rawValue: acIssues.joined(separator: ", "))
+					) {
+						#expect(
+							acDifferenceCount == 0,
+							"\(name)#ac.c\(channel): \(acDifferenceCount) differences; first \(firstACDifference?.description ?? "none")"
+						)
+					}
 				}
 				let dcStart =
 					channel * dimension.widthInBlocks * dimension.heightInBlocks
@@ -470,7 +478,7 @@ extension QuantizerTests {
 		"bounded quantized conversions match actual upstream integer decisions",
 	)
 	func quantizedConversionMatchesReferenceOnBoundedValues() throws {
-		let reference = try SemanticDump(fixture: "bounded_quantized")
+		let reference = try SemanticDump(fixture: "e4_bounded_quantized")
 		let expected = reference.restricted(to: ["quantized_ac"])
 		#expect(reference.fields["quantized_ac.neon_target"] == .integers([1]))
 		let coefficients = (0..<DCT.blockSize).map { index in

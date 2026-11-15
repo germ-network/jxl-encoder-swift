@@ -14,7 +14,7 @@ struct QuantizerTests {
 	@Test("matches the pinned upstream primitive on every edge block and channel")
 	func matchesReference() throws {
 		let input = try StageDump(fixture: "edge_dct")
-		let expected = try SemanticDump(fixture: "edge_fixed_quantized")
+		let expected = try SemanticDump(fixture: "e4_edge_quantized")
 		#expect(expected.fields["quantized_edge.neon_target"] == .integers([1]))
 		guard case .integers(let counts)? = expected.fields["quantized_edge.block_count"]
 		else {
@@ -67,6 +67,21 @@ struct QuantizerTests {
 		}
 	}
 
+	@Test("non-unit quantization parameters still round signed ties to even")
+	func roundsTiesWithNonUnitScaleAndMultiplier() {
+		let identity = [Float](repeating: 1, count: DCT.blockSize)[...]
+		var coefficients = [Float](repeating: 0, count: DCT.blockSize)
+		coefficients[1] = 1.2
+		coefficients[2] = 2.0
+		coefficients[3] = -1.2
+		coefficients[4] = -2.0
+		let actual = Quantizer.quantizeBlockAC(
+			coefficients: coefficients[...], channel: 1,
+			inverseMatrix: identity, quant: 2, scale: 0.5,
+			matrixMultiplier: 1.25)
+		#expect([actual[1], actual[2], actual[3], actual[4]] == [2, 2, -2, -2])
+	}
+
 	@Test("DC is always dropped because its inverse weight is zero")
 	func dcIsZeroed() {
 		for channel in 0..<3 {
@@ -103,11 +118,15 @@ struct QuantizerTests {
 		let y = Quantizer.thresholds(channel: 1)
 		let b = Quantizer.thresholds(channel: 2)
 
-		#expect(x.0 == y.0)  // first quadrant is shared
-		#expect(x.1 == y.1 + 0.08)
-		#expect(b.1 == 0.75)
-		#expect(b.2 == 0.75)
-		#expect(b.3 == 0.75)
+		#expect(x.0 == 0.58)
+		#expect(y.0 == 0.56)
+		#expect(x.1 == 0.62)
+		#expect(x.2 == 0.62)
+		#expect(x.3 == 0.62)
+		#expect(y.1 == 0.62)
+		#expect(y.2 == 0.62)
+		#expect(y.3 == 0.62)
+		#expect(b == x)
 	}
 
 	@Test("inverse weights are the reciprocal of the forward weights")
@@ -123,19 +142,129 @@ struct QuantizerTests {
 	}
 	@Test(
 		"e4 dead zones match upstream for each channel and quadrant",
-		.disabled("Pending reference comparison"))
+	)
 	func e4DeadZonesMatchReferenceAtThresholdBounds() throws {
-		Issue.record(
-			"Compare signed below, equal and above threshold outputs for every channel and quadrant"
-		)
+		let reference = try SemanticDump(fixture: "e4_bounded_quantized")
+		func integers(_ name: String) -> [Int64]? {
+			guard case .integers(let values)? = reference.fields[name] else {
+				return nil
+			}
+			return values
+		}
+		let channels = try #require(integers("e4_boundary.channel"))
+		let referenceIndexes = try #require(integers("e4_boundary.index"))
+		let targets = try #require(integers("e4_boundary.target_bits"))
+		let inputs = try #require(integers("e4_boundary.input_bits"))
+		let scaled = try #require(integers("e4_boundary.scaled_bits"))
+		let outputs = try #require(integers("e4_boundary.output"))
+		#expect(channels.count == 72)
+		#expect(referenceIndexes.count == 72)
+		#expect(targets.count == 72)
+		#expect(inputs.count == 72)
+		#expect(scaled.count == 72)
+		#expect(outputs.count == 72)
+		let identity = [Float](repeating: 1, count: DCT.blockSize)[...]
+		let indexes = [1, 4, 32, 36]
+		var boundary = 0
+		for channel in 0..<3 {
+			let values: [Float] =
+				channel == 1
+				? [0.56, 0.62, 0.62, 0.62]
+				: [0.58, 0.62, 0.62, 0.62]
+			for (index, threshold) in zip(indexes, values) {
+				let magnitudes = [threshold.nextDown, threshold, threshold.nextUp]
+				for sign: Float in [-1, 1] {
+					for (offset, magnitude) in magnitudes.enumerated() {
+						let referenceValue = Int32(outputs[boundary])
+						#expect(channels[boundary] == Int64(channel))
+						#expect(referenceIndexes[boundary] == Int64(index))
+						#expect(
+							Float(bitPattern: UInt32(targets[boundary]))
+								.bitPattern == magnitude.bitPattern)
+						#expect(scaled[boundary] == targets[boundary])
+						let input = Float(
+							bitPattern: UInt32(inputs[boundary]))
+						let matrix = QuantMatrices.inverseMatrix(
+							channel: channel)
+						let multiplier: Float = channel == 0 ? 1.25 : 1
+						let qac = Self.scale * Float(Self.quant)
+						let value =
+							(matrix[matrix.startIndex + index]
+								* (qac * multiplier)) * input
+						#expect(
+							abs(value).bitPattern
+								== UInt32(scaled[boundary]))
+						var coefficients = [Float](
+							repeating: 0, count: DCT.blockSize)
+						coefficients[index] = sign * magnitude
+						let actual = Quantizer.quantizeBlockAC(
+							coefficients: coefficients[...],
+							channel: channel,
+							inverseMatrix: identity, quant: 1, scale: 1)
+						let expected: Int32 =
+							offset == 0 ? 0 : (sign < 0 ? -1 : 1)
+						#expect(actual[index] == expected)
+						#expect(referenceValue == expected)
+						boundary += 1
+					}
+				}
+			}
+		}
 	}
 
 	@Test(
 		"actual e4 callers select the translated dead zones",
-		.disabled("Pending reference comparison"))
+	)
 	func e4CallerQuantizedCoefficientsMatchReference() throws {
-		Issue.record(
-			"Compare actual upstream caller coefficients using measured DCT inputs")
+		let fixture = try SemanticDump(fixture: "e4_caller_witness")
+		let input = try StageDump(fixture: "e4_caller_witness")
+		func integers(_ name: String) -> [Int64]? {
+			guard case .integers(let values)? = fixture.fields[name] else { return nil }
+			return values
+		}
+		let channels = try #require(integers("e4_caller.channel"))
+		let indexes = try #require(integers("e4_caller.index"))
+		let targets = try #require(integers("e4_caller.target_bits"))
+		let scaled = try #require(integers("e4_caller.scaled_bits"))
+		let quant = try #require(integers("e4_caller.quant"))
+		#expect(channels == [1, 1, 1, 1, 0, 0, 0, 2, 2, 2])
+		#expect(indexes == [1, 4, 32, 36, 4, 32, 36, 4, 32, 36])
+		#expect(targets.count == 10)
+		#expect(scaled.count == 10)
+		let firstQuant = try #require(quant.first)
+		#expect(quant.count == 10)
+		#expect(quant.allSatisfy { $0 == firstQuant })
+		for probe in 0..<10 {
+			let magnitude = Float(bitPattern: UInt32(scaled[probe]))
+			let lower = probe == 0 ? Float(0.56) : Float(0.62)
+			let upper = probe == 0 ? Float(0.58) : Float(0.635)
+			#expect(magnitude > lower && magnitude < upper)
+			#expect(
+				Float(bitPattern: UInt32(targets[probe]))
+					== (probe == 0 ? 0.57 : 0.63))
+		}
+
+		let params = try DistanceParams(distance: 1)
+		#expect(quant == [Int64](repeating: Int64(params.uniformQuant), count: 10))
+		let blockCount = input.height / DCT.blockDim
+		var quantDC = [[Int16]](
+			repeating: [Int16](repeating: 0, count: blockCount), count: 3)
+		let actual = ACGroupEncoder.computeGroup(
+			xyb: PaddedStripe(
+				width: input.width, height: input.height, planes: input.planes),
+			widthInBlocks: 1, heightInBlocks: blockCount,
+			quantField: quant.map(UInt8.init), scale: params.scale,
+			scaleDC: params.scaleDC, xQuantMatrixScale: params.xQuantMatrixScale,
+			quantDC: &quantDC)
+		for channel in 0..<3 {
+			let expected = try #require(integers("e4_caller.c\(channel)"))
+			#expect(actual[channel].map(Int64.init) == expected, "channel \(channel)")
+		}
+		for probe in 0..<10 {
+			let channel = Int(channels[probe])
+			let coefficient = Int(indexes[probe])
+			#expect(actual[channel][probe * DCT.blockSize + coefficient] == 1)
+		}
 	}
 
 }

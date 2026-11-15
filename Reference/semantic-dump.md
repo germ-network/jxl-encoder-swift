@@ -366,10 +366,31 @@ uses sixteen possible histograms, which makes the simple form unavailable; its
 identical raw/MTF candidate arrays have equal costs, so the strict MTF
 comparison keeps the raw map.
 
-The `quantized_ac` stage fixture is not decoded from a codestream. It exercises
-a bounded, explicit fixed-parameter input to the pinned upstream primitive; it
-does not establish conversion safety for unrestricted floats or equality with
-ordinary-image e4 coefficients.
+The original `bounded_quantized` and `edge_fixed_quantized` fixtures preserve
+their earlier configured-threshold experiment as a diagnostic. The additive
+`e4_bounded_quantized` and `e4_edge_quantized` fixtures run the pinned NEON
+primitive with the Y/X/B dead-zone arrays selected by the e4 caller. They remain
+fixed-parameter primitive checks, not evidence that an ordinary image reaches
+those choices.
+
+`edge_acgroup.dump` is also retained as an inherited libjxl-tiny artifact. Its
+old byte-for-byte AC-group expectation used thresholds that do not match the
+full libjxl Cheetah source, so it is not a current e4 oracle. The replacement
+policy evidence is the actual Cheetah caller fixture and primitive boundary
+records above; the legacy dump and its provenance remain unchanged.
+
+`e4_caller_witness.sem` is the separate actual-caller witness. Its 10 blocks
+run through pinned full libjxl's Cheetah `InitializePassesEncoder` and
+`ComputeCoefficients` path. The semantic fields record channel, coefficient
+index, target and remeasured scaled-value float bits, adaptive quant value, and
+the resulting caller coefficient arrays. The paired
+`e4_caller_witness.dump` stores the opsin pixels supplied to the caller. The
+selected Y/X/B probes sit inside the new-versus-old threshold intervals and
+cover all four coefficient quadrants; Y is zero in X/B probe blocks so the
+source's chroma-from-luma stage does not shift their inputs. The primitive
+`e4_boundary` records the exact upstream scaled Float bits and output at
+`nextDown`/exact/`nextUp` for both signs, all three channels, and all four
+quadrants. These records independently check strict threshold comparisons.
 
 The `coefficient_sampled_group_boundary` fixture records actual upstream
 `ComputeCoeffOrder` output for a 33×32 DCT8-block image spanning two groups.
