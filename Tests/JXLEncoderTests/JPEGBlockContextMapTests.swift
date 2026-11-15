@@ -13,6 +13,26 @@ import Testing
 
 @Suite("JPEG block context map")
 struct JPEGBlockContextMapTests {
+	@Test(
+		"DC histogram uses the reference unsigned buckets",
+		arguments: [
+			(-1_048_576, 2047), (-32_768, 2047), (-1025, 2047), (-1024, 0),
+			(-1023, 1), (1022, 2046), (1023, 2047), (1024, 2047),
+			(32_767, 2047), (1_048_576, 2047),
+		]
+	)
+	func dcHistogramUsesUnsignedBuckets(dc: Int, expectedBucket: Int) throws {
+		let component = JPEGComponent(
+			identifier: 1, horizontalSampling: 1, verticalSampling: 1,
+			quantTableIndex: 0, blocksPerLine: 1, blocksPerColumn: 1,
+			coefficients: [Int32(dc)] + [Int32](repeating: 0, count: 63))
+		let image = JPEGImage(
+			width: 8, height: 8, components: [component],
+			quantTables: [[UInt16](repeating: 1, count: 64)], restartInterval: 0)
+		let result = JPEGBlockContextMap.compute(try JPEGTranscode(image))
+		#expect(result.thresholds == [expectedBucket - 1025])
+	}
+
 	@Test("threshold count follows the clamp(log2 total - log2 qtSum - 7, 1, 7) formula")
 	func numThresholdsFormula() {
 		// total = 1024 (ceilLog2 = 10), qtSum = 1 (ceilLog2 = 0): 10-0-7 = 3.

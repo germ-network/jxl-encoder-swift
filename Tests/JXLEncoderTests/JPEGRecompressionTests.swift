@@ -6,6 +6,60 @@ import Testing
 /// point, and JPEG XL signature detection.
 @Suite("Portable JPEG recompression")
 struct PortableJPEGRecompressionTests {
+	@Test(
+		"DC boundary JPEGs recompress through the public API",
+		arguments: [-1025, -1024, -1023, 1023, 1024]
+	)
+	func dcBoundaryRecompresses(dc: Int) throws {
+		let data = Self.singleBlockJPEG(dc: dc)
+		let image = try JPEGParser.parse(data)
+		#expect(image.components[0].coefficients[0] == Int32(dc))
+		#expect(image.components[0].coefficients.dropFirst().allSatisfy { $0 == 0 })
+		let recompressed = try #require(Encoder.recompressJPEG(data))
+		#expect(JXLSignature.matches(recompressed))
+	}
+
+	static func singleBlockJPEG(dc: Int) -> [UInt8] {
+		func segment(_ marker: UInt8, _ payload: [UInt8]) -> [UInt8] {
+			let length = payload.count + 2
+			return [0xFF, marker, UInt8(length >> 8), UInt8(length & 0xFF)] + payload
+		}
+
+		func amplitude(_ value: Int, category: Int) -> [UInt8] {
+			guard category > 0 else { return [] }
+			let encoded = value >= 0 ? value : value + (1 << category) - 1
+			return (0..<category).reversed().map { UInt8(encoded >> $0 & 1) }
+		}
+
+		let category = dc == 0 ? 0 : Int.bitWidth - abs(dc).leadingZeroBitCount
+		var bits: [UInt8] = [0]
+		bits += amplitude(dc, category: category)
+		bits.append(0)  // AC EOB
+		while !bits.count.isMultiple(of: 8) { bits.append(1) }
+		var entropy: [UInt8] = []
+		for start in stride(from: 0, to: bits.count, by: 8) {
+			let byte = bits[start..<start + 8].reduce(UInt8(0)) { ($0 << 1) | $1 }
+			entropy.append(byte)
+			if byte == 0xFF { entropy.append(0) }
+		}
+
+		let quant = segment(0xDB, [0] + [UInt8](repeating: 1, count: 64))
+		let frame = segment(0xC0, [8, 0, 8, 0, 8, 1, 1, 0x11, 0])
+		let dcTable: [UInt8] =
+			[0, 1] + [UInt8](repeating: 0, count: 15) + [UInt8(category)]
+		let acTable: [UInt8] = [0x10, 1] + [UInt8](repeating: 0, count: 15) + [0]
+		let huffman = segment(0xC4, dcTable + acTable)
+		let scan = segment(0xDA, [1, 1, 0, 0, 63, 0])
+		var jpeg: [UInt8] = [0xFF, 0xD8]
+		jpeg.append(contentsOf: quant)
+		jpeg.append(contentsOf: frame)
+		jpeg.append(contentsOf: huffman)
+		jpeg.append(contentsOf: scan)
+		jpeg.append(contentsOf: entropy)
+		jpeg.append(contentsOf: [0xFF, 0xD9])
+		return jpeg
+	}
+
 	/// An APP1 EXIF segment whose IFD0 holds only an orientation entry.
 	static func exifSegment(orientation: Int, littleEndian: Bool) -> [UInt8] {
 		func u16(_ v: Int) -> [UInt8] {
