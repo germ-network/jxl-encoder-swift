@@ -479,34 +479,10 @@ struct EntropyReferenceTests {
 				)
 				.isEmpty,
 				"\(name) has unexpected matching-field differences")
-			for field in [
-				"entropy.clusters.input_shannon_entropy",
-				"entropy.clusters.output_shannon_entropy",
-			] {
-				if name == "clusters_best_merge",
-					field == "entropy.clusters.output_shannon_entropy"
-				{
-					continue
-				}
-				guard
-					case .floats(let actualValues)? = actual.fields[field],
-					case .floats(let expectedValues)? = fixture.expected.fields[
-						field]
-				else {
-					Issue.record("Missing Shannon entropy field: \(field)")
-					continue
-				}
-				let matches =
-					actualValues.map(\.bitPattern)
-					== expectedValues.map(\.bitPattern)
-				if name == "clusters_best_merge" {
-					#expect(
-						field == "entropy.clusters.input_shannon_entropy"
-							&& matches)
-				} else {
-					#expect(matches)
-				}
-			}
+			assertFloatFields(
+				actual, match: fixture.expected, fixture: name,
+				excludingFields: name == "clusters_best_merge"
+					? ["entropy.clusters.output_shannon_entropy"] : [])
 		}
 	}
 

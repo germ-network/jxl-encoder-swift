@@ -469,10 +469,11 @@ private let shannonFields: Set<String> = [
 	"entropy.clusters.output_shannon_entropy",
 ]
 
-private func assertFloatFields(
-	_ actual: SemanticDump, match expected: SemanticDump, fixture: String
+func assertFloatFields(
+	_ actual: SemanticDump, match expected: SemanticDump, fixture: String,
+	excludingFields: Set<String> = []
 ) {
-	for field in shannonFields {
+	for field in shannonFields where !excludingFields.contains(field) {
 		guard
 			case .floats(let actualValues)? = actual.fields[field],
 			case .floats(let expectedValues)? = expected.fields[field]
