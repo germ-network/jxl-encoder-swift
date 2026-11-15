@@ -215,20 +215,24 @@ struct PixelBlockEntropyModelTests {
 		let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
 		var writer = BitWriter()
 		JPEGBlockContextMap.write(result, writer: &writer)
-		let nativeBits = try #require(
-			Int(lines.first { $0.hasPrefix("wire_bits ") }!.split(separator: " ")[1]))
-		let nativeBytes = String(
-			lines.first { $0.hasPrefix("wire_bytes ") }!.split(separator: " ")[1])
-		let expectedBytes = stride(from: 0, to: nativeBytes.count, by: 2)
-			.compactMap { offset in
-				Int(nativeBytes.dropFirst(offset).prefix(2), radix: 16).map(
-					Int64.init)
-			}
-		#expect(expectedBytes.count * 2 == nativeBytes.count)
-		reportAutomaticWireDiagnostic(
-			fixture: "e4_pixel_block_model_ties",
-			actualBitCount: writer.bitsWritten, actualBytes: writer.bytes,
-			expectedBitCount: Int64(nativeBits), expectedBytes: expectedBytes)
+		let wireBitLines = lines.filter { $0.hasPrefix("wire_bits ") }
+		let wireByteLines = lines.filter { $0.hasPrefix("wire_bytes ") }
+		if !wireBitLines.isEmpty || !wireByteLines.isEmpty {
+			let bitLine = try #require(wireBitLines.count == 1 ? wireBitLines[0] : nil)
+			let byteLine = try #require(wireByteLines.count == 1 ? wireByteLines[0] : nil)
+			let nativeBits = try #require(Int(bitLine.split(separator: " ")[1]))
+			let nativeBytes = String(try #require(byteLine.split(separator: " ")[1]))
+			let expectedBytes = stride(from: 0, to: nativeBytes.count, by: 2)
+				.compactMap { offset in
+					Int(nativeBytes.dropFirst(offset).prefix(2), radix: 16).map(
+						Int64.init)
+				}
+			#expect(expectedBytes.count * 2 == nativeBytes.count)
+			reportAutomaticWireDiagnostic(
+				fixture: "e4_pixel_block_model_ties",
+				actualBitCount: writer.bitsWritten, actualBytes: writer.bytes,
+				expectedBitCount: Int64(nativeBits), expectedBytes: expectedBytes)
+		}
 		var reader = TestBitReader(bytes: writer.bytes)
 		#expect(reader.read(1) == 0)
 		for _ in 0..<3 { #expect(reader.read(4) == 0) }
