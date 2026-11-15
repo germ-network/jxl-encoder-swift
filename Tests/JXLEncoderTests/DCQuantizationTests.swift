@@ -30,6 +30,32 @@ private func hasSwiftDCShape(actualCount: Int, codedBlockCount: Int) -> Bool {
 /// bitstream, because coefficient 0 is zeroed there and carried by the DC image.
 @Suite("DC quantization")
 struct DCQuantizationTests {
+	@Test(
+		"DC uses native scalar multiply-subtract",
+		.disabled("Contract pending implementation"))
+	func nativeScalarArithmetic() {
+		Issue.record(
+			"Pin fused/unfused discriminating inputs to separately rounded Float products"
+		)
+	}
+
+	@Test(
+		"DC preserves Float intermediate evaluation",
+		.disabled("Contract pending implementation"))
+	func preservesFloatEvaluation() {
+		Issue.record(
+			"Distinguish Float scalar arithmetic from widened Double intermediates")
+	}
+
+	@Test(
+		"group DC receives native scalar quantization",
+		.disabled("Contract pending implementation"))
+	func productionDCUsesNativeScalarArithmetic() {
+		Issue.record(
+			"Exercise computeGroup with an input whose emitted chroma DC distinguishes fusion"
+		)
+	}
+
 	/// Quantizer values for distance 1.0: scale = 7340 / 2^16, quantDC = 10.
 	static let scaleDC: Float = Float(10) * (Float(7340) * (1.0 / Float(1 << 16)))
 	static var inverseFactorB: Float { 256.0 * scaleDC }
