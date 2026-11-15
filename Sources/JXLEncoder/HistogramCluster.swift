@@ -15,7 +15,7 @@ struct Histogram {
 	var counts = [UInt32](repeating: 0, count: StaticEntropyCodes.alphabetSize)
 	var totalCount = 0
 	/// Cached cost in bits; recomputed explicitly, not maintained on mutation.
-	var bitCost = 0
+	var bitCost: Float = 0
 
 	mutating func add(_ symbol: UInt32) {
 		counts[Int(symbol)] += 1
@@ -34,7 +34,7 @@ struct Histogram {
 		let depths = HuffmanTree.createTree(
 			counts: counts, length: StaticEntropyCodes.alphabetSize, treeLimit: 15)
 		for i in 0..<StaticEntropyCodes.alphabetSize {
-			bitCost += Int(counts[i]) * Int(depths[i])
+			bitCost += Float(counts[i]) * Float(depths[i])
 		}
 	}
 }

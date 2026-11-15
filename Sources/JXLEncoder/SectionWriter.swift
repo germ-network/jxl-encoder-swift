@@ -141,6 +141,12 @@ enum SectionOptimizer {
 	/// unaffected by ANS being available at all.
 	static let ansMinimumTokens = 100
 
+	static func usesPrefixCode(
+		originalHistograms: [Histogram], totalTokens: Int
+	) -> Bool {
+		totalTokens < ansMinimumTokens
+	}
+
 	static func optimize(
 		sections: inout [SectionWriter],
 		range: Range<Int>,
