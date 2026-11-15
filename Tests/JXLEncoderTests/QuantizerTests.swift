@@ -144,7 +144,9 @@ struct QuantizerTests {
 		"e4 dead zones match upstream for each channel and quadrant",
 	)
 	func e4DeadZonesMatchReferenceAtThresholdBounds() throws {
-		let reference = try SemanticDump(fixture: "e4_bounded_quantized")
+		let comparison = SemanticPrimitiveCase.e4Boundary
+		#expect(comparison.knownIssues.isEmpty)
+		let reference = try SemanticDump(fixture: comparison.fixture)
 		func integers(_ name: String) -> [Int64]? {
 			guard case .integers(let values)? = reference.fields[name] else {
 				return nil
@@ -197,14 +199,25 @@ struct QuantizerTests {
 						var coefficients = [Float](
 							repeating: 0, count: DCT.blockSize)
 						coefficients[index] = sign * magnitude
-						let actual = Quantizer.quantizeBlockAC(
+						let isolated = Quantizer.quantizeBlockAC(
 							coefficients: coefficients[...],
 							channel: channel,
 							inverseMatrix: identity, quant: 1, scale: 1)
 						let expected: Int32 =
 							offset == 0 ? 0 : (sign < 0 ? -1 : 1)
-						#expect(actual[index] == expected)
+						#expect(isolated[index] == expected)
 						#expect(referenceValue == expected)
+						var productionCoefficients = [Float](
+							repeating: 0, count: DCT.blockSize)
+						productionCoefficients[index] = input
+						let production = Quantizer.quantizeBlockAC(
+							coefficients: productionCoefficients[...],
+							channel: channel,
+							inverseMatrix: matrix,
+							quant: Self.quant,
+							scale: Self.scale,
+							matrixMultiplier: multiplier)
+						#expect(production[index] == referenceValue)
 						boundary += 1
 					}
 				}
@@ -216,7 +229,10 @@ struct QuantizerTests {
 		"actual e4 callers select the translated dead zones",
 	)
 	func e4CallerQuantizedCoefficientsMatchReference() throws {
-		let fixture = try SemanticDump(fixture: "e4_caller_witness")
+		let comparison = SemanticPrimitiveCase.e4CallerPolicy
+		#expect(comparison.knownIssues.isEmpty)
+		let fixture = try SemanticDump(fixture: comparison.fixture)
+		let expectedCaller = fixture.restricted(to: [comparison.category])
 		let input = try StageDump(fixture: "e4_caller_witness")
 		func integers(_ name: String) -> [Int64]? {
 			guard case .integers(let values)? = fixture.fields[name] else { return nil }
@@ -257,9 +273,11 @@ struct QuantizerTests {
 			scaleDC: params.scaleDC, xQuantMatrixScale: params.xQuantMatrixScale,
 			quantDC: &quantDC)
 		for channel in 0..<3 {
-			let expected = try #require(integers("e4_caller.c\(channel)"))
+			let expected = try #require(
+				integers("\(comparison.category).c\(channel)"))
 			#expect(actual[channel].map(Int64.init) == expected, "channel \(channel)")
 		}
+		#expect(expectedCaller.fields.count == 8)
 		for probe in 0..<10 {
 			let channel = Int(channels[probe])
 			let coefficient = Int(indexes[probe])

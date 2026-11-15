@@ -60,7 +60,7 @@ struct ACGroupTests {
 		withKnownIssue(
 			Comment(
 				rawValue:
-					"GER-3398: Cheetah Y dead zone follows full libjxl enc_group.cc:336-361; the inherited tiny golden uses the prior threshold"
+					"GER-3398: Cheetah Y thresholds {0.56,0.62,0.62,0.62} and X/B thresholds {0.58,0.62,0.62,0.62} follow full libjxl enc_group.cc:336-361 and 502-509; inherited tiny golden uses prior policy"
 			)
 		) {
 			#expect(writer.bitsWritten == expectedBits)
@@ -71,7 +71,7 @@ struct ACGroupTests {
 		withKnownIssue(
 			Comment(
 				rawValue:
-					"GER-3398: Cheetah Y dead zone follows full libjxl enc_group.cc:336-361; the inherited tiny golden uses the prior threshold"
+					"GER-3398: Cheetah Y thresholds {0.56,0.62,0.62,0.62} and X/B thresholds {0.58,0.62,0.62,0.62} follow full libjxl enc_group.cc:336-361 and 502-509; inherited tiny golden uses prior policy"
 			)
 		) {
 			#expect(actual.count == expectedBytes.count)
@@ -81,7 +81,7 @@ struct ACGroupTests {
 		withKnownIssue(
 			Comment(
 				rawValue:
-					"GER-3398: Cheetah Y dead zone follows full libjxl enc_group.cc:336-361; the inherited tiny golden uses the prior threshold"
+					"GER-3398: Cheetah Y thresholds {0.56,0.62,0.62,0.62} and X/B thresholds {0.58,0.62,0.62,0.62} follow full libjxl enc_group.cc:336-361 and 502-509; inherited tiny golden uses prior policy"
 			)
 		) {
 			#expect(

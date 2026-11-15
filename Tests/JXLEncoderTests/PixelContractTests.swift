@@ -478,8 +478,10 @@ extension QuantizerTests {
 		"bounded quantized conversions match actual upstream integer decisions",
 	)
 	func quantizedConversionMatchesReferenceOnBoundedValues() throws {
-		let reference = try SemanticDump(fixture: "e4_bounded_quantized")
-		let expected = reference.restricted(to: ["quantized_ac"])
+		let comparison = SemanticPrimitiveCase.e4BoundedQuantization
+		#expect(comparison.knownIssues.isEmpty)
+		let reference = try SemanticDump(fixture: comparison.fixture)
+		let expected = reference.restricted(to: [comparison.category])
 		#expect(reference.fields["quantized_ac.neon_target"] == .integers([1]))
 		let coefficients = (0..<DCT.blockSize).map { index in
 			Float((index * 37) % 101 - 50) * 0.03125
