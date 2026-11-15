@@ -1,5 +1,6 @@
 #include <cstdint>
 #include <fstream>
+#include <iomanip>
 #include <iterator>
 #include <string>
 #include <vector>
@@ -7,6 +8,8 @@
 #include "lib/jxl/ac_context.h"
 #include "lib/jxl/ac_strategy.h"
 #include "lib/jxl/common.h"
+#include "lib/jxl/enc_bit_writer.h"
+#include "lib/jxl/enc_context_map.h"
 #include "lib/jxl/enc_params.h"
 #include "lib/jxl/image.h"
 #include "lib/jxl/memory_manager_internal.h"
@@ -21,7 +24,9 @@ namespace harness {
 namespace {
 
 int RunPixelBlockModel(const std::vector<std::string> &args) {
-  if (args.size() != 3)
+  const bool capture_wire =
+      args.size() == 4 && args[3] == "--capture-wire";
+  if (args.size() != 3 && !capture_wire)
     return 2;
   std::ifstream input(args[0]);
   std::vector<int> counts(256);
@@ -75,12 +80,23 @@ int RunPixelBlockModel(const std::vector<std::string> &args) {
     output << ' ' << model.Context(0, threshold, 0, channel);
     output << ' ' << model.Context(0, threshold + 1, 0, channel);
   }
+  if (capture_wire) {
+    jxl::BitWriter wire(&memory_manager);
+    if (!jxl::EncodeBlockCtxMap(model, &wire, nullptr))
+      return 1;
+    const size_t wire_bits = wire.BitsWritten();
+    wire.ZeroPadToByte();
+    output << "\nwire_bits " << wire_bits << "\nwire_bytes ";
+    for (uint8_t byte : wire.GetSpan())
+      output << std::hex << std::setw(2) << std::setfill('0')
+             << static_cast<unsigned>(byte);
+  }
   output << '\n';
   return output ? 0 : 1;
 }
 
 const RegisterSubcommand kRegister({"pixel-block-model",
-                                    "<256-counts.txt> <distance>",
+                                    "<256-counts.txt> <distance> [--capture-wire]",
                                     RunPixelBlockModel});
 
 } // namespace

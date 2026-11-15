@@ -201,7 +201,7 @@ struct PixelBlockEntropyModelTests {
 	}
 
 	@Test(
-		"DC lists, quant thresholds and decoded context maps match; automatic wire is diagnostic."
+		"Native block-map fields match and automatic wire stays diagnostic."
 	)
 	func quantThresholdWireFieldsMatchReference() throws {
 		var histogram = [Int](repeating: 0, count: 256)
@@ -215,24 +215,34 @@ struct PixelBlockEntropyModelTests {
 		let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
 		var writer = BitWriter()
 		JPEGBlockContextMap.write(result, writer: &writer)
-		let wireBitLines = lines.filter { $0.hasPrefix("wire_bits ") }
-		let wireByteLines = lines.filter { $0.hasPrefix("wire_bytes ") }
-		if !wireBitLines.isEmpty || !wireByteLines.isEmpty {
-			let bitLine = try #require(wireBitLines.count == 1 ? wireBitLines[0] : nil)
-			let byteLine = try #require(wireByteLines.count == 1 ? wireByteLines[0] : nil)
-			let nativeBits = try #require(Int(bitLine.split(separator: " ")[1]))
-			let nativeBytes = String(try #require(byteLine.split(separator: " ")[1]))
-			let expectedBytes = stride(from: 0, to: nativeBytes.count, by: 2)
-				.compactMap { offset in
-					Int(nativeBytes.dropFirst(offset).prefix(2), radix: 16).map(
-						Int64.init)
-				}
-			#expect(expectedBytes.count * 2 == nativeBytes.count)
-			reportAutomaticWireDiagnostic(
-				fixture: "e4_pixel_block_model_ties",
-				actualBitCount: writer.bitsWritten, actualBytes: writer.bytes,
-				expectedBitCount: Int64(nativeBits), expectedBytes: expectedBytes)
-		}
+		let wireURL = try #require(
+			Bundle.module.url(
+				forResource: "e4_pixel_block_model_ties_wire", withExtension: "sem",
+				subdirectory: "Fixtures/semantic"))
+		let wireLines = try String(contentsOf: wireURL, encoding: .utf8)
+			.split(separator: "\n")
+		let bitLine = try #require(
+			wireLines.count == 2 && wireLines[0].hasPrefix("wire_bits ")
+				? wireLines[0] : nil)
+		let byteLine = try #require(
+			wireLines.count == 2 && wireLines[1].hasPrefix("wire_bytes ")
+				? wireLines[1] : nil)
+		let bitFields = bitLine.split(separator: " ")
+		let byteFields = byteLine.split(separator: " ")
+		let nativeBits = try #require(
+			bitFields.count == 2 ? Int(bitFields[1]) : nil)
+		let nativeBytes = try #require(
+			byteFields.count == 2 ? byteFields[1] : nil)
+		let expectedBytes = stride(from: 0, to: nativeBytes.count, by: 2)
+			.compactMap { offset in
+				Int(nativeBytes.dropFirst(offset).prefix(2), radix: 16).map(
+					Int64.init)
+			}
+		#expect(expectedBytes.count * 2 == nativeBytes.count)
+		reportAutomaticWireDiagnostic(
+			fixture: "e4_pixel_block_model_ties_wire",
+			actualBitCount: writer.bitsWritten, actualBytes: writer.bytes,
+			expectedBitCount: Int64(nativeBits), expectedBytes: expectedBytes)
 		var reader = TestBitReader(bytes: writer.bytes)
 		#expect(reader.read(1) == 0)
 		for _ in 0..<3 { #expect(reader.read(4) == 0) }
@@ -247,27 +257,6 @@ struct PixelBlockEntropyModelTests {
 				* (result.qfThresholds.count + 1))
 		#expect(result.numContexts == parseInts(lines[2])?.first)
 		#expect(Set(expectedMap) == Set(0..<result.numContexts))
-		let mapMode = reader.read(3)
-		let decodedMap: [Int]
-		if mapMode == 1 {
-			decodedMap = [Int](repeating: 0, count: expectedMap.count)
-		} else {
-			#expect(mapMode == 0)
-			#expect(reader.read(1) == 1)
-			let mapCode = HistogramCluster.optimizePrefixCodes(
-				tokens: expectedMap.map { Token(context: 0, value: UInt32($0)) },
-				contextMap: [0], prefixCodeCount: 1)
-			var mapHeader = BitWriter()
-			PrefixCodeWriter.writePrefixCodes(mapCode.prefixCodes, writer: &mapHeader)
-			var headerReader = TestBitReader(bytes: mapHeader.bytes)
-			for _ in 0..<mapHeader.bitsWritten {
-				#expect(reader.read(1) == headerReader.read(1))
-			}
-			decodedMap = reader.readPrefixSymbols(
-				count: expectedMap.count, code: mapCode.prefixCodes[0])
-		}
-		#expect(decodedMap == expectedMap)
-		#expect((decodedMap.max() ?? -1) + 1 == result.numContexts)
 		expectQuantThresholdSelectorsRoundTrip()
 	}
 

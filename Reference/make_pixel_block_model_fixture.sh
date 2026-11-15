@@ -13,6 +13,10 @@ with open(sys.argv[1], "w", encoding="utf-8") as output:
     output.write(" ".join(map(str, counts)))
 PY
 "$HARNESS" pixel-block-model "$COUNTS" 1.0 "$OUT"
+WIRE_CAPTURE="${TMPDIR:-/tmp}/e4_pixel_block_model_ties_wire.capture.sem"
+WIRE_OUT="$ROOT/Tests/JXLEncoderTests/Fixtures/semantic/e4_pixel_block_model_ties_wire.sem"
+"$HARNESS" pixel-block-model "$COUNTS" 1.0 "$WIRE_CAPTURE" --capture-wire
+awk '$1 == "wire_bits" || $1 == "wire_bytes"' "$WIRE_CAPTURE" > "$WIRE_OUT"
 PHOTO_OUT="$ROOT/Tests/JXLEncoderTests/Fixtures/semantic/e4_pixel_block_model_flower_1024.sem"
 PHOTO_COUNTS="${TMPDIR:-/tmp}/e4_pixel_block_model_flower_1024.counts"
 python3 - "$PHOTO_COUNTS" <<'PY'
