@@ -20,69 +20,67 @@ private func hasSwiftDCShape(actualCount: Int, codedBlockCount: Int) -> Bool {
 	actualCount == codedBlockCount
 }
 
-/// Guards the fused multiply-add in DC quantization.
-///
-/// clang contracts `a * b - c * d` into `fma(a, b, -(c * d))` by default; Swift
-/// never contracts. Rounding both products separately differs in the last bit,
-/// and these inputs sit close enough to a rounding boundary that the difference
-/// changes the emitted integer. That cost exactly one block out of 44 800 in a
-/// 2100x1400 photo before the port matched the contraction — invisible in the AC
-/// bitstream, because coefficient 0 is zeroed there and carried by the DC image.
 @Suite("DC quantization")
 struct DCQuantizationTests {
-	@Test(
-		"DC uses native scalar multiply-subtract",
-		.disabled("Contract pending implementation"))
+	@Test("DC uses native scalar multiply-subtract")
 	func nativeScalarArithmetic() {
-		Issue.record(
-			"Pin fused/unfused discriminating inputs to separately rounded Float products"
-		)
+		for (bits, expected) in [
+			(UInt32(0xBF64_2040), Int16(-257)),
+			(UInt32(0xBEE3_ADF7), Int16(-129)),
+			(UInt32(0xBDE1_003F), Int16(-33)),
+		] {
+			let actual = ACGroupEncoder.quantizedDC(
+				coefficient: Float(bitPattern: bits),
+				inverseFactor: 286.71875,
+				yDC: 2,
+				cflFactor: 0.5)
+			#expect(actual == expected)
+		}
 	}
 
-	@Test(
-		"DC preserves Float intermediate evaluation",
-		.disabled("Contract pending implementation"))
+	@Test("DC preserves Float intermediate evaluation")
 	func preservesFloatEvaluation() {
-		Issue.record(
-			"Distinguish Float scalar arithmetic from widened Double intermediates")
+		let coefficient = Float(bitPattern: 0xBF64_2040)
+		let product = coefficient * 286.71875
+		let correction = Float(2) * 0.5
+		#expect(product - correction == -256.5)
+		#expect(
+			Int16((product - correction).rounded(.toNearestOrAwayFromZero)) == -257)
+		let widened = Double(coefficient) * Double(286.71875) - Double(correction)
+		#expect(Int16(widened.rounded(.toNearestOrAwayFromZero)) == -256)
 	}
 
-	@Test(
-		"group DC receives native scalar quantization",
-		.disabled("Contract pending implementation"))
+	@Test("group DC receives native scalar quantization")
 	func productionDCUsesNativeScalarArithmetic() {
-		Issue.record(
-			"Exercise computeGroup with an input whose emitted chroma DC distinguishes fusion"
-		)
+		let scaleDC: Float = 1.119_995_117_187_5
+		let yValue = 2 / (512 * scaleDC)
+		let bValue = Float(bitPattern: 0xBF64_2040)
+		let planes = ChannelPlanes(
+			planes: [
+				[Float](repeating: 0, count: 64),
+				[Float](repeating: yValue, count: 64),
+				[Float](repeating: bValue, count: 64),
+			],
+			widths: [8, 8, 8],
+			heights: [8, 8, 8])
+		var quantDC = [[Int16]](repeating: [0], count: 3)
+		_ = ACGroupEncoder.computeGroup(
+			planes: planes,
+			widthInBlocks: 1,
+			heightInBlocks: 1,
+			subsampling: .none,
+			quantField: [5],
+			scale: 1,
+			scaleDC: scaleDC,
+			xQuantMatrixScale: 2,
+			quantDC: &quantDC)
+		#expect(quantDC[1] == [2])
+		#expect(quantDC[2] == [-257])
 	}
 
 	/// Quantizer values for distance 1.0: scale = 7340 / 2^16, quantDC = 10.
 	static let scaleDC: Float = Float(10) * (Float(7340) * (1.0 / Float(1 << 16)))
 	static var inverseFactorB: Float { 256.0 * scaleDC }
-
-	/// Found by search: fused and unfused rounding disagree here.
-	@Test(
-		"fused arithmetic is used where it changes the result",
-		arguments: [
-			(UInt32(0xBF64_2040), Int16(2), Int16(-256)),
-			(UInt32(0xBEE3_ADF7), Int16(2), Int16(-128)),
-			(UInt32(0xBDE1_003F), Int16(2), Int16(-32)),
-		])
-	func fusedMatters(coefficientBits: UInt32, yDC: Int16, expected: Int16) {
-		let coefficient = Float(bitPattern: coefficientBits)
-		let actual = ACGroupEncoder.quantizedDC(
-			coefficient: coefficient,
-			inverseFactor: Self.inverseFactorB,
-			yDC: yDC,
-			cflFactor: 0.5)
-		#expect(actual == expected)
-
-		// the unfused form would give a different answer, so this test has teeth
-		let unfused = Int16(
-			(coefficient * Self.inverseFactorB - Float(yDC) * 0.5)
-				.rounded(.toNearestOrAwayFromZero))
-		#expect(unfused != expected, "inputs no longer discriminate the contraction")
-	}
 
 	@Test("rounds ties away from zero, unlike AC quantization")
 	func tiesAwayFromZero() {

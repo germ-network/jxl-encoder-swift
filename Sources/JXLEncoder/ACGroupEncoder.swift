@@ -41,12 +41,8 @@ public enum ACGroupEncoder {
 
 	/// Quantizes one DC coefficient.
 	///
-	/// The multiply-subtract is written as an explicit fused multiply-add
-	/// because clang contracts `a * b - c * d` into `fma(a, b, -(c * d))` by
-	/// default while Swift never contracts. Rounding both products separately
-	/// differs in the last bit, which is enough to flip a value sitting on a
-	/// rounding boundary — it cost exactly one block in one 44 800-block DC
-	/// group before this was matched.
+	/// Uses scalar Float multiply-subtract evaluation. The folded correction
+	/// remains an inherited approximation of the e4 weighted-predictor path.
 	///
 	/// Rounding is ties-away-from-zero (`std::round`), unlike the ties-to-even
 	/// used when quantizing AC coefficients.
@@ -54,7 +50,7 @@ public enum ACGroupEncoder {
 		coefficient: Float, inverseFactor: Float, yDC: Int16, cflFactor: Float
 	) -> Int16 {
 		let correction = Float(yDC) * cflFactor
-		let value = (-correction).addingProduct(coefficient, inverseFactor)
+		let value = coefficient * inverseFactor - correction
 		return Int16(value.rounded(.toNearestOrAwayFromZero))
 	}
 
@@ -200,11 +196,6 @@ public enum ACGroupEncoder {
 					// Taken from the decorrelated coefficients, then B has Y's
 					// DC subtracted on top.
 					//
-					// Written as an explicit fused multiply-add because clang
-					// contracts `a * b - c * d` into `fma(a, b, -(c * d))` by
-					// default, while Swift never contracts. Computing both
-					// products separately differs in the last bit, which is
-					// enough to flip a value sitting on a rounding boundary.
 					quantDC[channel][index(channel)] = quantizedDC(
 						coefficient: blockCoefficients[0],
 						inverseFactor: inverseFactor[channel],
