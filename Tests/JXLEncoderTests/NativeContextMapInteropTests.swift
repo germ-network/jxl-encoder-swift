@@ -279,6 +279,12 @@ struct NativeContextMapInteropTests {
 			}
 			let prepared = ContextMapEncoding.prepare(
 				entries, numHistograms: numHistograms)
+			if name == "context_raw_rle" {
+				#expect(prepared.representation == .raw)
+			}
+			if name == "context_mtf_ans" {
+				#expect(prepared.representation == .moveToFront)
+			}
 			let selectedEntropy: ContextMapEntropy.Prepared?
 			switch prepared.representation {
 			case .simple(let entryBits):
@@ -296,6 +302,13 @@ struct NativeContextMapInteropTests {
 				entropyModes.insert(
 					selectedEntropy.usesPrefixCode ? "prefix" : "ans")
 				hasRunLength = hasRunLength || selectedEntropy.runLength.enabled
+				if name == "context_raw_rle" {
+					#expect(selectedEntropy.usesPrefixCode)
+					#expect(selectedEntropy.runLength.enabled)
+				}
+				if name == "context_mtf_ans" {
+					#expect(!selectedEntropy.usesPrefixCode)
+				}
 			}
 			var writer = BitWriter()
 			ContextMapEncoding.write(prepared, to: &writer)
