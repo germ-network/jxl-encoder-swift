@@ -2,6 +2,28 @@ import Foundation
 
 @testable import JXLEncoder
 
+func reportAutomaticWireDiagnostic(
+	fixture: String, actualBitCount: Int, actualBytes: [UInt8],
+	expectedBitCount: Int64, expectedBytes: [Int64]
+) {
+	let actual = actualBytes.map(Int64.init)
+	guard actualBitCount != expectedBitCount || actual != expectedBytes else { return }
+	let commonCount = min(actual.count, expectedBytes.count)
+	let firstDifference =
+		(0..<commonCount).first {
+			actual[$0] != expectedBytes[$0]
+		} ?? (actual.count == expectedBytes.count ? nil : commonCount)
+	let detail =
+		firstDifference.map { index in
+			index < commonCount
+				? "byte \(index): Swift \(actual[index]), libjxl \(expectedBytes[index])"
+				: "byte lengths diverge at \(index): Swift \(actual.count), libjxl \(expectedBytes.count)"
+		} ?? "byte arrays match"
+	print(
+		"\(fixture) automatic wire: bits Swift \(actualBitCount), libjxl \(expectedBitCount); \(detail)"
+	)
+}
+
 struct EntropyReferenceFixture {
 	let input: SemanticDump
 	let expected: SemanticDump

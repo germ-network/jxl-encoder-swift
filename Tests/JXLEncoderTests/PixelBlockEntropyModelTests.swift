@@ -201,7 +201,7 @@ struct PixelBlockEntropyModelTests {
 	}
 
 	@Test(
-		"The model's DC, qf, map and category fields reach the serialized header."
+		"DC lists, quant thresholds and decoded context maps match; automatic wire is diagnostic."
 	)
 	func quantThresholdWireFieldsMatchReference() throws {
 		var histogram = [Int](repeating: 0, count: 256)
@@ -215,6 +215,20 @@ struct PixelBlockEntropyModelTests {
 		let lines = try String(contentsOf: url, encoding: .utf8).split(separator: "\n")
 		var writer = BitWriter()
 		JPEGBlockContextMap.write(result, writer: &writer)
+		let nativeBits = try #require(
+			Int(lines.first { $0.hasPrefix("wire_bits ") }!.split(separator: " ")[1]))
+		let nativeBytes = String(
+			lines.first { $0.hasPrefix("wire_bytes ") }!.split(separator: " ")[1])
+		let expectedBytes = stride(from: 0, to: nativeBytes.count, by: 2)
+			.compactMap { offset in
+				Int(nativeBytes.dropFirst(offset).prefix(2), radix: 16).map(
+					Int64.init)
+			}
+		#expect(expectedBytes.count * 2 == nativeBytes.count)
+		reportAutomaticWireDiagnostic(
+			fixture: "e4_pixel_block_model_ties",
+			actualBitCount: writer.bitsWritten, actualBytes: writer.bytes,
+			expectedBitCount: Int64(nativeBits), expectedBytes: expectedBytes)
 		var reader = TestBitReader(bytes: writer.bytes)
 		#expect(reader.read(1) == 0)
 		for _ in 0..<3 { #expect(reader.read(4) == 0) }

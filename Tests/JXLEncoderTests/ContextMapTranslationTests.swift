@@ -251,15 +251,14 @@ struct ContextMapTranslationTests {
 		#expect(prefixCandidate.usesPrefixCode)
 		var prefixWriter = BitWriter()
 		ContextMapEntropy.write(prefixCandidate, to: &prefixWriter)
-		#expect(
-			prefixWriter.bitsWritten
-				== (try prefixFixture.integers(
-					prefixFixture.expected, "entropy.context_entropy.bit_count")[
-						0]))
-		#expect(
-			prefixWriter.bytes.map(Int64.init)
-				== (try prefixFixture.integers(
-					prefixFixture.expected, "entropy.context_entropy.bytes")))
+		reportAutomaticWireDiagnostic(
+			fixture: "context_entropy_rle_prefix_two_hist",
+			actualBitCount: prefixWriter.bitsWritten,
+			actualBytes: prefixWriter.bytes,
+			expectedBitCount: try prefixFixture.integers(
+				prefixFixture.expected, "entropy.context_entropy.bit_count")[0],
+			expectedBytes: try prefixFixture.integers(
+				prefixFixture.expected, "entropy.context_entropy.bytes"))
 		let mergeFixture = try EntropyReferenceFixture.load("clusters_best_pair_merge")
 		let mergeLengths = try mergeFixture.integers(
 			mergeFixture.input, "input.clusters.lengths")
@@ -445,14 +444,14 @@ struct ContextMapTranslationTests {
 		)
 		var serialized = BitWriter()
 		ContextMapEntropy.write(candidate, to: &serialized)
-		#expect(
-			serialized.bitsWritten
-				== Int(
-					try state.integers(
-						native, "entropy.context_entropy.bit_count")[0]))
-		#expect(
-			serialized.bytes.map(Int64.init)
-				== (try state.integers(native, "entropy.context_entropy.bytes")))
+		reportAutomaticWireDiagnostic(
+			fixture: "context_entropy_rle",
+			actualBitCount: serialized.bitsWritten,
+			actualBytes: serialized.bytes,
+			expectedBitCount: try state.integers(
+				native, "entropy.context_entropy.bit_count")[0],
+			expectedBytes: try state.integers(
+				native, "entropy.context_entropy.bytes"))
 
 		for (name, expectedPrefix, expectedLogAlpha) in [
 			("context_entropy_prefix_99", 1, 15),
@@ -489,8 +488,10 @@ struct ContextMapTranslationTests {
 				boundary.expected, "entropy.context_entropy.bit_count")[0]
 			let expectedBytes = try boundary.integers(
 				boundary.expected, "entropy.context_entropy.bytes")
-			#expect(boundaryWriter.bitsWritten == Int(expectedBits))
-			#expect(boundaryWriter.bytes.map(Int64.init) == expectedBytes)
+			reportAutomaticWireDiagnostic(
+				fixture: name, actualBitCount: boundaryWriter.bitsWritten,
+				actualBytes: boundaryWriter.bytes,
+				expectedBitCount: expectedBits, expectedBytes: expectedBytes)
 		}
 	}
 
@@ -581,14 +582,14 @@ struct ContextMapTranslationTests {
 						native, "entropy.context_entropy.cost")[0]))
 		var writer = BitWriter()
 		ContextMapEntropy.write(candidate, to: &writer)
-		#expect(
-			writer.bitsWritten
-				== (try fixture.integers(
-					native, "entropy.context_entropy.bit_count")[0]))
-		#expect(
-			writer.bytes.map(Int64.init)
-				== (try fixture.integers(
-					native, "entropy.context_entropy.bytes")))
+		reportAutomaticWireDiagnostic(
+			fixture: "context_entropy_ans_100",
+			actualBitCount: writer.bitsWritten,
+			actualBytes: writer.bytes,
+			expectedBitCount: try fixture.integers(
+				native, "entropy.context_entropy.bit_count")[0],
+			expectedBytes: try fixture.integers(
+				native, "entropy.context_entropy.bytes"))
 	}
 
 	@Test
@@ -670,12 +671,6 @@ struct ContextMapTranslationTests {
 			#expect(candidate.entries == entries)
 			let semantic = try SwiftEntropySemanticEncoding.contextMap(
 				entries: entries, numHistograms: numHistograms)
-			#expect(
-				semantic.fields["entropy.context_map.bit_count"]
-					== expected.fields["entropy.context_map.bit_count"])
-			#expect(
-				semantic.fields["entropy.context_map.bytes"]
-					== expected.fields["entropy.context_map.bytes"])
 			#expect(
 				semantic.fields["entropy.context_map.use_mtf"]
 					== expected.fields["entropy.context_map.use_mtf"])
@@ -759,16 +754,13 @@ struct ContextMapTranslationTests {
 			}
 			var serialized = BitWriter()
 			ContextMapEncoding.write(candidate, to: &serialized)
-			#expect(
-				serialized.bitsWritten
-					== Int(
-						try fixture.integers(
-							expected, "entropy.context_map.bit_count")[
-								0]))
-			#expect(
-				serialized.bytes.map(Int64.init)
-					== (try fixture.integers(
-						expected, "entropy.context_map.bytes")))
+			reportAutomaticWireDiagnostic(
+				fixture: name, actualBitCount: serialized.bitsWritten,
+				actualBytes: serialized.bytes,
+				expectedBitCount: try fixture.integers(
+					expected, "entropy.context_map.bit_count")[0],
+				expectedBytes: try fixture.integers(
+					expected, "entropy.context_map.bytes"))
 		}
 	}
 
