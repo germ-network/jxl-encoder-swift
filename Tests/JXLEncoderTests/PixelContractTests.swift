@@ -141,24 +141,15 @@ struct PixelSemanticFixtureTests {
 		let swiftEPF = try distances.map {
 			Int64(try DistanceParams(distance: $0).epfIterations)
 		}
-		let xScaleIssues = Set(Array(7...16) + Array(23...44))
 		let epfIssues: Set<Int> = [43, 44]
 		for index in distances.indices {
 			let distance = distances[index]
 			#expect(
 				swiftGaborish[index] == gaborish[index],
 				"Gaborish at \(distance)")
-			if xScaleIssues.contains(index) {
-				withKnownIssue(Comment(rawValue: "GER-3387")) {
-					#expect(
-						swiftXScale[index] == xScale[index],
-						"X matrix scale at \(distance)")
-				}
-			} else {
-				#expect(
-					swiftXScale[index] == xScale[index],
-					"X matrix scale at \(distance)")
-			}
+			#expect(
+				swiftXScale[index] == xScale[index],
+				"X matrix scale at \(distance)")
 			if epfIssues.contains(index) {
 				withKnownIssue(Comment(rawValue: "GER-3387")) {
 					#expect(
