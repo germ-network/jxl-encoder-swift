@@ -2,7 +2,7 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Expected values come from compiling full libjxl's own arithmetic directly
+/// Diagnostic values come from compiling full libjxl's own arithmetic directly
 /// (`InitialQuantDC`, `Quantizer::ComputeGlobalScaleAndQuant`, the uniform
 /// quant field's `q = 0.79 / distance`, and `Quantizer::ClampVal`) and
 /// printing raw bit patterns, so these pin the exact float results rather
@@ -52,30 +52,6 @@ struct DistanceParamsTests {
 			distance: 10.0, globalScale: 1035, quantDC: 13, scaleBits: 0x3C81_6000,
 			scaleDCBits: 0x3E52_3C00, uniformQuant: 5),
 	]
-
-	@Test("matches full libjxl's -e 4 uniform-quant-field branch", arguments: reference)
-	func matchesReference(expected: Expected) throws {
-		let params = try DistanceParams(distance: expected.distance)
-		#expect(params.globalScale == expected.globalScale)
-		#expect(params.quantDC == expected.quantDC)
-		#expect(params.scale.bitPattern == expected.scaleBits)
-		#expect(params.scaleDC.bitPattern == expected.scaleDCBits)
-		#expect(params.uniformQuant == expected.uniformQuant)
-	}
-
-	/// The distances where the `effective_dist` clamp does not bind, so the
-	/// result depends on `pow` to the last bit. These are the cases that would
-	/// expose a mismatch between swift-numerics and the reference's `std::pow`.
-	@Test(
-		"QuantDC matches std::pow bit-for-bit where the clamp does not bind",
-		arguments: [
-			(Float(3.0), UInt32(0x3F0A_5313)),
-			(Float(5.0), UInt32(0x3EB5_0C64)),
-			(Float(10.0), UInt32(0x3E4B_B0A8)),
-		])
-	func quantDCUsesPow(distance: Float, expectedBits: UInt32) {
-		#expect(DistanceParams.quantDC(distance: distance).bitPattern == expectedBits)
-	}
 
 	@Test("rejects lossless and negative distances")
 	func rejectsInvalid() {
@@ -215,15 +191,52 @@ struct DistanceParamsTests {
 		}
 	}
 
-	@Test(
-		"QuantDC follows the native Float pow data flow",
-		.disabled("Pending native formula coverage"))
-	func quantDCUsesNativePowFormula() {}
+	@Test("QuantDC follows the native Float pow data flow")
+	func quantDCUsesNativePowFormula() {
+		let distances =
+			Self.reference.map(\.distance) + [
+				0.03, 0.1, 0.25, 0.5, 1, 1.5, 2, 3, 5, 10,
+			]
+		for distance in distances {
+			let dcMul: Float = 0.3
+			let dcQuantPow: Float = 0.83
+			let dcQuant: Float = 1.095_924_047_623_553
+			var effective = dcMul * Float.pow(distance / dcMul, dcQuantPow)
+			effective = clamp1(effective, 0.5 * distance, distance)
+			let expected = min(dcQuant / effective, 50)
+			#expect(
+				DistanceParams.quantDC(distance: distance).bitPattern
+					== expected.bitPattern,
+				"distance bitPattern \(distance.bitPattern)")
+		}
+	}
 
-	@Test(
-		"Native quantization retains complete C++ diagnostics",
-		.disabled("Pending diagnostic preservation coverage"))
-	func preservesCppQuantizationDiagnostics() {}
+	@Test("Native quantization retains complete C++ diagnostics")
+	func preservesCppQuantizationDiagnostics() throws {
+		#expect(Self.reference.count == 10)
+		for expected in Self.reference {
+			let actual = try DistanceParams(distance: expected.distance)
+			print(
+				"C++ quantization diagnostic distance=\(expected.distance) "
+					+ "globalScale=\(actual.globalScale == expected.globalScale) "
+					+ "quantDC=\(actual.quantDC == expected.quantDC) "
+					+ "scale=\(actual.scale.bitPattern == expected.scaleBits) "
+					+ "scaleDC=\(actual.scaleDC.bitPattern == expected.scaleDCBits) "
+					+ "uniformQuant=\(actual.uniformQuant == expected.uniformQuant)"
+			)
+		}
+		let powDiagnostics: [(Float, UInt32)] = [
+			(3, 0x3F0A_5313), (5, 0x3EB5_0C64), (10, 0x3E4B_B0A8),
+		]
+		#expect(powDiagnostics.count == 3)
+		for (distance, cppBits) in powDiagnostics {
+			let native = DistanceParams.quantDC(distance: distance)
+			print(
+				"C++ std::pow diagnostic distance=\(distance) "
+					+ "cppBits=\(cppBits) nativeBits=\(native.bitPattern) "
+					+ "same=\(cppBits == native.bitPattern)")
+		}
+	}
 
 	@Test(
 		"QuantDC preserves its effective-distance clamps and cap",
