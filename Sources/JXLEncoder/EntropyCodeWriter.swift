@@ -123,7 +123,25 @@ struct HybridUintConfiguration: Equatable, Sendable {
 	let lsbInToken: Int
 
 	func encode(_ value: UInt32) -> (symbol: UInt32, bitCount: UInt32, bits: UInt32) {
-		fatalError("Hybrid uint encoding is not implemented")
+		precondition((0...31).contains(splitExponent))
+		precondition(msbInToken >= 0 && lsbInToken >= 0)
+		precondition(msbInToken + lsbInToken <= splitExponent)
+		let splitToken = UInt32(1) << splitExponent
+		guard value >= splitToken else { return (value, 0, 0) }
+
+		let exponent = 31 - value.leadingZeroBitCount
+		let mantissa = value - (UInt32(1) << exponent)
+		let bitCount = exponent - msbInToken - lsbInToken
+		let msb = mantissa >> (exponent - msbInToken)
+		let lsbMask = (UInt32(1) << lsbInToken) - 1
+		let symbol =
+			splitToken
+			+ (UInt32(exponent - splitExponent) << (msbInToken + lsbInToken))
+			+ (msb << lsbInToken)
+			+ (mantissa & lsbMask)
+		let extraMask = (UInt32(1) << bitCount) - 1
+		let bits = (value >> lsbInToken) & extraMask
+		return (symbol, UInt32(bitCount), bits)
 	}
 }
 

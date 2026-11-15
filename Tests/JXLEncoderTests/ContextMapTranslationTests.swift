@@ -4,14 +4,41 @@ import Testing
 
 @Suite("Upstream context-map encoding")
 struct ContextMapTranslationTests {
-	@Test(.disabled("Awaiting context-map translation"))
+	@Test
 	func fixedUintMatchesPinnedReference() throws {
 		let configuration = HybridUintConfiguration(
 			splitExponent: 2, msbInToken: 0, lsbInToken: 1)
-		let encoded = configuration.encode(4)
-		#expect(encoded.symbol == 4)
-		#expect(encoded.bitCount == 1)
-		#expect(encoded.bits == 0)
+		let witnesses: [(UInt32, UInt32, UInt32, UInt32)] = [
+			(0, 0, 0, 0), (3, 3, 0, 0), (4, 4, 1, 0),
+			(5, 5, 1, 0), (6, 4, 1, 1), (7, 5, 1, 1),
+			(8, 6, 2, 0), (UInt32.max, 63, 30, 1_073_741_823),
+		]
+		for (value, symbol, bitCount, bits) in witnesses {
+			let encoded = configuration.encode(value)
+			#expect(encoded.symbol == symbol)
+			#expect(encoded.bitCount == bitCount)
+			#expect(encoded.bits == bits)
+		}
+
+		let noSplit = HybridUintConfiguration(
+			splitExponent: 0, msbInToken: 0, lsbInToken: 0)
+		#expect(noSplit.encode(0).symbol == 0)
+		#expect(noSplit.encode(0).bitCount == 0)
+		#expect(noSplit.encode(1).symbol == 1)
+		#expect(noSplit.encode(1).bitCount == 0)
+		#expect(noSplit.encode(2).symbol == 2)
+		#expect(noSplit.encode(2).bitCount == 1)
+		#expect(noSplit.encode(2).bits == 0)
+		#expect(noSplit.encode(UInt32.max).symbol == 32)
+		#expect(noSplit.encode(UInt32.max).bitCount == 31)
+		#expect(noSplit.encode(UInt32.max).bits == UInt32.max >> 1)
+
+		let length = HybridUintConfiguration(splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+		#expect(length.encode(15).symbol == 15)
+		#expect(length.encode(16).symbol == 16)
+		#expect(length.encode(16).bitCount == 2)
+		#expect(length.encode(UInt32.max).symbol == 127)
+		#expect(length.encode(UInt32.max).bitCount == 29)
 	}
 
 	@Test(.disabled("Awaiting context-map translation"))
