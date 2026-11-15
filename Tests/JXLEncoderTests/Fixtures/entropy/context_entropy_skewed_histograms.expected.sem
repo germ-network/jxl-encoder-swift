@@ -1,0 +1,6 @@
+jxl-semantic-dump 1
+entropy.context_entropy.rle_enabled i 1 0
+entropy.context_entropy.singleton_entropy_above_threshold i 1 0
+entropy.context_entropy.skew_entropy_above_threshold i 1 1
+entropy.context_entropy.token_count i 1 6000001
+entropy.context_entropy.use_prefix_code i 1 0

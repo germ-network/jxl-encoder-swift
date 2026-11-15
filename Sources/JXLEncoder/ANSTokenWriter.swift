@@ -17,6 +17,26 @@ enum ANSTokenWriter {
 		tokens: [Token], contextMap: [UInt8], infoTables: [[ANSEncSymbolInfo]],
 		writer: inout BitWriter
 	) {
+		write(
+			contextMapTokens: tokens.map {
+				ContextMapEntropy.EncodedToken(token: $0, isLength: false)
+			}, contextMap: contextMap, infoTables: infoTables,
+			uintConfigurations: [HybridUintConfiguration](
+				repeating: HybridUintConfiguration(
+					splitExponent: 4, msbInToken: 2, lsbInToken: 0),
+				count: infoTables.count),
+			lengthConfiguration: HybridUintConfiguration(
+				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
+			lengthSymbolOffset: 0, writer: &writer)
+	}
+
+	static func write(
+		contextMapTokens tokens: [ContextMapEntropy.EncodedToken],
+		contextMap: [UInt8], infoTables: [[ANSEncSymbolInfo]],
+		uintConfigurations: [HybridUintConfiguration],
+		lengthConfiguration: HybridUintConfiguration, lengthSymbolOffset: UInt32,
+		writer: inout BitWriter
+	) {
 		var out: [(bits: UInt64, nbits: Int)] = []
 		var allBits: UInt64 = 0
 		var numAllBits = 0
@@ -32,9 +52,15 @@ enum ANSTokenWriter {
 		}
 
 		var coder = ANSState()
-		for token in tokens.reversed() {
+		for encoded in tokens.reversed() {
+			let token = encoded.token
 			let histo = Int(contextMap[Int(token.context)])
-			let (symbol, extraBitCount, extraBits) = UintCoder.encode(token.value)
+			let configuration =
+				encoded.isLength
+				? lengthConfiguration : uintConfigurations[histo]
+			let (baseSymbol, extraBitCount, extraBits) = configuration.encode(
+				token.value)
+			let symbol = baseSymbol + (encoded.isLength ? lengthSymbolOffset : 0)
 			let info = infoTables[histo][Int(symbol)]
 			// Extra bits before the ANS bits, since this is all reversed —
 			// once played back forward they land after their symbol's bits.

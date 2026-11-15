@@ -634,9 +634,6 @@ struct ANSHistogramWriterTests {
 		let counts = try fixture.integers(
 			fixture.input, "input.histogram.counts"
 		).map(UInt32.init)
-		let entries = counts.enumerated().flatMap { symbol, count in
-			Array(repeating: UInt8(symbol), count: Int(count))
-		}
 		let selected = ANSEncodingHistogram.computeBest(counts: counts, strategy: .precise)
 		let expectedShift = try fixture.integers(
 			fixture.expected, "entropy.ans_cost.serialized_shift")[0]
@@ -649,24 +646,6 @@ struct ANSHistogramWriterTests {
 		#expect(
 			Array(selected.normalizedCounts.prefix(expectedCounts.count))
 				== expectedCounts)
-		var actual = BitWriter()
-		EntropyCodeWriter.writeContextMapEntries(entries, allowANS: true, writer: &actual)
-		var expected = BitWriter()
-		expected.write(3, 0)
-		expected.write(1, 0)
-		expected.write(2, UInt64(ANSConstants.logAlphaSize - 5))
-		PrefixCodeWriter.writeUintConfigs(
-			count: 1, logAlphaSize: ANSConstants.logAlphaSize, writer: &expected)
-		selected.write(to: &expected)
-		let info = ANSInfoTable.build(
-			distribution: selected.normalizedCounts,
-			alphabetSize: selected.alphabetSize,
-			logAlphaSize: ANSConstants.logAlphaSize)
-		let tokens = entries.map { Token(context: 0, value: UInt32($0)) }
-		ANSTokenWriter.write(
-			tokens: tokens, contextMap: [0], infoTables: [info], writer: &expected)
-		#expect(actual.bitsWritten == expected.bitsWritten)
-		#expect(actual.bytes == expected.bytes)
 	}
 
 	@Test

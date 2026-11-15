@@ -33,8 +33,7 @@ enum HuffmanTree {
 			var tree: [Node] = []
 			tree.reserveCapacity(2 * length + 1)
 
-			// Built back to front so equal counts keep the reference's ordering
-			// through the stable sort below.
+			// Source ties sort by descending symbol index.
 			var i = length
 			while i != 0 {
 				i -= 1
@@ -53,7 +52,7 @@ enum HuffmanTree {
 				break
 			}
 
-			// Swift's sort is not stable, so sort on (count, original position).
+			// Reverse insertion order makes ascending offset equal descending symbol index.
 			let enumerated = tree.enumerated().sorted {
 				$0.element.totalCount != $1.element.totalCount
 					? $0.element.totalCount < $1.element.totalCount

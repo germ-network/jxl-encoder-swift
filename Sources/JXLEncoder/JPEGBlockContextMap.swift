@@ -2,20 +2,15 @@
 //  JPEGBlockContextMap.swift
 //  JXLEncoder
 //
-//  Port of the JPEG-transcode path's adaptive AC block-context assignment,
-//  from full libjxl's `ComputeJPEGTranscodingData` (enc_frame.cc),
-//  `BlockCtxMap::Context` (ac_context.h), and `EncodeBlockCtxMap` /
-//  `EncodeContextMap` (enc_context_map.cc). libjxl-tiny has no JPEG path and
-//  no adaptive block context map at all — this has no tiny counterpart; see
-//  docs/gap-closure-plan.md.
+//  Shared result and wire mapping for adaptive block contexts. The JPEG
+//  transcode model below buckets each block by its own luma DC value against
+//  per-image thresholds. The optimized DCT8 pixel model is implemented in
+//  PixelBlockEntropyModel and stores its qf thresholds in the same result.
+//  Neither adaptive map has a libjxl-tiny counterpart; see
+//  docs/gap-closure-plan.md for the JPEG history.
 //
-//  Buckets each block by its own luma DC value against per-image thresholds,
-//  so AC token contexts split brighter/darker regions instead of sharing one
-//  context per channel. Chroma carries no thresholds of its own — every
-//  channel's context at a given block position reads the same luma-derived
-//  bucket (confirmed at the source: `row_qdc[bx]` is indexed by the
-//  full-resolution position, not each channel's own subsampled one), and
-//  only the destination *slot* in the context map differs by channel.
+//  On the JPEG path, chroma carries no thresholds of its own — every channel's
+//  context at a block position reads the same full-resolution luma bucket.
 //
 
 public enum JPEGBlockContextMap {
@@ -33,13 +28,23 @@ public enum JPEGBlockContextMap {
 	}
 
 	public struct Result: Sendable {
-		/// Ascending luma DC-value thresholds; 1 to 7 of them.
+		/// Ascending luma DC thresholds; empty for pixel models, 1 to 7 for JPEG.
 		let thresholds: [Int]
+		/// Ascending raw-quant thresholds; empty for JPEG models.
+		var qfThresholds: [UInt32] = []
 		var numDCContexts: Int { thresholds.count + 1 }
-		/// Size `3 * numOrders * numDCContexts`, order-0 slots populated,
-		/// the rest left at zero — dead weight the decoder still expects.
+		/// Size `3 * numOrders * (qfThresholds.count + 1) * numDCContexts`.
+		/// Pixel models retain all source order slots, including unused orders.
 		let contextMap: [UInt8]
 		let numContexts: Int
+
+		static let pixelDefault = Result(
+			thresholds: [],
+			contextMap: [
+				0, 1, 2, 2, 3, 3, 4, 5, 6, 6, 6, 6, 6,
+				7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
+				7, 8, 9, 9, 10, 11, 12, 13, 14, 14, 14, 14, 14,
+			], numContexts: 15)
 
 		/// How many thresholds a raw luma DC value exceeds (`compressed_dc.cc`'s
 		/// `bucket_y` loop — strict `>`, matching encode and decode).
@@ -164,6 +169,20 @@ public enum JPEGBlockContextMap {
 		}
 	}
 
+	enum QuantThresholdCoder {
+		static func write(_ value: UInt32, writer: inout BitWriter) {
+			let (selector, bits, offset): (Int, Int, UInt32) =
+				switch value {
+				case 0..<4: (0, 2, 0)
+				case 4..<12: (1, 3, 4)
+				case 12..<44: (2, 5, 12)
+				default: (3, 8, 44)
+				}
+			writer.write(2, UInt64(selector))
+			writer.write(bits, UInt64(value - offset))
+		}
+	}
+
 	/// Port of `EncodeBlockCtxMap` (enc_context_map.cc), minus the "this is
 	/// exactly the format's built-in default map" shortcut: a JPEG transcode
 	/// always signals an adaptive map here, so that branch never applies.
@@ -177,11 +196,14 @@ public enum JPEGBlockContextMap {
 				ThresholdCoder.write(packSigned(Int32(t)), writer: &writer)
 			}
 		}
-		writer.write(4, 0)  // qf_thresholds: always empty for a transcode
+		writer.write(4, UInt64(result.qfThresholds.count))
+		for threshold in result.qfThresholds {
+			QuantThresholdCoder.write(threshold - 1, writer: &writer)
+		}
 		// Always a per-image, dynamically computed map — no static-tiny
 		// reference to stay byte-exact against, unlike the pixel/JPEG
 		// static-table path's fixed context map.
 		EntropyCodeWriter.writeContextMapEntries(
-			result.contextMap, allowANS: true, writer: &writer)
+			result.contextMap, numHistograms: result.numContexts, writer: &writer)
 	}
 }

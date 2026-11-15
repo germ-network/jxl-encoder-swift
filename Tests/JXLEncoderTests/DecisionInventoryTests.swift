@@ -128,6 +128,40 @@ struct DecisionInventoryTests {
 		#expect(Self.rules(["id": "ZZ-01"]).contains(.idPrefix))
 	}
 
+	@Test("AC-07 retains its identity at the single approved model-file relocation")
+	func acceptsOnlyAC07ModelRelocation() {
+		let modelFile = "Sources/JXLEncoder/PixelBlockEntropyModel.swift"
+		let evidence =
+			"lib/jxl/enc_heuristics.cc:69 Sources/JXLEncoder/PixelBlockEntropyModel.swift:6"
+		let relocated = [
+			"id": "AC-07", "swift_file": modelFile,
+			"swift_symbol": "PixelBlockEntropyModel.compute", "evidence": evidence,
+		]
+		#expect(Self.check([Self.row(relocated)]).isEmpty)
+		#expect(Self.rules(["id": "AC-03", "swift_file": modelFile]).contains(.idPrefix))
+		#expect(
+			Self.rules([
+				"id": "AC-07", "swift_file": "Sources/JXLEncoder/ACContext.swift",
+			]).contains(.idPrefix))
+		#expect(
+			Self.rules([
+				"id": "AC-07",
+				"swift_file": "Sources/JXLEncoder/JPEGBlockContextMap.swift",
+			]).contains(.idPrefix))
+		#expect(
+			Self.check([Self.row(relocated), Self.row(relocated)]).contains {
+				$0.rule == .duplicateId
+			})
+		#expect(
+			Self.check([
+				Self.row([
+					"id": "PM-02", "swift_file": modelFile,
+					"swift_symbol": "PixelBlockEntropyModel.compute",
+					"evidence": evidence,
+				])
+			]).isEmpty)
+	}
+
 	@Test(
 		"path, classification and verification take only listed values")
 	func rejectsUnknownValues() {
@@ -243,11 +277,13 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
-		"adapted rows carry their equivalence argument in notes")
-	func rejectsAdaptedWithoutEquivalenceArgument() {
-		#expect(Self.rules(["classification": "adapted"]).contains(.equivalenceArgument))
+		"adapted rows carry their boundary or specification rationale in notes")
+	func rejectsAdaptedWithoutRationale() {
+		#expect(Self.rules(["classification": "adapted"]).contains(.adaptationRationale))
 		let argued = [
-			"classification": "adapted", "notes": "division is exact for 12-bit totals",
+			"classification": "adapted",
+			"notes":
+				"Swift division retains the source integer operation; no output delta is expected.",
 		]
 		#expect(Self.check([Self.row(argued)]).isEmpty)
 	}

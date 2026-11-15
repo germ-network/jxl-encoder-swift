@@ -261,7 +261,7 @@ enum PrefixCodeWriter {
 		var count = 0
 		var firstFour = [Int](repeating: 0, count: 4)
 		var length = 0
-		for i in 0..<StaticEntropyCodes.alphabetSize where code.depths[i] != 0 {
+		for i in code.depths.indices where code.depths[i] != 0 {
 			if count < 4 { firstFour[count] = i }
 			count += 1
 			length = i + 1
@@ -308,11 +308,22 @@ enum PrefixCodeWriter {
 	/// narrower, `log_alpha_size`) — a fixed width here silently desyncs the
 	/// ANS path's decoder from the very first field after `use_prefix_code`.
 	static func writeUintConfigs(count: Int, logAlphaSize: Int, writer: inout BitWriter) {
-		let splitExponent = 4
-		let msbInToken = 2
-		let lsbInToken = 0
+		let configurations = [HybridUintConfiguration](
+			repeating: HybridUintConfiguration(
+				splitExponent: 4, msbInToken: 2, lsbInToken: 0),
+			count: count)
+		writeUintConfigs(configurations, logAlphaSize: logAlphaSize, writer: &writer)
+	}
+
+	static func writeUintConfigs(
+		_ configurations: [HybridUintConfiguration], logAlphaSize: Int,
+		writer: inout BitWriter
+	) {
 		let splitBits = ceilLog2Nonzero(logAlphaSize + 1)
-		for _ in 0..<count {
+		for configuration in configurations {
+			let splitExponent = configuration.splitExponent
+			let msbInToken = configuration.msbInToken
+			let lsbInToken = configuration.lsbInToken
 			writer.write(splitBits, UInt64(splitExponent))
 			// libjxl's own early-return: when split_exponent == logAlphaSize,
 			// msb/lsb can't matter (there's no room left to split) and are
@@ -332,7 +343,7 @@ enum PrefixCodeWriter {
 		writeUintConfigs(count: codes.count, logAlphaSize: prefixMaxBits, writer: &writer)
 		func symbolCount(_ code: PrefixCode) -> Int {
 			var count = 1
-			for i in 0..<StaticEntropyCodes.alphabetSize where code.depths[i] != 0 {
+			for i in code.depths.indices where code.depths[i] != 0 {
 				count = i + 1
 			}
 			return count

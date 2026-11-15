@@ -91,8 +91,8 @@ struct DecisionInventory {
 		case absentDecision
 		/// `inherited-tiny` row without a `tiny:` source in `evidence`.
 		case tinySource
-		/// `adapted` row whose `notes` doesn't carry the equivalence argument.
-		case equivalenceArgument
+		/// `adapted` row whose `notes` lacks its boundary/specification rationale.
+		case adaptationRationale
 		/// Row that still needs work has no replacement issue, or an unproven
 		/// `faithful`/`adapted` claim doesn't name GER-3392 as its verifier, or
 		/// an `inherited-tiny`/`original` row names only GER-3392.
@@ -169,6 +169,8 @@ struct DecisionInventory {
 		"JT": "Sources/JXLEncoder/JPEGTranscode.swift",
 		"PB": "Sources/JXLEncoder/PlaneBuffer.swift",
 		"PC": "Sources/JXLEncoder/PrefixCodeWriter.swift",
+		"PM": "Sources/JXLEncoder/PixelBlockEntropyModel.swift",
+		"PX": "Sources/JXLEncoder/PixelBlockEntropyConsumers.swift",
 		"QM": "Sources/JXLEncoder/QuantMatrices.swift",
 		"QR": "Sources/JXLEncoder/QuantizeRoundtrip.swift",
 		"QW": "Sources/JXLEncoder/QuantMatrixWriter.swift",
@@ -309,8 +311,7 @@ struct DecisionInventory {
 		case missing
 	}
 
-	/// Whether a row needs no GER-3392 verifier: `faithful` or `adapted`, and
-	/// either `diffed` or citing at least one fixture that `.verifies`.
+	/// A source review or consumed bounded fixture can support this row's claim.
 	static func isSettled(
 		classification: Classification, verification: Verification, hasFixture: Bool
 	) -> Bool {
@@ -335,12 +336,18 @@ struct DecisionInventory {
 		for row in rows {
 			if !Self.isValidId(row.id) {
 				add(.idFormat, row, "id \(row.id)")
-			} else if let prefix = row.id.components(separatedBy: "-").first,
-				Self.idPrefixes[prefix] != row.swiftFile
-			{
-				add(
-					.idPrefix, row,
-					"prefix \(prefix) is not assigned to \(row.swiftFile)")
+			} else if let prefix = row.id.components(separatedBy: "-").first {
+				let ac07File = "Sources/JXLEncoder/PixelBlockEntropyModel.swift"
+				let expectedFile =
+					row.id == "AC-07" ? ac07File : Self.idPrefixes[prefix]
+				if expectedFile != row.swiftFile
+					|| (row.id == "AC-07" && prefix != "AC")
+				{
+					add(
+						.idPrefix, row,
+						"prefix \(prefix) is not assigned to \(row.swiftFile)"
+					)
+				}
 			}
 			if !seenIds.insert(row.id).inserted {
 				add(.duplicateId, row, "id \(row.id) repeated")
@@ -401,8 +408,9 @@ struct DecisionInventory {
 			}
 			if classification == .adapted && row.notes == "-" {
 				add(
-					.equivalenceArgument, row,
-					"adapted rows argue equivalence in notes")
+					.adaptationRationale, row,
+					"adapted rows need a boundary/specification rationale in notes"
+				)
 			}
 
 			var hasFixture = false
@@ -566,7 +574,7 @@ struct DecisionInventory {
 		case .faithful, .adapted:
 			return named.contains(verifier)
 				? nil
-				: "unproven \(classification.rawValue) claim must name \(verifier)"
+				: "unproven \(classification.rawValue) source claim must name \(verifier)"
 		case .inheritedTiny, .original:
 			return named.subtracting([verifier]).isEmpty
 				? "\(classification.rawValue) rows must name an area issue" : nil
@@ -646,6 +654,7 @@ enum SourceGroup: String, CaseIterable {
 				"ImageHeader", "PlaneBuffer",
 				"QuantMatrices", "QuantMatrixWriter", "QuantizeRoundtrip",
 				"Quantizer",
+				"PixelBlockEntropyConsumers", "PixelBlockEntropyModel",
 				"ReciprocalEstimate", "SRGBTransfer", "XYB",
 			].map { "Sources/JXLEncoder/\($0).swift" }
 		case .jpeg:

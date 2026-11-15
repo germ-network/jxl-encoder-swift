@@ -13,6 +13,7 @@ struct SwiftFrameDecisions {
 	let loopFilter: FrameAssembly.LoopFilter
 	var coeffOrder: CoeffOrder.Result
 	var acCode: EntropyCode
+	var blockContextMap: JPEGBlockContextMap.Result?
 	/// No category reads it yet; the entropy categories will.
 	var dcCode: EntropyCode
 	/// Per AC group, in group raster order: the raw quant field the group
@@ -97,8 +98,17 @@ enum SwiftSemanticEncoding {
 		}
 		var order = Encoder.computeCoeffOrder(computes, dim: dim)
 		altering.coeffOrder(&order)
+		let blockContextMap = Encoder.computeBlockContextMap(computes, params: params)
+		acCode = EntropyCode(
+			contextMap: [UInt8](
+				repeating: 0,
+				count: blockContextMap.numContexts
+					* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+			prefixCodes: [])
 		let outputs = computes.reversed().map {
-			Encoder.tokenizeACGroup($0, order: order.orders, mode: .staging(acCode))
+			Encoder.tokenizeACGroup(
+				$0, order: order.orders, mode: .staging(acCode),
+				blockContextMap: blockContextMap)
 		}
 		Encoder.assemble(outputs: outputs, dim: dim, sections: &sections)
 		dcCode = SectionOptimizer.optimize(
@@ -109,12 +119,12 @@ enum SwiftSemanticEncoding {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			allowContextMapANS: true, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: order,
-			allowContextMapANS: true, writer: &acGlobal)
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
@@ -127,7 +137,8 @@ enum SwiftSemanticEncoding {
 			decisions: SwiftFrameDecisions(
 				width: width, height: height, transferFunction: transfer,
 				params: params, loopFilter: loopFilter, coeffOrder: order,
-				acCode: acCode, dcCode: dcCode,
+				acCode: acCode, blockContextMap: blockContextMap,
+				dcCode: dcCode,
 				quantFields: computes.map(\.quantField), pixelGroups: computes))
 	}
 
@@ -167,11 +178,15 @@ extension SemanticDump {
 				decisions.coeffOrder.orders.contains { $0 != CoeffOrder.natural }
 					? 1 : 0
 			]))
-		record("block_context.qf_thresholds", .integers([]))
+		record(
+			"block_context.qf_thresholds",
+			.integers((decisions.blockContextMap?.qfThresholds ?? []).map(Int64.init)))
 		record(
 			"block_context.ctx_map",
-			.integers(ACContext.compactBlockIndexMap.map(Int64.init)))
-		record("block_context.num_ctxs", .integers([Int64(ACContext.numBlockCategories)]))
+			.integers((decisions.blockContextMap?.contextMap ?? []).map(Int64.init)))
+		record(
+			"block_context.num_ctxs",
+			.integers([Int64(decisions.blockContextMap?.numContexts ?? 0)]))
 		record("context_map.num_histograms", .integers([1]))
 		let code = decisions.acCode
 		let map =

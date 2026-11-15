@@ -1,10 +1,9 @@
 # Decision inventory schema
 
 `decision-inventory.tsv` records, for every production encoder decision in this
-package, which upstream libjxl function and configuration it translates and how
-faithfully. Other work cites rows by `id`. Valid output or a smaller file never
-establishes that a row is faithful; only the upstream function and configuration
-do.
+package, its correspondence to a selected upstream function and configuration,
+or its applicable format requirement. Other work cites rows by `id`. Output
+comparisons help diagnose correspondence but do not establish it by themselves.
 
 The reference is full libjxl only:
 
@@ -43,17 +42,17 @@ non-empty, and `-` means "none" where a column allows it.
 | 8 | `config` | The upstream configuration that selects that branch, e.g. `-e 4 kCheetah; HistogramParams.ans_histogram_strategy=kApproximate`, or for JPEG `-e 4 -j 1`. `-` exactly when `upstream` is `-`. |
 | 9 | `classification` | One of the four classes below. |
 | 10 | `verification` | `diffed`, `cited` or `assumed` (below). |
-| 11 | `evidence` | Space-separated locations backing the classification (a line may be a range, `:12-20`): the row's own `<swift_file>:<line>` at the audited commit (omitted only for `(absent)`), and, when `upstream` is pinned, at least one `lib/…:<line>` or `tools/…:<line>` at the pin. `inherited-tiny` rows also name the libjxl-tiny source as `tiny:<file>:<function>` (tiny is unpinned). Never `-`. Output size, bits per pixel or successful decoding are never evidence. |
+| 11 | `evidence` | Space-separated locations backing the classification (a line may be a range, `:12-20`): the row's own `<swift_file>:<line>` at the audited commit (omitted only for `(absent)`), and, when `upstream` is pinned, at least one `lib/…:<line>` or `tools/…:<line>` at the pin. `inherited-tiny` rows also name the libjxl-tiny source as `tiny:<file>:<function>` (tiny is unpinned). Never `-`. Output comparisons and successful decoding can diagnose behavior but cannot establish source/spec correspondence alone. |
 | 12 | `replacement` | Comma-separated (no spaces) Linear issue ids that replace or verify this decision, or `-`. Only issues in the checker's `replacementIssues` list are accepted: GER-3386, GER-3387, GER-3388, GER-3389, GER-3392, GER-3418, GER-3419, plus any issue filed for this audit and added to that list. |
-| 13 | `notes` | Free text, or `-`. On `adapted` rows, the equivalence argument (never `-`). |
-| 14 | `fixture` | `-` or a comma list (no spaces) of verifying full-libjxl fixture references: `<path>#<category>` for `.sem`, `<path>` otherwise. |
+| 13 | `notes` | Free text, or `-`. On `adapted` rows, the boundary or specification basis, retained algorithm, and expected output difference; an evidence gap may be added but never substitutes for those items (never `-`). |
+| 14 | `fixture` | `-` or a comma list (no spaces) of diagnostic full-libjxl fixture references: `<path>#<category>` for `.sem`, `<path>` otherwise. They record consumed bounded comparisons and never settle source correspondence alone. |
 
 ## Classification
 
 | value | meaning |
 |---|---|
-| `faithful` | Translates the cited upstream function under the cited config, with no behavioural difference. |
-| `adapted` | Differs in form for memory safety or Swift arithmetic (bounds-checked buffers, integer widths, division in place of a reciprocal) and is claimed equivalent in output; `notes` says why. |
+| `faithful` | Follows the cited upstream algorithm under the cited config, with no identified algorithmic divergence. |
+| `adapted` | Uses a justified Swift-boundary adaptation or spec-guided choice while retaining applicable source algorithm decisions. Output may differ; `notes` identify the boundary or specification, retained algorithm, and expected difference. An evidence gap may be stated in addition, never instead. If source behavior conflicts with the specification, record the evidence and resolve which to follow before classifying. |
 | `inherited-tiny` | Still follows libjxl-tiny where full libjxl e4 differs; awaiting retargeting (D-3). |
 | `original` | Local implementation or policy with no faithful upstream source: a replacement, simplification, omission (`(absent)`) or platform glue. |
 
@@ -68,13 +67,13 @@ non-empty, and `-` means "none" where a column allows it.
 ## Rules
 
 1. Each file's header line is exactly its column names, in order. Every line has that many non-empty fields and no carriage return.
-2. Ids match the pattern, are unique, and use the prefix the table below assigns to the row's `swift_file`.
+2. Ids match the pattern, are unique, and use the prefix the table below assigns to the row's `swift_file`. `AC-07` keeps its stable identity at `PixelBlockEntropyModel.swift`; this is the sole relocation exception, and no other `AC` row may move from `ACContext.swift`.
 3. `classification`, `verification` and `path` take only the listed values.
 4. `upstream` is the pinned revision or `-`; `-` only with `original`. `upstream_function` and `config` are `-` exactly when `upstream` is.
 5. Provenance: `swift_symbol`, `decision` and `evidence` are never `-`; `evidence` holds the locations column 11 requires; `upstream_function`, when not `-`, is `(lib|tools)/<path>:<Function>`.
 6. `(absent)` rows are `original` with a pinned upstream.
-7. `inherited-tiny` rows name a `tiny:` source in `evidence`; `adapted` rows argue equivalence in `notes`.
-8. `replacement` is `-` only when the row needs no further work: `faithful` or `adapted`, with `diffed` or at least one verifying fixture. Every other row (every deviation, and every claim not compared line by line) names at least one accepted issue. A `faithful` or `adapted` row that is `cited` or `assumed` without a verifying fixture names GER-3392 as its verifier, alongside any area issue. `inherited-tiny` and `original` rows name an area issue (not GER-3392 alone), since they need replacing, not only verifying.
+7. `inherited-tiny` rows name a `tiny:` source in `evidence`; `adapted` rows explain the boundary or specification basis, retained algorithm, and expected output difference in `notes`; an evidence gap may be added but never substitutes for that rationale. Source/spec conflicts require an explicit resolution before classification.
+8. `replacement` is `-` only when the row needs no further work: `faithful` or `adapted`, with `diffed` source review or a consumed bounded fixture. Fixture evidence applies only to its named finite witness and does not establish general algorithm correspondence. Every other row (every deviation, and every claim without source review or a consumed witness) names at least one accepted issue. A `faithful` or `adapted` row that is `cited` or `assumed` without a consumed fixture names GER-3392 as its verifier, alongside any area issue. `inherited-tiny` and `original` rows name an area issue (not GER-3392 alone), since they need replacing, not only verifying.
 9. Every `swift_file` (in either file) is an existing `.swift` file under `Sources/`.
 10. Coverage: every `.swift` file under `Sources/` has at least one row or an exemption, never both; no file is exempted twice. The exemptions are exactly the agreed set (`DecisionInventory.agreedExemptions`); changing it is a reviewed decision. A file both inventoried and exempt is reported with rules 1–9; a file with neither is reported per source group (`SourceGroup`).
 11. `fixtureReference`: every fixture reference is well formed, has pinned full-libjxl provenance, and is compared without a known issue. A `.sem#category` reference must belong to a semantic comparison descriptor consumed by its test; a path-only stage reference must belong to a stage descriptor consumed by its test. Provenance `consumers` text alone verifies nothing. Known semantic and stage divergences verify nothing. Fixtures on `inherited-tiny` or `original` rows still must verify but do not settle those rows.
@@ -125,6 +124,8 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `JT` | JPEGTranscode.swift |
 | `PB` | PlaneBuffer.swift |
 | `PC` | PrefixCodeWriter.swift |
+| `PM` | PixelBlockEntropyModel.swift |
+| `PX` | PixelBlockEntropyConsumers.swift |
 | `QM` | QuantMatrices.swift |
 | `QR` | QuantizeRoundtrip.swift |
 | `QW` | QuantMatrixWriter.swift |

@@ -2,6 +2,28 @@ import Foundation
 
 @testable import JXLEncoder
 
+func reportAutomaticWireDiagnostic(
+	fixture: String, actualBitCount: Int, actualBytes: [UInt8],
+	expectedBitCount: Int64, expectedBytes: [Int64]
+) {
+	let actual = actualBytes.map(Int64.init)
+	guard actualBitCount != expectedBitCount || actual != expectedBytes else { return }
+	let commonCount = min(actual.count, expectedBytes.count)
+	let firstDifference =
+		(0..<commonCount).first {
+			actual[$0] != expectedBytes[$0]
+		} ?? (actual.count == expectedBytes.count ? nil : commonCount)
+	let detail =
+		firstDifference.map { index in
+			index < commonCount
+				? "byte \(index): Swift \(actual[index]), libjxl \(expectedBytes[index])"
+				: "byte lengths diverge at \(index): Swift \(actual.count), libjxl \(expectedBytes.count)"
+		} ?? "byte arrays match"
+	print(
+		"\(fixture) automatic wire: bits Swift \(actualBitCount), libjxl \(expectedBitCount); \(detail)"
+	)
+}
+
 struct EntropyReferenceFixture {
 	let input: SemanticDump
 	let expected: SemanticDump
@@ -56,7 +78,7 @@ struct EntropyReferenceFixture {
 			return values
 		}
 		var inputFields: Set<String>
-		let expectedFields: Set<String>
+		var expectedFields: Set<String>
 		if name == "tree_entropy_cheetah" {
 			inputFields = [
 				"input.tree_entropy.speed_tier", "input.tree_entropy.decoding_tier",
@@ -359,10 +381,176 @@ struct EntropyReferenceFixture {
 				else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 				offset = end
 			}
+		} else if name == "context_entropy_rle_cumulative_rounding" {
+			inputFields = ["input.context_entropy.rle_pattern"]
+			expectedFields = [
+				"entropy.context_entropy.input_count",
+				"entropy.context_entropy.rle_enabled",
+				"entropy.context_entropy.token_count",
+				"entropy.context_entropy.token_hash",
+			]
+			let pattern = try integers(input, "input.context_entropy.rle_pattern")
+			let inputCount = try integers(
+				expected, "entropy.context_entropy.input_count")
+			let rle = try integers(expected, "entropy.context_entropy.rle_enabled")
+			let tokenCount = try integers(
+				expected, "entropy.context_entropy.token_count")
+			let tokenHash = try integers(
+				expected, "entropy.context_entropy.token_hash")
+			guard pattern == [5000, 200, 52, 4],
+				inputCount == [1_260_004], rle == [1],
+				tokenCount.count == 1, tokenCount[0] > 100,
+				tokenHash.count == 1, (0...Int64(UInt32.max)).contains(tokenHash[0])
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "context_entropy_singleton_contexts" {
+			inputFields = ["input.context_entropy.majority_count"]
+			expectedFields = [
+				"entropy.context_entropy.token_count",
+				"entropy.context_entropy.rle_enabled",
+				"entropy.context_entropy.histogram_counts",
+				"entropy.context_entropy.use_prefix_code",
+			]
+			let majority = try integers(input, "input.context_entropy.majority_count")
+			guard majority == [102],
+				try integers(expected, "entropy.context_entropy.token_count") == [
+					103
+				],
+				try integers(expected, "entropy.context_entropy.rle_enabled") == [
+					0
+				],
+				try integers(expected, "entropy.context_entropy.histogram_counts")
+					== [102, 0, 0, 1],
+				try integers(expected, "entropy.context_entropy.use_prefix_code")
+					== [1]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name == "context_entropy_skewed_histograms" {
+			inputFields = ["input.context_entropy.majority_count"]
+			expectedFields = [
+				"entropy.context_entropy.token_count",
+				"entropy.context_entropy.rle_enabled",
+				"entropy.context_entropy.skew_entropy_above_threshold",
+				"entropy.context_entropy.singleton_entropy_above_threshold",
+				"entropy.context_entropy.use_prefix_code",
+			]
+			let majority = try integers(input, "input.context_entropy.majority_count")
+			guard majority == [3_000_000],
+				try integers(expected, "entropy.context_entropy.token_count")
+					== [6_000_001],
+				try integers(expected, "entropy.context_entropy.rle_enabled")
+					== [0],
+				try integers(
+					expected,
+					"entropy.context_entropy.skew_entropy_above_threshold")
+					== [1],
+				try integers(
+					expected,
+					"entropy.context_entropy.singleton_entropy_above_threshold")
+					== [0],
+				try integers(expected, "entropy.context_entropy.use_prefix_code")
+					== [0]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name.hasPrefix("context_entropy_") {
+			inputFields = ["input.context_entropy.entries"]
+			expectedFields = [
+				"entropy.context_entropy.entries", "entropy.context_entropy.cost",
+				"entropy.context_entropy.tokens",
+				"entropy.context_entropy.context_map",
+				"entropy.context_entropy.uint_configs",
+				"entropy.context_entropy.length_uint_config",
+				"entropy.context_entropy.rle_enabled",
+				"entropy.context_entropy.min_length_symbol",
+				"entropy.context_entropy.min_length",
+				"entropy.context_entropy.distance_context",
+				"entropy.context_entropy.histogram_count",
+				"entropy.context_entropy.histogram_lengths",
+				"entropy.context_entropy.histogram_counts",
+				"entropy.context_entropy.tables",
+				"entropy.context_entropy.use_prefix_code",
+				"entropy.context_entropy.log_alpha_size",
+				"entropy.context_entropy.bit_count",
+				"entropy.context_entropy.bytes",
+			]
+			if name == "context_entropy_prefix_99_fixed_wire" {
+				expectedFields.insert("entropy.context_entropy.table_bits")
+			}
+			let entries = try integers(input, "input.context_entropy.entries")
+			let outputEntries = try integers(
+				expected, "entropy.context_entropy.entries")
+			let tokens = try integers(expected, "entropy.context_entropy.tokens")
+			let contextMap = try integers(
+				expected, "entropy.context_entropy.context_map")
+			let uintConfigs = try integers(
+				expected, "entropy.context_entropy.uint_configs")
+			let lengthConfig = try integers(
+				expected, "entropy.context_entropy.length_uint_config")
+			let rle = try integers(expected, "entropy.context_entropy.rle_enabled")
+			let minSymbol = try integers(
+				expected, "entropy.context_entropy.min_length_symbol")
+			let minLength = try integers(expected, "entropy.context_entropy.min_length")
+			let distanceContext = try integers(
+				expected, "entropy.context_entropy.distance_context")
+			let histogramCount = try integers(
+				expected, "entropy.context_entropy.histogram_count")
+			let lengths = try integers(
+				expected, "entropy.context_entropy.histogram_lengths")
+			let histogramCounts = try integers(
+				expected, "entropy.context_entropy.histogram_counts")
+			let tables = try integers(expected, "entropy.context_entropy.tables")
+			let tableBits =
+				name == "context_entropy_prefix_99_fixed_wire"
+				? try integers(expected, "entropy.context_entropy.table_bits") : []
+			let usePrefix = try integers(
+				expected, "entropy.context_entropy.use_prefix_code")
+			let logAlpha = try integers(
+				expected, "entropy.context_entropy.log_alpha_size")
+			let cost = try integers(expected, "entropy.context_entropy.cost")
+			let bitCount = try integers(expected, "entropy.context_entropy.bit_count")
+			let bytes = try integers(expected, "entropy.context_entropy.bytes")
+			guard !entries.isEmpty, entries.count <= 1_000_000,
+				entries.allSatisfy({ (0...255).contains($0) }),
+				outputEntries == entries, tokens.count.isMultiple(of: 3),
+				!tokens.isEmpty,
+				tokens.enumerated().allSatisfy({ index, value in
+					if index % 3 == 0 { return (0...1).contains(value) }
+					if index % 3 == 1 {
+						return value >= 0 && value <= Int64(UInt32.max)
+					}
+					return (0...1).contains(value)
+				}),
+				uintConfigs.count.isMultiple(of: 3),
+				lengthConfig.count == 3, rle.count == 1, (0...1).contains(rle[0]),
+				minSymbol == [224], minLength == [3], distanceContext == [1],
+				histogramCount.count == 1, (1...2).contains(histogramCount[0]),
+				lengths.count == Int(histogramCount[0]),
+				lengths.allSatisfy({ (0...256).contains($0) }),
+				histogramCounts.count == lengths.reduce(0, +),
+				checkedSum(histogramCounts, limit: Int64(UInt32.max))
+					== Int64(tokens.count / 3),
+				tables.count == histogramCounts.count * 2,
+				name != "context_entropy_prefix_99_fixed_wire"
+					|| (tableBits.count == histogramCounts.count
+						&& stride(from: 0, to: tables.count, by: 2)
+							.allSatisfy { index in
+								let depth = tables[index]
+								let bits = tableBits[index / 2]
+								return depth == 0
+									? bits == 0
+									: bits < (1 << depth)
+							}),
+				usePrefix.count == 1, (0...1).contains(usePrefix[0]),
+				logAlpha.count == 1, (7...15).contains(logAlpha[0]),
+				cost.count == 1, cost[0] >= 0, bitCount.count == 1,
+				bitCount[0] > 0, bytes.count == (bitCount[0] + 7) / 8,
+				contextMap.count == (rle[0] == 1 ? 2 : 1),
+				contextMap.allSatisfy({ (0..<histogramCount[0]).contains($0) }),
+				rle[0] == 0
+					|| (lengthConfig == [0, 0, 0]
+						&& tokens.contains(where: { $0 == 1 }))
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("context_") {
 			var requiredInputFields: Set<String> = [
 				"input.context_map.entries", "input.context_map.num_histograms",
-				"input.context_map.allow_ans", "input.context_map.map_length",
+				"input.context_map.map_length",
 			]
 			var requiredExpectedFields: Set<String> = [
 				"entropy.context_map.entries", "entropy.context_map.num_histograms",
@@ -396,9 +584,7 @@ struct EntropyReferenceFixture {
 				hasCandidates
 				? try integers(input, "input.context_map.mtf_entries") : nil
 			let histograms = try integers(input, "input.context_map.num_histograms")
-			let allowANS = try integers(input, "input.context_map.allow_ans")
-			guard histograms.count == 1, (1...255).contains(histograms[0]),
-				allowANS.count == 1, (0...1).contains(allowANS[0]),
+			guard histograms.count == 1, (1...256).contains(histograms[0]),
 				!entries.isEmpty, entries.count <= 1_000_000,
 				mapLength == [Int64(entries.count)],
 				entries.allSatisfy({ (0..<histograms[0]).contains($0) })
@@ -532,7 +718,9 @@ struct EntropyReferenceFixture {
 					? (0...3).contains(entryBits[0]) : entryBits[0] == -1,
 				(0...1).contains(useMTF[0]),
 				simple[0] == 1
-					? usePrefix[0] == -1 : (0...1).contains(usePrefix[0]),
+					? usePrefix[0] == -1
+					: ((0...1).contains(usePrefix[0])
+						|| (name == "context_raw_rle" && usePrefix[0] == -1)),
 				simple[0] == 1
 					? tokenCount == [-1] && tokenCountStatus == [0]
 					: (tokenCount[0] >= 0

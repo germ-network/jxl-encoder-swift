@@ -16,6 +16,8 @@ public struct DCGroupData: Sendable {
 	/// One plane per channel, each at its own subsampled size.
 	public var quantDC: [[Int16]]
 	public var rawQuantField: [UInt8]
+	/// Uniform per-block EPF sharpness for the selected encoding path.
+	public let epfSharpness: UInt8
 	public let widthInBlocks: Int
 	public let heightInBlocks: Int
 	public let subsampling: ChromaSubsampling
@@ -40,11 +42,12 @@ public struct DCGroupData: Sendable {
 
 	public init(
 		widthInBlocks: Int, heightInBlocks: Int,
-		subsampling: ChromaSubsampling = .none
+		subsampling: ChromaSubsampling = .none, epfSharpness: UInt8 = 4
 	) {
 		self.widthInBlocks = widthInBlocks
 		self.heightInBlocks = heightInBlocks
 		self.subsampling = subsampling
+		self.epfSharpness = epfSharpness
 		let widths = (0..<3).map {
 			subsampling.dcPlaneSize(channel: $0, blocks: widthInBlocks, vertical: false)
 		}
@@ -164,7 +167,9 @@ public enum DCGroupEncoder {
 
 		// Edge-preserving filter sharpness, constant across the image.
 		for _ in 0..<(data.widthInBlocks * data.heightInBlocks) {
-			writer.write(token: Token(context: 0, value: packSigned(4)))
+			writer.write(
+				token: Token(
+					context: 0, value: packSigned(Int32(data.epfSharpness))))
 		}
 	}
 

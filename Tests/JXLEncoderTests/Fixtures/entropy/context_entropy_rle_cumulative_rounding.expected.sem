@@ -1,0 +1,5 @@
+jxl-semantic-dump 1
+entropy.context_entropy.input_count i 1 1260004
+entropy.context_entropy.rle_enabled i 1 1
+entropy.context_entropy.token_count i 1 275004
+entropy.context_entropy.token_hash i 1 57965365

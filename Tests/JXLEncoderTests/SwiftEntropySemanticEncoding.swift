@@ -152,35 +152,78 @@ enum SwiftEntropySemanticEncoding {
 	}
 
 	static func contextMap(
-		entries: [UInt8], numHistograms: Int, allowANS: Bool
+		entries: [UInt8], numHistograms: Int
 	) throws -> SemanticDump {
-		guard (1...255).contains(numHistograms),
+		guard (1...256).contains(numHistograms),
 			!entries.isEmpty, entries.count <= 1_000_000,
 			entries.allSatisfy({ Int($0) < numHistograms })
 		else {
 			throw SemanticDumpError.unimplemented
 		}
+		let prepared = ContextMapEncoding.prepare(
+			entries, numHistograms: numHistograms)
 		var writer = BitWriter()
-		EntropyCodeWriter.writeContextMapEntries(
-			entries, allowANS: allowANS, writer: &writer)
+		ContextMapEncoding.write(prepared, to: &writer)
 		var dump = SemanticDump()
 		dump.record("entropy.context_map.entries", .integers(entries.map(Int64.init)))
 		dump.record("entropy.context_map.num_histograms", .integers([Int64(numHistograms)]))
-		let simple = entries.max() == 0
-		let usePrefix =
-			simple
-			? -1
-			: (allowANS && entries.count >= SectionOptimizer.ansMinimumTokens ? 0 : 1)
+		let simple: Bool
+		let entryBits: Int
+		let useMTF: Bool
+		let selected: ContextMapEntropy.Prepared?
+		switch prepared.representation {
+		case .simple(let bits):
+			simple = true
+			entryBits = bits
+			useMTF = false
+			selected = nil
+		case .raw:
+			simple = false
+			entryBits = -1
+			useMTF = false
+			selected = prepared.raw
+		case .moveToFront:
+			simple = false
+			entryBits = -1
+			useMTF = true
+			selected = prepared.moveToFront
+		}
+		let usePrefix = selected.map { $0.usesPrefixCode ? 1 : 0 } ?? -1
 		dump.record("entropy.context_map.simple", .integers([simple ? 1 : 0]))
-		dump.record("entropy.context_map.entry_bits", .integers([simple ? 0 : -1]))
-		dump.record("entropy.context_map.use_mtf", .integers([0]))
+		dump.record("entropy.context_map.entry_bits", .integers([Int64(entryBits)]))
+		dump.record("entropy.context_map.use_mtf", .integers([useMTF ? 1 : 0]))
 		dump.record("entropy.context_map.use_prefix_code", .integers([Int64(usePrefix)]))
 		dump.record(
 			"entropy.context_map.token_count",
-			.integers([-1]))
+			.integers([
+				Int64(selected?.runLength.tokens.count ?? -1)
+			]))
 		dump.record(
 			"entropy.context_map.token_count_status",
-			.integers([simple ? 0 : 3]))
+			.integers([selected == nil ? 0 : (useMTF ? 2 : 1)]))
+		dump.record(
+			"entropy.context_map.mtf_entries",
+			.integers(prepared.transformedEntries.map(Int64.init)))
+		dump.record(
+			"entropy.context_map.simple_cost",
+			.integers([
+				ceilLog2Nonzero(numHistograms) < 4
+					? Int64(ceilLog2Nonzero(numHistograms) * entries.count) : -1
+			]))
+		if let raw = prepared.raw, let mtf = prepared.moveToFront {
+			dump.record(
+				"entropy.context_map.raw_cost",
+				.integers([Int64(raw.estimatedCost)]))
+			dump.record(
+				"entropy.context_map.mtf_cost",
+				.integers([Int64(mtf.estimatedCost)]))
+			dump.record(
+				"entropy.context_map.raw_token_count",
+				.integers([Int64(raw.runLength.tokens.count)]))
+			dump.record(
+				"entropy.context_map.mtf_token_count",
+				.integers([Int64(mtf.runLength.tokens.count)]))
+		}
 		dump.record("entropy.context_map.bit_count", .integers([Int64(writer.bitsWritten)]))
 		dump.record("entropy.context_map.bytes", .integers(writer.bytes.map(Int64.init)))
 		return dump
@@ -382,7 +425,7 @@ enum SwiftEntropySemanticEncoding {
 		var bytes: [Int64] = []
 		var codeWriter = BitWriter()
 		codeWriter.write(1, 0)  // disabled LZ77 field in the transmitted code
-		EntropyCodeWriter.write(code, allowContextMapANS: true, writer: &codeWriter)
+		EntropyCodeWriter.write(code, writer: &codeWriter)
 		for (index, stream) in tokens.enumerated() {
 			lengths.append(Int64(stream.count))
 			records.append(contentsOf: [Int64(index), Int64(stream.count)])

@@ -128,14 +128,9 @@ enum FrameAssembly {
 		/// Overrides the distance-derived scales, which a transcode does not use.
 		globalScale: Int? = nil,
 		quantDC: Int? = nil,
-		/// Non-nil writes the adaptive JPEG-transcode block context map in
-		/// place of the fixed one below. Always nil on the pixel path and on
-		/// the JPEG static-table path.
+		/// Non-nil writes the optimized pixel or JPEG-transcode block context
+		/// map in place of the fixed one below. Nil on static-table paths.
 		blockContextMap: JPEGBlockContextMap.Result? = nil,
-		/// Whether `code`'s own context map may use ANS — only ever true when
-		/// `code` was built by `SectionOptimizer.optimize`, never for
-		/// `.staticDC`, which must stay byte-exact against libjxl-tiny.
-		allowContextMapANS: Bool = false,
 		writer: inout BitWriter
 	) throws {
 		if let dcQuantization {
@@ -165,16 +160,16 @@ enum FrameAssembly {
 
 			// The compact block context map has no prefix codes of its own;
 			// only its context map is transmitted.
-			let blockContextCode = EntropyCode(
-				contextMap: ACContext.compactBlockIndexMap, prefixCodes: [])
-			EntropyCodeWriter.writeContextMap(blockContextCode, writer: &writer)
+			EntropyCodeWriter.writeContextMapEntries(
+				ACContext.compactBlockIndexMap,
+				numHistograms: Int(ACContext.compactBlockIndexMap.max() ?? 0) + 1,
+				writer: &writer)
 		}
 
 		try writeColorCorrelationDC(jpegCompatible: dcQuantization != nil, writer: &writer)
 		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
 		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(
-			code, allowContextMapANS: allowContextMapANS, writer: &writer)
+		EntropyCodeWriter.write(code, writer: &writer)
 	}
 
 	/// Port of `ColorCorrelationEncodeDC` (enc_chroma_from_luma.cc). Verified
@@ -217,10 +212,6 @@ enum FrameAssembly {
 		/// signals the built-in ones.
 		quantTables: [[UInt16]]? = nil,
 		coeffOrder: CoeffOrder.Result = .identity,
-		/// Whether `code`'s own context map may use ANS — only ever true when
-		/// `code` was built by `SectionOptimizer.optimize`, never for
-		/// `.staticAC`, which must stay byte-exact against libjxl-tiny.
-		allowContextMapANS: Bool = false,
 		writer: inout BitWriter
 	) throws {
 		if let quantTables {
@@ -233,8 +224,7 @@ enum FrameAssembly {
 		writer.write(2, 3)  // used_orders selector: the Bits(13) branch
 		CoeffOrder.write(coeffOrder, writer: &writer)
 		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(
-			code, allowContextMapANS: allowContextMapANS, writer: &writer)
+		EntropyCodeWriter.write(code, writer: &writer)
 	}
 
 	static func ceilLog2(_ n: Int) -> Int {

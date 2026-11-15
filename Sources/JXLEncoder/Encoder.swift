@@ -189,16 +189,29 @@ public enum Encoder {
 	/// Tokenizes one already-computed AC group using the frame-global
 	/// coefficient order.
 	static func tokenizeACGroup(
-		_ compute: ACGroupCompute, order: [[Int]], mode: SectionWriter.Mode
+		_ compute: ACGroupCompute, order: [[Int]], mode: SectionWriter.Mode,
+		blockContextMap: JPEGBlockContextMap.Result? = nil
 	) -> ACGroupOutput {
 		var writer = SectionWriter(mode: mode)
-		ACGroupEncoder.tokenizeGroup(
-			coefficients: compute.coefficients,
-			widthInBlocks: compute.widthInBlocks,
-			heightInBlocks: compute.heightInBlocks,
-			subsampling: .none,
-			order: order,
-			writer: &writer)
+		if let blockContextMap {
+			ACGroupEncoder.tokenizeGroup(
+				coefficients: compute.coefficients,
+				widthInBlocks: compute.widthInBlocks,
+				heightInBlocks: compute.heightInBlocks,
+				subsampling: .none,
+				order: order,
+				blockContextMap: blockContextMap,
+				rawQuantField: compute.quantField,
+				writer: &writer)
+		} else {
+			ACGroupEncoder.tokenizeGroup(
+				coefficients: compute.coefficients,
+				widthInBlocks: compute.widthInBlocks,
+				heightInBlocks: compute.heightInBlocks,
+				subsampling: .none,
+				order: order,
+				writer: &writer)
+		}
 		return ACGroupOutput(
 			groupX: compute.groupX, groupY: compute.groupY,
 			widthInBlocks: compute.widthInBlocks,
@@ -218,6 +231,16 @@ public enum Encoder {
 		return CoeffOrder.compute(
 			counts: counts, widthInBlocks: dim.widthInBlocks,
 			heightInBlocks: dim.heightInBlocks)
+	}
+
+	static func computeBlockContextMap(
+		_ computes: [ACGroupCompute], params: DistanceParams
+	) -> JPEGBlockContextMap.Result {
+		var quantCounts = [Int](repeating: 0, count: 256)
+		for compute in computes {
+			for quant in compute.quantField { quantCounts[Int(quant) - 1] += 1 }
+		}
+		return PixelBlockEntropyModel.compute(quantCounts: quantCounts, params: params)
 	}
 
 	/// Folds finished AC groups into their DC groups and writes the DC sections.
@@ -317,6 +340,17 @@ public enum Encoder {
 		// static-table path keeps the fixed zig-zag order, unchanged.
 		let coeffOrder: CoeffOrder.Result =
 			optimizeCodes ? computeCoeffOrder(computes, dim: dim) : .identity
+		let blockContextMap =
+			optimizeCodes ? computeBlockContextMap(computes, params: params) : nil
+		if let blockContextMap {
+			acCode = EntropyCode(
+				contextMap: [UInt8](
+					repeating: 0,
+					count: blockContextMap.numContexts
+						* (ACContext.nonZeroBuckets
+							+ ACContext.zeroDensityCount)),
+				prefixCodes: [])
+		}
 
 		let acMode: SectionWriter.Mode =
 			optimizeCodes ? .staging(acCode) : .direct(acCode)
@@ -328,7 +362,9 @@ public enum Encoder {
 		while !computes.isEmpty {
 			let compute = computes.removeLast()
 			outputs.append(
-				tokenizeACGroup(compute, order: coeffOrder.orders, mode: acMode))
+				tokenizeACGroup(
+					compute, order: coeffOrder.orders, mode: acMode,
+					blockContextMap: blockContextMap))
 		}
 		assemble(outputs: outputs, dim: dim, sections: &sections)
 
@@ -346,13 +382,13 @@ public enum Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
-			allowContextMapANS: optimizeCodes, writer: &acGlobal)
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -443,12 +479,24 @@ extension Encoder {
 		// static-table path keeps the fixed zig-zag order, unchanged.
 		let coeffOrder: CoeffOrder.Result =
 			optimizeCodes ? computeCoeffOrder(computes, dim: dim) : .identity
+		let blockContextMap =
+			optimizeCodes ? computeBlockContextMap(computes, params: params) : nil
+		if let blockContextMap {
+			acCode = EntropyCode(
+				contextMap: [UInt8](
+					repeating: 0,
+					count: blockContextMap.numContexts
+						* (ACContext.nonZeroBuckets
+							+ ACContext.zeroDensityCount)),
+				prefixCodes: [])
+		}
 
 		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
 			for compute in computes {
 				group.addTask {
 					tokenizeACGroup(
-						compute, order: coeffOrder.orders, mode: acMode)
+						compute, order: coeffOrder.orders, mode: acMode,
+						blockContextMap: blockContextMap)
 				}
 			}
 			var collected: [ACGroupOutput] = []
@@ -474,13 +522,13 @@ extension Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: coeffOrder,
-			allowContextMapANS: optimizeCodes, writer: &acGlobal)
+			writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -586,7 +634,7 @@ extension Encoder {
 			return DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks,
-				subsampling: transcode.subsampling)
+				subsampling: transcode.subsampling, epfSharpness: 0)
 		}
 
 		// No meaning without per-image code optimisation to carry it — the
@@ -714,16 +762,14 @@ extension Encoder {
 			dcQuantization: (0..<3).map { transcode.dcQuantization(channel: $0) },
 			globalScale: FrameAssembly.jpegGlobalScale,
 			quantDC: 1,
-			blockContextMap: blockContextMap,
-			allowContextMapANS: optimizeCodes, writer: &dcGlobal)
+			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode,
 			quantTables: (0..<3).map { transcode.quantTable(channel: $0) },
-			coeffOrder: coeffOrder,
-			allowContextMapANS: optimizeCodes, writer: &acGlobal)
+			coeffOrder: coeffOrder, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
