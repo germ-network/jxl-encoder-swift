@@ -23,7 +23,3 @@ with open(sys.argv[1], "w", encoding="utf-8") as output:
     output.write(" ".join(map(str, counts)))
 PY
 "$HARNESS" pixel-block-model "$PHOTO_COUNTS" 1.0 "$PHOTO_OUT"
-SORT_OUT="$ROOT/Tests/JXLEncoderTests/Fixtures/semantic/e4_pixel_sort_nonuniform.tsv"
-"$HARNESS" pixel-sort-witness \
-	"$ROOT/Tests/JXLEncoderTests/Fixtures/semantic/e4_pixel_sort_witness.tsv" \
-	"$SORT_OUT"

@@ -1,5 +1,0 @@
-This distribution includes a Swift translation of the bounded ordinary-sort
-path from LLVM libc++'s sort.h (Apache-2.0 WITH LLVM-exception). The translation
-is modified for this caller's maximum 26-element range and does not include
-the general libc++ sort implementation. Full license terms are in
-Reference/LLVM-LICENSE.txt.
