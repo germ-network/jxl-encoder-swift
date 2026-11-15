@@ -471,73 +471,8 @@ struct EntropyReferenceTests {
 				histograms.append(histogram)
 			}
 			guard cursor == counts.count else { throw SemanticDumpError.unimplemented }
-			let boundaryDistances = [
-				"clusters_distance_48_fast": 48,
-				"clusters_distance_56_fast": 56,
-				"clusters_distance_64_fast": 64,
-			]
-			if let distance = boundaryDistances[name] {
-				#expect(histograms.count == 2)
-				var left = histograms[0]
-				var right = histograms[1]
-				left.computeBitCost()
-				right.computeBitCost()
-				#expect(HistogramCluster.distance(left, right) == Float(distance))
-			}
-			let actual: SemanticDump
-			if name == "clusters_default_cap_fast" {
-				actual = SwiftEntropySemanticEncoding.clusters(
-					histograms: histograms)
-			} else {
-				actual = SwiftEntropySemanticEncoding.clusters(
-					histograms: histograms, limit: Int(limit[0]))
-			}
-			if name == "clusters_distance_48_fast"
-				|| name == "clusters_distance_56_fast"
-			{
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([2]))
-			}
-			if name == "clusters_distance_64_fast" {
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([2]))
-			}
-			if name == "clusters_ties_fast" {
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(
-					fixture.expected.fields["entropy.clusters.map"]
-						== .integers([0, 1, 0]))
-			}
-			if name == "clusters_farthest_fast" {
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(
-					fixture.expected.fields["entropy.clusters.map"]
-						== .integers([0, 0, 1, 1]))
-			}
-			if name == "clusters_over_eight_fast" {
-				#expect(histograms.count == 10)
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([9]))
-				#expect(
-					fixture.expected.fields["entropy.clusters.map"]
-						== .integers([0, 1, 2, 3, 4, 5, 6, 7, 8, 0]))
-			}
-			if name == "clusters_default_cap_fast" {
-				#expect(histograms.count == 10)
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([10]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([10]))
-			}
+			let actual = SwiftEntropySemanticEncoding.clusters(
+				histograms: histograms, limit: Int(limit[0]))
 			let differences = actual.differences(
 				from: fixture.expected,
 				excludingFields: [
