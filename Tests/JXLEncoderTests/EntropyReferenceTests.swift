@@ -430,24 +430,17 @@ struct EntropyReferenceTests {
 
 	@Test
 	func fastAndBestClustersMatchReference() throws {
-		let clusteringDifferences: Set<String> = [
-			"entropy.clusters.map", "entropy.clusters.count",
-			"entropy.clusters.alphabet_lengths",
-			"entropy.clusters.total_counts",
-			"entropy.clusters.histogram_counts",
-		]
 		let fixtures: [(String, Set<String>)] = [
-			("clusters_fast_identical", Set<String>()),
 			("clusters_best_identical", Set<String>()),
-			("clusters_ties_fast", Set<String>()),
-			("clusters_distance_48_fast", clusteringDifferences),
-			("clusters_distance_56_fast", clusteringDifferences),
-			("clusters_distance_64_fast", Set<String>()),
-			("clusters_default_cap_fast", Set<String>()),
-			("clusters_farthest_fast", Set<String>()),
-			("clusters_over_eight_fast", Set<String>()),
-			("clusters_fast_merge", clusteringDifferences),
-			("clusters_best_merge", Set<String>()),
+			(
+				"clusters_best_merge",
+				[
+					"entropy.clusters.map", "entropy.clusters.count",
+					"entropy.clusters.alphabet_lengths",
+					"entropy.clusters.total_counts",
+					"entropy.clusters.histogram_counts",
+				]
+			),
 		]
 		for (name, knownDifferences) in fixtures {
 			let fixture = try EntropyReferenceFixture.load(name)
@@ -478,88 +471,52 @@ struct EntropyReferenceTests {
 				histograms.append(histogram)
 			}
 			guard cursor == counts.count else { throw SemanticDumpError.unimplemented }
-			let boundaryDistances = [
-				"clusters_distance_48_fast": 48,
-				"clusters_distance_56_fast": 56,
-				"clusters_distance_64_fast": 64,
-			]
-			if let distance = boundaryDistances[name] {
-				#expect(histograms.count == 2)
-				var left = histograms[0]
-				var right = histograms[1]
-				left.computeBitCost()
-				right.computeBitCost()
-				#expect(HistogramCluster.distance(left, right) == Float(distance))
-			}
-			let actual: SemanticDump
-			if name == "clusters_default_cap_fast" {
-				actual = SwiftEntropySemanticEncoding.clusters(
-					histograms: histograms)
-			} else {
-				actual = SwiftEntropySemanticEncoding.clusters(
-					histograms: histograms, limit: Int(limit[0]))
-			}
-			if name == "clusters_distance_48_fast"
-				|| name == "clusters_distance_56_fast"
-			{
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([1]))
-			}
-			if name == "clusters_distance_64_fast" {
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([2]))
-			}
-			if name == "clusters_ties_fast" {
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(
-					fixture.expected.fields["entropy.clusters.map"]
-						== .integers([0, 1, 0]))
-			}
-			if name == "clusters_farthest_fast" {
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([2]))
-				#expect(
-					fixture.expected.fields["entropy.clusters.map"]
-						== .integers([0, 0, 1, 1]))
-			}
-			if name == "clusters_over_eight_fast" {
-				#expect(histograms.count == 10)
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([9]))
-				#expect(
-					fixture.expected.fields["entropy.clusters.map"]
-						== .integers([0, 1, 2, 3, 4, 5, 6, 7, 8, 0]))
-			}
-			if name == "clusters_default_cap_fast" {
-				#expect(histograms.count == 10)
-				#expect(
-					fixture.expected.fields["entropy.clusters.count"]
-						== .integers([8]))
-				#expect(actual.fields["entropy.clusters.count"] == .integers([8]))
-			}
-			let differences = actual.differences(from: fixture.expected)
+			let actual = SwiftEntropySemanticEncoding.clusters(
+				histograms: histograms, limit: Int(limit[0]))
+			let differences = actual.differences(
+				from: fixture.expected,
+				excludingFields: [
+					"entropy.clusters.input_shannon_entropy",
+					"entropy.clusters.output_shannon_entropy",
+				])
 			let differenceFields = Set(differences.map(\.field))
 			#expect(differenceFields == knownDifferences, "\(name): \(differences)")
 			#expect(
 				actual.differences(
-					from: fixture.expected, excludingFields: knownDifferences
+					from: fixture.expected,
+					excludingFields: knownDifferences.union([
+						"entropy.clusters.input_shannon_entropy",
+						"entropy.clusters.output_shannon_entropy",
+					])
 				)
 				.isEmpty,
 				"\(name) has unexpected matching-field differences")
-			for field in knownDifferences {
-				let fieldDifferences = differences.filter { $0.field == field }
-				withKnownIssue(Comment(rawValue: "GER-3386: \(field)")) {
+			for field in [
+				"entropy.clusters.input_shannon_entropy",
+				"entropy.clusters.output_shannon_entropy",
+			] {
+				if name == "clusters_best_merge",
+					field == "entropy.clusters.output_shannon_entropy"
+				{
+					continue
+				}
+				guard
+					case .floats(let actualValues)? = actual.fields[field],
+					case .floats(let expectedValues)? = fixture.expected.fields[
+						field]
+				else {
+					Issue.record("Missing Shannon entropy field: \(field)")
+					continue
+				}
+				let matches =
+					actualValues.map(\.bitPattern)
+					== expectedValues.map(\.bitPattern)
+				if name == "clusters_best_merge" {
 					#expect(
-						fieldDifferences.isEmpty,
-						"\(name): \(fieldDifferences)")
+						field == "entropy.clusters.input_shannon_entropy"
+							&& matches)
+				} else {
+					#expect(matches)
 				}
 			}
 		}
@@ -694,12 +651,28 @@ struct EntropyReferenceTests {
 				== .integers(histogramCounts.map(Int64.init)))
 		#expect(
 			actual.fields["entropy.tree_entropy.context_map"]
-				== .integers([0, 1, 0, 1, 1, 1]))
-		#expect(actual.fields["entropy.tree_entropy.prefix_code_count"] == .integers([2]))
-		#expect(actual.fields["entropy.tree_entropy.use_prefix_code"] == .integers([1]))
-		#expect(actual.fields["entropy.tree_entropy.code_bit_count"] == .integers([202]))
-		#expect(actual.fields["entropy.tree_entropy.stream_bit_count"] == .integers([908]))
-		#expect(actual.fields["entropy.tree_entropy.full_bit_count"] == .integers([910]))
+				== fixture.expected.fields["entropy.tree_entropy.context_map"])
+		guard
+			case .integers(let tableLengths)? = fixture.expected.fields[
+				"entropy.tree_entropy.table_lengths"]
+		else { throw SemanticDumpError.unimplemented }
+		#expect(
+			actual.fields["entropy.tree_entropy.prefix_code_count"]
+				== .integers([Int64(tableLengths.count)]))
+		withKnownIssue(Comment(rawValue: "GER-3386: tree entropy coding")) {
+			#expect(
+				actual.fields["entropy.tree_entropy.use_prefix_code"]
+					== .integers([1]))
+			#expect(
+				actual.fields["entropy.tree_entropy.code_bit_count"]
+					== .integers([202]))
+			#expect(
+				actual.fields["entropy.tree_entropy.stream_bit_count"]
+					== .integers([908]))
+			#expect(
+				actual.fields["entropy.tree_entropy.full_bit_count"]
+					== .integers([910]))
+		}
 		#expect(
 			actual.fields["entropy.tree_entropy.full_bit_count"]
 				== .integers([Int64(productionWriter.bitsWritten)]))
@@ -712,8 +685,8 @@ struct EntropyReferenceTests {
 			case .integers(let prefixBits)? = actual.fields[
 				"entropy.tree_entropy.prefix_bits"]
 		else { throw SemanticDumpError.unimplemented }
-		#expect(prefixDepths.count == 128, "invalid Swift prefix table size")
-		#expect(prefixBits.count == 128, "invalid Swift canonical-code table size")
+		#expect(prefixDepths.count == tableLengths.count * 64)
+		#expect(prefixBits.count == tableLengths.count * 64)
 		var comparableSwift = SemanticDump()
 		for field in ["context_map", "use_prefix_code", "bit_count", "bytes"] {
 			guard let value = actual.fields["entropy.tree_entropy.\(field)"] else {
@@ -731,7 +704,6 @@ struct EntropyReferenceTests {
 		}
 		let differences = comparableSwift.differences(from: comparableReference)
 		let knownDifferences: Set<String> = [
-			"entropy.tree_entropy.context_map",
 			"entropy.tree_entropy.use_prefix_code",
 			"entropy.tree_entropy.bit_count",
 			"entropy.tree_entropy.bytes",

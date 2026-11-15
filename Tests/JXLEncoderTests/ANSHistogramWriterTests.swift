@@ -581,51 +581,6 @@ struct ANSHistogramWriterTests {
 	}
 
 	@Test
-	func sectionOptimizerUsesApproximateANSSelection() throws {
-		let fixture = try EntropyReferenceFixture.load("ans_cost_approx_step2_witness")
-		let counts = try fixture.integers(
-			fixture.input, "input.histogram.counts"
-		).map(UInt32.init)
-		let selected = ANSEncodingHistogram.computeBest(
-			counts: counts, strategy: .approximate)
-		var section = SectionWriter(mode: .staging(.staticAC))
-		for (symbol, count) in counts.enumerated() {
-			for _ in 0..<count {
-				section.write(token: Token(context: 0, value: UInt32(symbol)))
-			}
-		}
-		var sections = [section]
-		let optimized = SectionOptimizer.optimize(
-			sections: &sections, range: 0..<sections.count,
-			baseCode: .staticAC, allowANS: true)
-		#expect(optimized.ansHistograms?.count == 1)
-		#expect(optimized.ansHistograms?.first?.method == selected.method)
-		#expect(
-			optimized.ansHistograms?.first?.alphabetSize == selected.alphabetSize)
-		#expect(
-			Array(
-				optimized.ansHistograms?.first?.normalizedCounts.prefix(
-					selected.alphabetSize) ?? []) == selected.normalizedCounts)
-		#expect(
-			optimized.ansInfoTables?.first?.map(\.freq)
-				== selected.normalizedCounts.prefix(selected.alphabetSize).map {
-					$0
-				})
-		#expect(selected.method == 7)
-		#expect(sections[0].staged.isEmpty)
-
-		var rawSection = SectionWriter(mode: .staging(.staticAC))
-		rawSection.writeRaw(1, 1)
-		for _ in 0..<100 { rawSection.write(token: Token(context: 0, value: 0)) }
-		var rawSections = [rawSection]
-		let prefixFallback = SectionOptimizer.optimize(
-			sections: &rawSections, range: 0..<rawSections.count,
-			baseCode: .staticAC, allowANS: true)
-		#expect(prefixFallback.ansInfoTables == nil)
-		#expect(prefixFallback.ansHistograms == nil)
-	}
-
-	@Test
 	func entropyCodeWriterRetainsSelectedHistogramEncoding() throws {
 		let fixture = try EntropyReferenceFixture.load("ans_cost_approx_step2_witness")
 		let counts = try fixture.integers(

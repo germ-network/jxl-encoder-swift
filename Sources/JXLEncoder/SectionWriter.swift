@@ -135,11 +135,20 @@ enum SectionOptimizer {
 	/// used collapse away, which is most of them on a thumbnail, and contexts
 	/// tiny's static tables would have pre-merged stay separable until the
 	/// image's own statistics say otherwise.
-	/// Real libjxl's own `total_tokens < 100` threshold (enc_ans.cc) for
-	/// preferring prefix coding: ANS's histogram-signaling overhead isn't
-	/// worth it below this, so small sections and small images are
-	/// unaffected by ANS being available at all.
+	/// libjxl keeps prefix coding for short sections and when every original
+	/// context has entropy below 1e-5.
 	static let ansMinimumTokens = 100
+
+	static func usesPrefixCode(
+		originalHistograms: [Histogram], totalTokens: Int
+	) -> Bool {
+		guard totalTokens >= ansMinimumTokens else { return true }
+		return originalHistograms.allSatisfy { original in
+			var histogram = original
+			histogram.computeBitCost()
+			return histogram.bitCost < 1e-5
+		}
+	}
 
 	static func optimize(
 		sections: inout [SectionWriter],
@@ -170,12 +179,14 @@ enum SectionOptimizer {
 
 		let (clusters, contextMap) = HistogramCluster.cluster(
 			histograms, limit: clustersLimit)
+		let usePrefixCode = usesPrefixCode(
+			originalHistograms: histograms, totalTokens: totalTokens)
 
 		// `allowANS` alone isn't the real invariant — `flushANS` can only
 		// replay a section that staged nothing but tokens, so that's derived
 		// from what was actually staged rather than trusted from the caller.
 		let ansHistograms: [ANSEncodingHistogram]? =
-			allowANS && !hasRawBits && totalTokens >= ansMinimumTokens
+			allowANS && !hasRawBits && !usePrefixCode
 			? clusters.map { histogram in
 				ANSEncodingHistogram.computeBest(
 					counts: histogram.counts, strategy: .approximate)

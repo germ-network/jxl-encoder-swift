@@ -151,14 +151,19 @@ from pathlib import Path
 root=Path(sys.argv[1]); output=Path(sys.argv[2])
 manifest={line.split('\t')[0]:line.split('\t') for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#')}
 fixtures=sorted(p for p in output.iterdir() if p.is_file())
-names={'bounded_quantized.sem','edge_fixed_quantized.sem','coded_dimensions.sem','distance_params.sem','distance_filters.sem','dc_boundary.sem','dc_boundary.ppm','quant_bias.sem'}
+names={'bounded_quantized.sem','edge_fixed_quantized.sem','e4_bounded_quantized.sem','e4_edge_quantized.sem','e4_caller_witness.sem','coded_dimensions.sem','distance_params.sem','distance_filters.sem','dc_boundary.sem','dc_boundary.ppm','quant_bias.sem'}
 for stem in ('flower_1024','pixel_lifecycle_2057x521'):
  names.update({stem+'.ppm',stem+'.ac.bin',stem+'.dc.bin',stem+'.stages.sem'})
 expected={name:manifest['Tests/JXLEncoderTests/Fixtures/semantic/'+name][2] for name in names}
 assert {p.name for p in fixtures}==names
 for fixture in fixtures:
  assert hashlib.sha256(fixture.read_bytes()).hexdigest()==expected[fixture.name], fixture.name
+caller=output.parent/'e4_caller_witness.dump'
+path='Tests/JXLEncoderTests/Fixtures/e4_caller_witness.dump'
+assert hashlib.sha256(caller.read_bytes()).hexdigest()==manifest[path][2]
 PYCODE
+  if "$HARNESS" e4-quantized-ac; then return 1; fi
+  if "$HARNESS" e4-caller-witness; then return 1; fi
 }
 entropy_tree_decisions_match_fixtures() {
   "$HARNESS" entropy tree 6 8192 8 0 > "$SCRATCH/tree_8192.sem"

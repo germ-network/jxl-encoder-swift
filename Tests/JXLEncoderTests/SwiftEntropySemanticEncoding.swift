@@ -117,6 +117,14 @@ enum SwiftEntropySemanticEncoding {
 				HistogramCluster.cluster(histograms, limit: $0)
 			} ?? HistogramCluster.cluster(histograms)
 		var dump = SemanticDump()
+		var inputCosts = histograms
+		for index in inputCosts.indices { inputCosts[index].computeBitCost() }
+		dump.record(
+			"entropy.clusters.input_shannon_entropy",
+			.floats(inputCosts.map(\.bitCost)))
+		dump.record(
+			"entropy.clusters.output_shannon_entropy",
+			.floats(result.clusters.map(\.bitCost)))
 		dump.record("entropy.clusters.map", .integers(result.contextMap.map(Int64.init)))
 		dump.record("entropy.clusters.count", .integers([Int64(result.clusters.count)]))
 		let lengths = result.clusters.map { cluster in

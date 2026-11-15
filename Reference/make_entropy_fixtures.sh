@@ -16,7 +16,9 @@ mkdir -p "$out"
 pin="$LIBJXL_COMMIT"
 tmp="$(mktemp)"
 sorted_entropy="$tmp.entropy"
-trap 'rm -f "$tmp" "$sorted_entropy" "$tmp.modular.0" "$tmp.modular.1" "$tmp.tree-input.ppm" "$tmp.tree.jxl" "$tmp.tree-layout.sem"' EXIT
+original_provenance="$tmp.original"
+trap 'rm -f "$tmp" "$sorted_entropy" "$original_provenance" "$tmp.modular.0" "$tmp.modular.1" "$tmp.tree-input.ppm" "$tmp.tree.jxl" "$tmp.tree-layout.sem"' EXIT
+cp "$root/Reference/provenance.tsv" "$original_provenance"
 head -n 2 "$root/Reference/provenance.tsv" > "$tmp"
 awk -F '\t' 'NR > 2 && $1 !~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$root/Reference/provenance.tsv" >> "$tmp"
@@ -154,6 +156,10 @@ generate_coefficient_counts() {
 generate_cluster() {
 	local name="$1" mode="$2" limit="$3"; shift 3
 	local input="$out/$name.input.sem" encoded_mode
+	local test_file=Tests/JXLEncoderTests/EntropyReferenceTests.swift
+	if [[ "$mode" == fast ]]; then
+		test_file=Tests/JXLEncoderTests/HistogramClusteringTranslationTests.swift
+	fi
 	case "$mode" in fast) encoded_mode=0 ;; best) encoded_mode=1 ;; esac
 	local lengths=() flat=() row
 	for row in "$@"; do
@@ -177,10 +183,32 @@ generate_cluster() {
 	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
 	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
 	input_list="${*// /;}"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline cluster parameters in generator\t-\tmode=%s limit=%s counts=%s\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
-		"$name" "$input_hash" "$mode" "$limit" "$input_list" >> "$tmp"
-	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tmode=%s limit=%s hwy=NEON\tTests/JXLEncoderTests/EntropyReferenceTests.swift\n' \
-		"$name" "$expected_hash" "$name" "$pin" "$mode" "$limit" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline cluster parameters in generator\t-\tmode=%s limit=%s counts=%s\t%s\n' \
+		"$name" "$input_hash" "$mode" "$limit" "$input_list" "$test_file" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tmode=%s limit=%s hwy=NEON\t%s\n' \
+		"$name" "$expected_hash" "$name" "$pin" "$mode" "$limit" "$test_file" >> "$tmp"
+}
+
+generate_coder_choice() {
+	local name="$1" context_count="$2"; shift 2
+	local token_count=$(( $# / 2 ))
+	local input="$out/$name.input.sem"
+	{
+		printf 'jxl-semantic-dump 1\n'
+		printf 'input.coder_choice.context_count i 1 %s\n' "$context_count"
+		printf 'input.coder_choice.tokens i %s' "$#"
+		printf ' %s' "$@"
+		printf '\n'
+	} > "$input"
+	"$harness" entropy coder-choice "$context_count" "$token_count" "$@" \
+		> "$out/$name.expected.sem"
+	local input_hash expected_hash
+	input_hash="$(shasum -a 256 "$input" | cut -d ' ' -f 1)"
+	expected_hash="$(shasum -a 256 "$out/$name.expected.sem" | cut -d ' ' -f 1)"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-supplied\tReference/make_entropy_fixtures.sh\tReference/make_entropy_fixtures.sh\tinline context/value token pairs\t-\tcontexts=%s tokens=%s\tTests/JXLEncoderTests/HistogramClusteringTranslationTests.swift\n' \
+		"$name" "$input_hash" "$context_count" "$token_count" >> "$tmp"
+	printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/cmd_entropy.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tBuildAndEncodeHistograms ForModular(Cheetah); clustering=kFast; ANS=approximate; hwy=NEON\tTests/JXLEncoderTests/HistogramClusteringTranslationTests.swift\n' \
+		"$name" "$expected_hash" "$name" "$pin" >> "$tmp"
 }
 
 generate_context_map() {
@@ -521,6 +549,7 @@ generate_cluster clusters_fast_identical fast 4 16,0 16,0
 generate_cluster clusters_best_identical best 4 16,0 16,0
 generate_cluster clusters_fast_merge fast 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
+generate_cluster clusters_rounded_float_total_fast fast 1 16799851,0 0,1
 generate_cluster clusters_best_merge best 4 \
 	23,24,113,132,138,100 102,2,10,28,39,12 27,2,142,84,128,21
 generate_cluster clusters_ties_fast fast 2 \
@@ -530,6 +559,12 @@ generate_cluster clusters_farthest_fast fast 2 \
 generate_cluster clusters_distance_48_fast fast 4 12,12,0,0 0,0,12,12
 generate_cluster clusters_distance_56_fast fast 4 14,14,0,0 0,0,14,14
 generate_cluster clusters_distance_64_fast fast 4 16,16,0,0 0,0,16,16
+generate_coder_choice coder_choice_99_mixed 128 \
+	$(for ((index = 0; index < 99; index++)); do printf '0 %s ' "$((index % 2))"; done)
+generate_coder_choice coder_choice_100_mixed 128 \
+	$(for ((index = 0; index < 100; index++)); do printf '0 %s ' "$((index % 2))"; done)
+generate_coder_choice coder_choice_100_singletons 128 \
+	$(for ((index = 0; index < 100; index++)); do printf '%s %s ' "$index" "$((index % 2))"; done)
 over_eight_rows=()
 for ((index = 0; index < 10; index++)); do
 	row=()
@@ -542,7 +577,7 @@ for ((index = 0; index < 10; index++)); do
 	done
 	over_eight_rows+=("$(IFS=,; printf '%s' "${row[*]}")")
 done
-generate_cluster clusters_default_cap_fast fast 8 "${over_eight_rows[@]}"
+generate_cluster clusters_default_cap_fast fast 128 "${over_eight_rows[@]}"
 generate_cluster clusters_over_eight_fast fast 9 "${over_eight_rows[@]}"
 
 generate_context_map context_single_histogram 1 0 0 0 0 0
@@ -731,20 +766,29 @@ printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tfixture\t%s\thand-s
 printf 'Tests/JXLEncoderTests/Fixtures/entropy/%s.expected.sem\tfixture\t%s\tfull-libjxl\tReference/harness/src/decoded_frame.cc,Reference/harness/src/capture_modular_tree.cc\tReference/make_entropy_fixtures.sh\tTests/JXLEncoderTests/Fixtures/entropy/%s.input.sem\tlibjxl %s\tdecoded merged tree; groups=18 dc_groups=2 hwy=NEON\tSemanticCrossCheckTests.swift\n' \
 	"$tree_name" "$tree_expected_hash" "$tree_name" "$pin" >> "$tmp"
 
-git -C "$root" show HEAD:Reference/provenance.tsv \
-	| awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\/stream_shared_(ans|prefix)\.(input|expected|receipt)\.sem$/' \
-	>> "$tmp"
-
 awk -F '\t' 'NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\//' \
 	"$tmp" | sort -t $'\t' -k1,1 > "$sorted_entropy"
-{
-	head -n 2 "$tmp"
-	awk -F '\t' -v entropy_file="$sorted_entropy" \
-		'$1 == "Tests/JXLEncoderTests/Fixtures/hopper_420_odd.coef" {
-			while ((getline line < entropy_file) > 0) print line
-			close(entropy_file)
-		}
-		NR > 2 && $1 ~ /^Tests\/JXLEncoderTests\/Fixtures\/entropy\// { next }
-		NR > 2 { print }' "$tmp"
-} > "$root/Reference/provenance.tsv"
+python3 - "$tmp" "$sorted_entropy" "$original_provenance" "$root/Reference/provenance.tsv" <<'PYCODE'
+import sys
+from pathlib import Path
+
+generated, sorted_entropy, original, destination = map(Path, sys.argv[1:])
+generated_lines = generated.read_text().splitlines()
+original_lines = original.read_text().splitlines()
+new_entropy = {
+    line.split("\t", 1)[0]: line
+    for line in sorted_entropy.read_text().splitlines()
+}
+output = original_lines[:2]
+seen = set()
+for line in original_lines[2:]:
+    path = line.split("\t", 1)[0]
+    if path in new_entropy:
+        output.append(new_entropy[path])
+        seen.add(path)
+    else:
+        output.append(line)
+output.extend(new_entropy[path] for path in sorted(new_entropy.keys() - seen))
+destination.write_text("\n".join(output) + "\n")
+PYCODE
 "$root/Reference/pin-check.sh" "$linked"

@@ -14,8 +14,8 @@
 struct Histogram {
 	var counts = [UInt32](repeating: 0, count: StaticEntropyCodes.alphabetSize)
 	var totalCount = 0
-	/// Cached cost in bits; recomputed explicitly, not maintained on mutation.
-	var bitCost = 0
+	/// Cached Shannon entropy in bits; recomputed explicitly after mutation.
+	var bitCost: Float = 0
 
 	mutating func add(_ symbol: UInt32) {
 		counts[Int(symbol)] += 1
@@ -27,15 +27,22 @@ struct Histogram {
 		totalCount += other.totalCount
 	}
 
-	/// Bits this histogram would take under its own optimal Huffman code.
+	/// Shannon entropy, accumulated in the same four-lane order as libjxl.
 	mutating func computeBitCost() {
 		bitCost = 0
 		guard totalCount != 0 else { return }
-		let depths = HuffmanTree.createTree(
-			counts: counts, length: StaticEntropyCodes.alphabetSize, treeLimit: 15)
+		let total = Float(totalCount)
+		let inverseTotal = 1.0 / total
+		var lanes = [Float](repeating: 0, count: 4)
 		for i in 0..<StaticEntropyCodes.alphabetSize {
-			bitCost += Int(counts[i]) * Int(depths[i])
+			let count = counts[i]
+			precondition(count <= UInt32(Int32.max))
+			let value = Float(count)
+			if count == 0 || value == total { continue }
+			let term = -(value * FastMath.log2(inverseTotal * value))
+			lanes[i & 3] += term
 		}
+		bitCost = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
 	}
 }
 
@@ -51,8 +58,8 @@ enum HistogramCluster {
 		return Float(combined.bitCost - a.bitCost - b.bitCost)
 	}
 
-	static let clustersLimit = 8
-	static let minDistanceForDistinct: Float = 64.0
+	static let clustersLimit = 128
+	static let minDistanceForDistinct: Float = 48.0
 
 	/// One pass of k-means-style clustering: repeatedly promote the histogram
 	/// furthest from every existing cluster, then assign the remainder.
@@ -65,7 +72,7 @@ enum HistogramCluster {
 		var symbols = [UInt32](repeating: UInt32(maxHistograms), count: input.count)
 		var dists = [Float](repeating: .greatestFiniteMagnitude, count: input.count)
 
-		var largest = 0
+		var largest = input.firstIndex(where: { $0.totalCount > 0 }) ?? 0
 		for i in 0..<input.count {
 			if input[i].totalCount == 0 {
 				symbols[i] = 0
@@ -91,8 +98,8 @@ enum HistogramCluster {
 
 		for i in 0..<input.count where symbols[i] == UInt32(maxHistograms) {
 			var best = 0
-			var bestDistance = distance(input[i], output[0])
-			for j in 1..<output.count {
+			var bestDistance = Float.greatestFiniteMagnitude
+			for j in 0..<output.count {
 				let d = distance(input[i], output[j])
 				if d < bestDistance {
 					best = j

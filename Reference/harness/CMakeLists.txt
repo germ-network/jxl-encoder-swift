@@ -29,6 +29,8 @@ set_source_files_properties(
   PROPERTIES COMPILE_OPTIONS "-fno-access-control")
 
 add_executable(jxl-harness ${HARNESS_SOURCES})
+target_sources(jxl-harness PRIVATE
+  "${LIBJXL_DIR}/lib/jxl/dec_transforms_testonly.cc")
 target_include_directories(jxl-harness PRIVATE
   "${CMAKE_CURRENT_SOURCE_DIR}/src"
   "${LIBJXL_DIR}")

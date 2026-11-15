@@ -4,6 +4,7 @@
 #include <array>
 #include <charconv>
 #include <cstdint>
+#include <fstream>
 #include <limits>
 #include <sstream>
 #include <string_view>
@@ -187,13 +188,19 @@ int RunClusters(const std::vector<std::string>& args) {
   std::vector<int64_t> cluster_lengths;
   std::vector<int64_t> totals;
   std::vector<int64_t> values;
+  std::vector<float> input_entropies;
+  std::vector<float> cluster_entropies;
   int64_t input_total = 0;
   int64_t output_total = 0;
-  for (const auto& histogram : input) input_total += histogram.total_count;
+  for (const auto& histogram : input) {
+    input_total += histogram.total_count;
+    input_entropies.push_back(histogram.ShannonEntropy());
+  }
   for (const auto& cluster : clusters) {
     const size_t length = cluster.alphabet_size();
     cluster_lengths.push_back(length);
     totals.push_back(cluster.total_count);
+    cluster_entropies.push_back(cluster.ShannonEntropy());
     output_total += cluster.total_count;
     for (size_t i = 0; i < length; ++i) values.push_back(cluster.counts[i]);
   }
@@ -206,6 +213,8 @@ int RunClusters(const std::vector<std::string>& args) {
   dump.Integers("entropy.clusters.histogram_counts", values);
   dump.Integers("entropy.clusters.input_total_count", {input_total});
   dump.Integers("entropy.clusters.output_total_count", {output_total});
+  dump.Floats("entropy.clusters.input_shannon_entropy", input_entropies);
+  dump.Floats("entropy.clusters.output_shannon_entropy", cluster_entropies);
   dump.Write(stdout);
   return 0;
 }
@@ -710,6 +719,167 @@ int RunTreeEntropy(const std::vector<std::string>& args) {
   return 0;
 }
 
+int CaptureCoderChoice(int context_count,
+                       const std::vector<jxl::Token> &input_tokens) {
+  if (context_count <= 0 || context_count > 65536 || input_tokens.empty() ||
+      input_tokens.size() > 500000)
+    return 2;
+  for (const auto &token : input_tokens) {
+    if (token.context >= context_count)
+      return 2;
+  }
+
+  JxlMemoryManager manager;
+  if (!jxl::MemoryManagerInit(&manager, nullptr))
+    return 1;
+  jxl::CompressParams cparams;
+  cparams.speed_tier = jxl::SpeedTier::kCheetah;
+  cparams.decoding_speed_tier = 0;
+  cparams.modular_mode = false;
+  const auto params = jxl::HistogramParams::ForModular(cparams, {0}, false);
+  std::vector<std::vector<jxl::Token>> token_streams(1, input_tokens);
+  jxl::EntropyEncodingData codes;
+  jxl::BitWriter writer(&manager);
+  size_t cost = 0;
+  const jxl::Status status = writer.WithMaxBits(
+      1 << 24, jxl::LayerType::ModularTree, nullptr, [&]() -> jxl::Status {
+        JXL_ASSIGN_OR_RETURN(cost, jxl::BuildAndEncodeHistograms(
+                                       &manager, params, context_count,
+                                       token_streams, &codes, &writer,
+                                       jxl::LayerType::ModularTree, nullptr));
+        JXL_RETURN_IF_ERROR(
+            jxl::WriteTokens(token_streams[0], codes, 0, &writer,
+                             jxl::LayerType::ModularTree, nullptr));
+        return true;
+      });
+  if (!status)
+    return 1;
+
+  SemanticDumpWriter dump;
+  dump.Integers("entropy.coder_choice.context_count", {context_count});
+  dump.Integers("entropy.coder_choice.token_count",
+                {static_cast<int64_t>(input_tokens.size())});
+  dump.Integers("entropy.coder_choice.use_prefix_code",
+                {codes.use_prefix_code});
+  dump.Integers(
+      "entropy.coder_choice.context_map",
+      std::vector<int64_t>(codes.context_map.begin(), codes.context_map.end()));
+  dump.Integers("entropy.coder_choice.clustering",
+                {static_cast<int>(params.clustering)});
+  dump.Integers("entropy.coder_choice.ans_strategy",
+                {static_cast<int>(params.ans_histogram_strategy)});
+  std::vector<int64_t> alphabet_lengths;
+  std::vector<int64_t> frequencies;
+  std::vector<int64_t> uint_config;
+  for (const auto &table : codes.encoding_info) {
+    size_t alphabet_length = table.size();
+    while (alphabet_length > 0 && table[alphabet_length - 1].freq_ == 0)
+      --alphabet_length;
+    alphabet_lengths.push_back(alphabet_length);
+    for (size_t i = 0; i < alphabet_length; ++i)
+      frequencies.push_back(table[i].freq_);
+    const auto config = params.UintConfig();
+    uint_config.insert(
+        uint_config.end(),
+        {config.split_exponent, config.msb_in_token, config.lsb_in_token});
+  }
+  dump.Integers("entropy.coder_choice.table_count",
+                {static_cast<int64_t>(codes.encoding_info.size())});
+  dump.Integers("entropy.coder_choice.alphabet_lengths", alphabet_lengths);
+  dump.Integers("entropy.coder_choice.frequencies", frequencies);
+  dump.Integers("entropy.coder_choice.uint_config", uint_config);
+  dump.Write(stdout);
+  return 0;
+}
+
+int RunCoderChoice(const std::vector<std::string> &args) {
+  if (args.size() < 2)
+    return 2;
+  int context_count = 0;
+  int token_count = 0;
+  if (!ParseInt(args[0], &context_count) || context_count <= 0 ||
+      context_count > 65536 || !ParseInt(args[1], &token_count) ||
+      token_count <= 0 || token_count > 4096 ||
+      args.size() != 2 + static_cast<size_t>(token_count) * 2)
+    return 2;
+  std::vector<jxl::Token> tokens;
+  tokens.reserve(token_count);
+  for (int i = 0; i < token_count; ++i) {
+    int context = 0;
+    int value = 0;
+    if (!ParseInt(args[2 + 2 * i], &context) || context < 0 ||
+        context >= context_count || !ParseInt(args[3 + 2 * i], &value) ||
+        value < 0)
+      return 2;
+    tokens.emplace_back(context, value);
+  }
+  return CaptureCoderChoice(context_count, tokens);
+}
+
+int RunCoderChoiceInput(const std::vector<std::string> &args) {
+  if (args.size() != 1)
+    return 2;
+  std::ifstream input(args[0]);
+  if (!input)
+    return 2;
+  bool header = false;
+  int context_count = 0;
+  bool got_context_count = false;
+  bool got_tokens = false;
+  std::vector<jxl::Token> tokens;
+  std::string line;
+  while (std::getline(input, line)) {
+    if (line.empty())
+      continue;
+    if (!header) {
+      if (line != "jxl-semantic-dump 1")
+        return 2;
+      header = true;
+      continue;
+    }
+    std::istringstream row(line);
+    std::string field;
+    std::string type;
+    size_t count = 0;
+    if (!(row >> field >> type >> count) || type != "i")
+      return 2;
+    if (field == "input.coder_choice.context_count") {
+      int64_t value = 0;
+      if (got_context_count || count != 1 || !(row >> value) || value <= 0 ||
+          value > 65536)
+        return 2;
+      context_count = static_cast<int>(value);
+      got_context_count = true;
+      std::string extra;
+      if (row >> extra)
+        return 2;
+    } else if (field == "input.coder_choice.tokens") {
+      if (got_tokens || count == 0 || count % 2 != 0 || count > 1000000)
+        return 2;
+      tokens.reserve(count / 2);
+      for (size_t i = 0; i < count / 2; ++i) {
+        int64_t context = 0;
+        int64_t value = 0;
+        if (!(row >> context >> value) || context < 0 || context > 65535 ||
+            value < 0 || value > std::numeric_limits<int32_t>::max())
+          return 2;
+        tokens.emplace_back(static_cast<uint32_t>(context),
+                            static_cast<uint32_t>(value));
+      }
+      std::string extra;
+      if (row >> extra)
+        return 2;
+      got_tokens = true;
+    } else {
+      return 2;
+    }
+  }
+  if (!header || !got_context_count || !got_tokens)
+    return 2;
+  return CaptureCoderChoice(context_count, tokens);
+}
+
+
 int RunACTokens(const std::vector<std::string>& args) {
   if (args.size() < 4) return 2;
   int width = 0;
@@ -835,6 +1005,14 @@ int RunEntropy(const std::vector<std::string>& args) {
   if (args[0] == "tree-entropy") {
     return RunTreeEntropy(std::vector<std::string>(args.begin() + 1, args.end()));
   }
+  if (args[0] == "coder-choice") {
+    return RunCoderChoice(
+        std::vector<std::string>(args.begin() + 1, args.end()));
+  }
+  if (args[0] == "coder-choice-input") {
+    return RunCoderChoiceInput(
+        std::vector<std::string>(args.begin() + 1, args.end()));
+  }
   if (args[0] == "ac-tokens") {
     return RunACTokens(std::vector<std::string>(args.begin() + 1, args.end()));
   }
@@ -842,7 +1020,7 @@ int RunEntropy(const std::vector<std::string>& args) {
 }
 
 const RegisterSubcommand kRegister({
-    "entropy", "histogram|cluster|context-map|tree|modular|ac-metadata|tree-entropy ...",
+    "entropy", "histogram|cluster|context-map|tree|modular|ac-metadata|tree-entropy|coder-choice|coder-choice-input ...",
     RunEntropy});
 
 }  // namespace
