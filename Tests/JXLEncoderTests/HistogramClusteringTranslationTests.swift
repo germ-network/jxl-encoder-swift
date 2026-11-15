@@ -14,10 +14,33 @@ struct HistogramClusteringTranslationTests {
 		singleton.computeBitCost()
 		#expect(singleton.bitCost.bitPattern == Float.zero.bitPattern)
 		let fixture = try EntropyReferenceFixture.load("clusters_fast_merge")
-		let histograms = try histograms(from: fixture)
+		let mergeHistograms = try histograms(from: fixture)
 		let actual = SwiftEntropySemanticEncoding.clusters(
-			histograms: histograms, limit: 4)
+			histograms: mergeHistograms, limit: 4)
 		assertFloatFields(actual, match: fixture.expected)
+
+		let roundedTotal = try EntropyReferenceFixture.load(
+			"clusters_rounded_float_total_fast")
+		let roundedHistograms = try histograms(from: roundedTotal)
+		let rounded = SwiftEntropySemanticEncoding.clusters(
+			histograms: roundedHistograms, limit: 1)
+		assertFloatFields(rounded, match: roundedTotal.expected)
+		guard
+			case .floats(let inputEntropies)? = roundedTotal.expected.fields[
+				"entropy.clusters.input_shannon_entropy"],
+			case .floats(let outputEntropies)? = roundedTotal.expected.fields[
+				"entropy.clusters.output_shannon_entropy"]
+		else { throw SemanticDumpError.unimplemented }
+		var first = roundedHistograms[0]
+		var second = roundedHistograms[1]
+		first.computeBitCost()
+		second.computeBitCost()
+		let expectedDistance =
+			outputEntropies[0] - inputEntropies[0]
+			- inputEntropies[1]
+		#expect(
+			HistogramCluster.distance(first, second).bitPattern
+				== expectedDistance.bitPattern)
 	}
 
 	@Test
@@ -27,6 +50,7 @@ struct HistogramClusteringTranslationTests {
 			"clusters_distance_48_fast", "clusters_distance_56_fast",
 			"clusters_distance_64_fast", "clusters_farthest_fast",
 			"clusters_fast_merge", "clusters_over_eight_fast",
+			"clusters_rounded_float_total_fast",
 		] {
 			let fixture = try EntropyReferenceFixture.load(name)
 			let histograms = try histograms(from: fixture)
@@ -64,48 +88,46 @@ struct HistogramClusteringTranslationTests {
 
 	@Test
 	func prefixSelectionMatchesOriginalHistogramSingletonFixtures() throws {
-		let short = mixedHistogram(first: 50, second: 49)
-		#expect(
-			SectionOptimizer.usesPrefixCode(
-				originalHistograms: [short], totalTokens: 99))
-
-		let mixed = mixedHistogram(first: 50, second: 50)
-		#expect(
-			!SectionOptimizer.usesPrefixCode(
-				originalHistograms: [Histogram(), mixed], totalTokens: 100))
-
-		let originalSingletons = (0..<100).map { index in
-			var histogram = Histogram()
-			histogram.add(UInt32(index % StaticEntropyCodes.alphabetSize))
-			return histogram
+		for (name, expectedPrefixCode) in [
+			("coder_choice_99_mixed", true),
+			("coder_choice_100_mixed", false),
+			("coder_choice_100_singletons", true),
+		] {
+			let fixture = try EntropyReferenceFixture.load(name)
+			let contextCount = try fixture.integers(
+				fixture.input, "input.coder_choice.context_count")[0]
+			let pairs = try fixture.integers(
+				fixture.input, "input.coder_choice.tokens")
+			guard pairs.count.isMultiple(of: 2) else {
+				throw SemanticDumpError.unimplemented
+			}
+			let baseCode = EntropyCode(
+				contextMap: Array(repeating: 0, count: Int(contextCount)),
+				prefixCodes: [])
+			var section = SectionWriter(mode: .staging(baseCode))
+			for index in stride(from: 0, to: pairs.count, by: 2) {
+				section.write(
+					token: Token(
+						context: UInt32(pairs[index]),
+						value: UInt32(pairs[index + 1])))
+			}
+			var sections = [section]
+			let actual = SectionOptimizer.optimize(
+				sections: &sections, range: 0..<sections.count,
+				baseCode: baseCode, allowANS: true)
+			let expectedUsePrefixCode = try fixture.integers(
+				fixture.expected, "entropy.coder_choice.use_prefix_code")
+			let expectedContextMap = try fixture.integers(
+				fixture.expected, "entropy.coder_choice.context_map"
+			).map(UInt8.init)
+			#expect(expectedUsePrefixCode == [expectedPrefixCode ? 1 : 0])
+			#expect((actual.ansHistograms == nil) == expectedPrefixCode)
+			#expect(actual.contextMap == expectedContextMap)
+			if name == "coder_choice_100_singletons" {
+				#expect(actual.contextMap.allSatisfy { $0 == 0 })
+				#expect(actual.ansInfoTables == nil)
+			}
 		}
-		let singletonSelection = SectionOptimizer.usesPrefixCode(
-			originalHistograms: originalSingletons, totalTokens: 100)
-		#expect(singletonSelection)
-		let merged = HistogramCluster.cluster(
-			originalSingletons, limit: SectionOptimizer.clustersLimit)
-		#expect(merged.clusters.count == 1)
-		#expect(merged.clusters[0].counts.filter { $0 > 0 }.count > 1)
-
-		var singletonSection = SectionWriter(mode: .staging(.staticAC))
-		for context in 0..<100 {
-			singletonSection.write(
-				token: Token(
-					context: UInt32(context),
-					value: UInt32(context % StaticEntropyCodes.alphabetSize)))
-		}
-		var singletonSections = [singletonSection]
-		let singletonOptimization = SectionOptimizer.optimize(
-			sections: &singletonSections, range: 0..<singletonSections.count,
-			baseCode: .staticAC, allowANS: true)
-		#expect(singletonOptimization.contextMap.count == EntropyCode.staticAC.contextCount)
-		#expect(singletonOptimization.contextMap.allSatisfy { $0 == 0 })
-		#expect(singletonOptimization.ansHistograms == nil)
-		#expect(singletonOptimization.ansInfoTables == nil)
-
-		#expect(
-			SectionOptimizer.usesPrefixCode(
-				originalHistograms: [Histogram(), Histogram()], totalTokens: 0))
 	}
 
 	@Test
@@ -165,14 +187,6 @@ struct HistogramClusteringTranslationTests {
 		#expect(forcedPrefix.ansInfoTables == nil)
 		#expect(forcedPrefix.ansHistograms == nil)
 	}
-}
-
-private func mixedHistogram(first: UInt32, second: UInt32) -> Histogram {
-	var histogram = Histogram()
-	histogram.counts[0] = first
-	histogram.counts[1] = second
-	histogram.totalCount = Int(first + second)
-	return histogram
 }
 
 private func histograms(from fixture: EntropyReferenceFixture) throws -> [Histogram] {

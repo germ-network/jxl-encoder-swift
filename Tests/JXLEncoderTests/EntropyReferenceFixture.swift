@@ -232,6 +232,60 @@ struct EntropyReferenceFixture {
 					? shift[0] == -1
 					: (0..<ANSConstants.logTabSize).contains(Int(shift[0]))
 			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
+		} else if name.hasPrefix("coder_choice_") {
+			inputFields = [
+				"input.coder_choice.context_count", "input.coder_choice.tokens",
+			]
+			expectedFields = [
+				"entropy.coder_choice.context_count",
+				"entropy.coder_choice.token_count",
+				"entropy.coder_choice.use_prefix_code",
+				"entropy.coder_choice.context_map",
+				"entropy.coder_choice.clustering",
+				"entropy.coder_choice.ans_strategy",
+				"entropy.coder_choice.table_count",
+				"entropy.coder_choice.alphabet_lengths",
+				"entropy.coder_choice.frequencies",
+				"entropy.coder_choice.uint_config",
+			]
+			let contextCount = try integers(input, "input.coder_choice.context_count")
+			let tokens = try integers(input, "input.coder_choice.tokens")
+			let capturedContextCount = try integers(
+				expected, "entropy.coder_choice.context_count")
+			let capturedTokenCount = try integers(
+				expected, "entropy.coder_choice.token_count")
+			let usePrefixCode = try integers(
+				expected, "entropy.coder_choice.use_prefix_code")
+			let contextMap = try integers(
+				expected, "entropy.coder_choice.context_map")
+			let tableCount = try integers(expected, "entropy.coder_choice.table_count")
+			let alphabetLengths = try integers(
+				expected, "entropy.coder_choice.alphabet_lengths")
+			let frequencies = try integers(
+				expected, "entropy.coder_choice.frequencies")
+			let uintConfig = try integers(
+				expected, "entropy.coder_choice.uint_config")
+			guard contextCount.count == 1,
+				(1...128).contains(contextCount[0]),
+				tokens.count.isMultiple(of: 2),
+				(2...8192).contains(tokens.count),
+				stride(from: 0, to: tokens.count, by: 2).allSatisfy({ index in
+					(0..<contextCount[0]).contains(tokens[index])
+						&& tokens[index + 1] >= 0
+				}),
+				capturedContextCount == contextCount,
+				capturedTokenCount == [Int64(tokens.count / 2)],
+				usePrefixCode.count == 1, (0...1).contains(usePrefixCode[0]),
+				contextMap.count == Int(contextCount[0]),
+				contextMap.allSatisfy({ (0..<128).contains($0) }),
+				tableCount.count == 1, tableCount[0] >= 0,
+				alphabetLengths.count == Int(tableCount[0]),
+				alphabetLengths.allSatisfy({ $0 >= 0 }),
+				frequencies.allSatisfy({ $0 >= 0 }),
+				uintConfig.count == Int(tableCount[0]) * 3,
+				try integers(expected, "entropy.coder_choice.clustering") == [1],
+				try integers(expected, "entropy.coder_choice.ans_strategy") == [1]
+			else { throw SemanticDumpError.unsupportedEntropyFixture(name) }
 		} else if name.hasPrefix("clusters_") {
 			inputFields = [
 				"input.clusters.mode", "input.clusters.limit",

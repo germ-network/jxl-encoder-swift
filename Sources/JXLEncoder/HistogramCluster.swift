@@ -37,8 +37,8 @@ struct Histogram {
 		for i in 0..<StaticEntropyCodes.alphabetSize {
 			let count = counts[i]
 			precondition(count <= UInt32(Int32.max))
-			if count == 0 || Int(count) == totalCount { continue }
 			let value = Float(count)
+			if count == 0 || value == total { continue }
 			let term = -(value * FastMath.log2(inverseTotal * value))
 			lanes[i & 3] += term
 		}

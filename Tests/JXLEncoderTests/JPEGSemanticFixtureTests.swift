@@ -37,7 +37,7 @@ struct JPEGSemanticCorpusEntry: Sendable, CustomTestStringConvertible {
 			issues["ac_entropy_alphabet"] = ["GER-3388"]
 		} else if name != "jpeg_flat_444" {
 			issues["coeff_order"] = ["GER-3386"]
-			if name != "jpeg_small_422" {
+			if name != "jpeg_small_422" && name != "jpeg_hopper_420_sof1" {
 				issues["ac_entropy"] = ["GER-3386"]
 			}
 			issues["ac_entropy_alphabet"] = ["GER-3388"]
@@ -141,25 +141,17 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 		],
 		"jpeg_hopper_420_sof1#coeff_order": ["coeff_order.dct8.c1"],
 		"jpeg_hopper_420_sof1#context_map": ["context_map.ac"],
-		"jpeg_hopper_420_sof1#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
-			"ac_entropy.table_count", "ac_entropy.uint_config",
-		],
 		"jpeg_hopper_420_sof1#ac_entropy_alphabet": [
 			"ac_entropy_alphabet.ans_log_alpha_size"
 		],
 		"jpeg_hopper_gray_odd#coeff_order": ["coeff_order.dct8.c1"],
 		"jpeg_hopper_gray_odd#context_map": ["context_map.ac"],
-		"jpeg_hopper_gray_odd#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
-			"ac_entropy.table_count", "ac_entropy.uint_config",
-		],
+		"jpeg_hopper_gray_odd#ac_entropy": ["ac_entropy.ans.frequencies"],
 		"jpeg_hopper_gray_odd#ac_entropy_alphabet": [
 			"ac_entropy_alphabet.ans_log_alpha_size"
 		],
 		"ac_entropy_jpeg_2x1#ac_entropy": [
 			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
-			"ac_entropy.table_count", "ac_entropy.uint_config",
 		],
 		"ac_entropy_jpeg_2x1#ac_entropy_alphabet": [
 			"ac_entropy_alphabet.ans_log_alpha_size"
@@ -170,7 +162,6 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 		"jpeg_flower_513x267_420#context_map": ["context_map.ac"],
 		"jpeg_flower_513x267_420#ac_entropy": [
 			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
-			"ac_entropy.table_count", "ac_entropy.uint_config",
 		],
 		"jpeg_flower_513x267_420#ac_entropy_alphabet": [
 			"ac_entropy_alphabet.ans_log_alpha_size"
@@ -181,7 +172,6 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 		"jpeg_flower_513x267_422#context_map": ["context_map.ac"],
 		"jpeg_flower_513x267_422#ac_entropy": [
 			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
-			"ac_entropy.table_count", "ac_entropy.uint_config",
 		],
 		"jpeg_flower_513x267_422#ac_entropy_alphabet": [
 			"ac_entropy_alphabet.ans_log_alpha_size"
@@ -192,7 +182,6 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 		"jpeg_flower_513x267_440#context_map": ["context_map.ac"],
 		"jpeg_flower_513x267_440#ac_entropy": [
 			"ac_entropy.ans.alphabet_lengths", "ac_entropy.ans.frequencies",
-			"ac_entropy.table_count", "ac_entropy.uint_config",
 		],
 		"jpeg_flower_513x267_440#ac_entropy_alphabet": [
 			"ac_entropy_alphabet.ans_log_alpha_size"
@@ -200,38 +189,24 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 	]
 	static let knownDivergentActualCounts: [String: [String: Int]] = [
 		"jpeg_hopper_420_odd#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 2, "ac_entropy.ans.frequencies": 58,
-			"ac_entropy.uint_config": 6,
+			"ac_entropy.ans.alphabet_lengths": 3,
+			"ac_entropy.ans.frequencies": 83, "ac_entropy.uint_config": 9,
 		],
 		"jpeg_hopper_420_restart#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 4, "ac_entropy.ans.frequencies": 120,
-			"ac_entropy.uint_config": 12,
-		],
-		"jpeg_hopper_420_sof1#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 1, "ac_entropy.ans.frequencies": 5,
-			"ac_entropy.uint_config": 3,
-		],
-		"jpeg_hopper_gray_odd#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 1, "ac_entropy.ans.frequencies": 35,
-			"ac_entropy.uint_config": 3,
+			"ac_entropy.ans.alphabet_lengths": 6,
+			"ac_entropy.ans.frequencies": 162, "ac_entropy.uint_config": 18,
 		],
 		"ac_entropy_jpeg_2x1#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 9, "ac_entropy.ans.frequencies": 182,
-			"ac_entropy.uint_config": 27,
+			"ac_entropy.ans.frequencies": 197
 		],
 		"jpeg_flower_513x267_420#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 10, "ac_entropy.ans.frequencies": 203,
-			"ac_entropy.uint_config": 30,
+			"ac_entropy.ans.frequencies": 215
 		],
 		"jpeg_flower_513x267_422#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 9, "ac_entropy.ans.frequencies": 182,
-			"ac_entropy.uint_config": 27,
-		],
-		"jpeg_flower_513x267_440#ac_entropy": [
-			"ac_entropy.ans.alphabet_lengths": 9, "ac_entropy.ans.frequencies": 180,
-			"ac_entropy.uint_config": 27,
+			"ac_entropy.ans.frequencies": 197
 		],
 	]
+
 	static var knownIssueReferences: Set<String> {
 		Set(
 			all.filter { !$0.knownIssues.isEmpty }.map {
@@ -303,6 +278,7 @@ struct JPEGSemanticFixtureTests {
 			uniqueKeysWithValues: JPEGSemanticCorpusEntry.all.map {
 				($0.name, try $0.encoded())
 			})
+
 		for semanticCase in JPEGSemanticCase.all {
 			let actual = try SemanticDump(
 				swiftJPEGDecisions: encoded[semanticCase.entry.name]!.decisions)
@@ -510,7 +486,7 @@ struct JPEGSemanticFixtureTests {
 		#expect(
 			JPEGSemanticCase.knownIssueReferences.isSubset(
 				of: JPEGSemanticCase.references))
-		#expect(JPEGSemanticCase.knownIssueReferences.count == 38)
+		#expect(JPEGSemanticCase.knownIssueReferences.count == 37)
 		#expect(
 			JPEGSemanticCorpusEntry.all.allSatisfy { entry in
 				entry.knownIssues.values.allSatisfy {

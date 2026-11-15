@@ -1,0 +1,11 @@
+jxl-semantic-dump 1
+entropy.coder_choice.alphabet_lengths i 1 0
+entropy.coder_choice.ans_strategy i 1 1
+entropy.coder_choice.clustering i 1 1
+entropy.coder_choice.context_count i 1 128
+entropy.coder_choice.context_map i 128 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0
+entropy.coder_choice.frequencies i 0
+entropy.coder_choice.table_count i 1 1
+entropy.coder_choice.token_count i 1 100
+entropy.coder_choice.uint_config i 3 4 2 0
+entropy.coder_choice.use_prefix_code i 1 1
