@@ -726,12 +726,7 @@ private struct JPEGSegmentParser {
 	private func consumeRestartMarker(
 		_ reader: inout JPEGBitReader, expected: Int
 	) throws {
-		var position = reader.index
-		while position + 1 < data.count, data[position] == 0xFF,
-			data[position + 1] == 0xFF
-		{
-			position += 1  // fill byte
-		}
+		let position = reader.index
 		guard position + 1 < data.count, data[position] == 0xFF,
 			data[position + 1] == 0xD0 + UInt8(expected)
 		else {

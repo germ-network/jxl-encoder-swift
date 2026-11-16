@@ -11,7 +11,10 @@
 			.enabled(if: harness != nil))
 		func readerSerializationPreservesSourceCoefficients() throws {
 			guard let harness = Self.harness else { return }
-			for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+			for name in [
+				"scan_420_111", "scan_420_111_restart", "scan_422_21",
+				"scan_440_12",
+			] {
 				let source = try JPEGParserTests.fixture(name)
 				let transcode = try JPEGTranscode(JPEGParser.parse(source))
 				let directory = FileManager.default.temporaryDirectory

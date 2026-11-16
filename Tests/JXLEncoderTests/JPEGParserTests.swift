@@ -264,9 +264,57 @@ struct JPEGParserTests {
 
 	@Test(
 		"restart MCU counts and predictor state are local to each scan",
-		.disabled("Pending approved reader implementation"))
+	)
 	func restartStateIsLocalToEachScan() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("scan_420_111_restart")
+		let reference = try JPEGCoefficientDump(fixture: "scan_420_111_restart")
+		let image = try JPEGParser.parse(data)
+		#expect(image.restartInterval == 1)
+		try #require(image.components.count == reference.components.count)
+		for (parsed, expected) in zip(image.components, reference.components) {
+			#expect(
+				Self.firstDifference(parsed.coefficients, expected.coefficients)
+					== nil,
+				"component \(parsed.identifier) differs from libjpeg")
+		}
+		let scans = Self.markerOffsets(0xDA, in: data)
+		let restarts = Self.restartMarkerOffsets(data)
+		try #require(scans.count == 3)
+		try #require(restarts.count > 8)
+		for scan in scans.indices {
+			let upperBound = scan + 1 < scans.count ? scans[scan + 1] : data.count
+			let current = restarts.filter { $0 > scans[scan] && $0 < upperBound }
+			try #require(!current.isEmpty)
+			#expect(data[current[0] + 1] == 0xD0)
+		}
+
+		var wrongSecondScan = data
+		let secondScanRestart = try #require(
+			restarts.first(where: { $0 > scans[1] && $0 < scans[2] }))
+		wrongSecondScan[secondScanRestart + 1] = 0xD1
+		#expect(throws: JPEGParseError.missingRestartMarker(expected: 0)) {
+			try JPEGParser.parse(wrongSecondScan)
+		}
+
+		let firstRestart = restarts[0]
+		let missing =
+			Array(data[..<firstRestart]) + Array(data[(firstRestart + 2)...])
+		#expect(throws: JPEGParseError.missingRestartMarker(expected: 0)) {
+			try JPEGParser.parse(missing)
+		}
+
+		let extraFill =
+			Array(data[..<firstRestart]) + [0xFF] + Array(data[firstRestart...])
+		#expect(throws: JPEGParseError.missingRestartMarker(expected: 0)) {
+			try JPEGParser.parse(extraFill)
+		}
+	}
+
+	static func restartMarkerOffsets(_ data: [UInt8]) -> [Int] {
+		guard data.count > 1 else { return [] }
+		return (0..<(data.count - 1)).filter {
+			data[$0] == 0xFF && (0xD0...0xD7).contains(data[$0 + 1])
+		}
 	}
 
 	@Test("DHT selectors, limits and duplicate values are validated")
@@ -614,7 +662,8 @@ struct JPEGParserTests {
 		"matches libjpeg's coefficients",
 		arguments: [
 			"small_444", "small_422", "small_440", "small_411", "hopper_420_odd",
-			"hopper_gray_odd", "scan_420_111", "scan_422_21", "scan_440_12",
+			"hopper_gray_odd", "scan_420_111", "scan_420_111_restart", "scan_422_21",
+			"scan_440_12",
 		])
 	func matchesReference(name: String) throws {
 		let reference = try JPEGCoefficientDump(fixture: name)

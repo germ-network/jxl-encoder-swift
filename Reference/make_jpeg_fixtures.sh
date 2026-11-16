@@ -107,6 +107,7 @@ printf '2; 0; 1;\n' > "$WORK/scans_111.txt"
 printf '0 1; 2;\n' > "$WORK/scans_21.txt"
 printf '1; 0 2;\n' > "$WORK/scans_12.txt"
 cjpeg -quality 85 -sample 2x2 -scans "$WORK/scans_111.txt" -outfile "$CORE/scan_420_111.jpg" "$WORK/odd_420.ppm"
+cjpeg -quality 85 -sample 2x2 -restart 1B -scans "$WORK/scans_111.txt" -outfile "$CORE/scan_420_111_restart.jpg" "$WORK/odd_420.ppm"
 cjpeg -quality 85 -sample 2x1 -scans "$WORK/scans_21.txt" -outfile "$CORE/scan_422_21.jpg" "$WORK/odd.ppm"
 cjpeg -quality 85 -sample 1x2 -scans "$WORK/scans_12.txt" -outfile "$CORE/scan_440_12.jpg" "$WORK/odd.ppm"
 # Quality 2 pushes the quantization tables past 255, which forces 16-bit DQT
@@ -118,7 +119,7 @@ cjpeg -quality 80 -arithmetic -outfile "$CORE/reject_arithmetic.jpg" "$WORK/tiny
 cjpeg -lossless 1 -outfile "$CORE/reject_lossless.jpg" "$WORK/tiny.ppm"
 
 for name in small_444 small_422 small_440 small_411 hopper_420_odd hopper_gray_odd \
-	scan_420_111 scan_422_21 scan_440_12; do
+	scan_420_111 scan_420_111_restart scan_422_21 scan_440_12; do
 	"$OUT/dump_jpeg_coefficients" "$CORE/$name.jpg" "$CORE/$name.coef"
 done
 
@@ -133,7 +134,8 @@ cp "$CORE/hopper_420_restart.jpg" "$CORE/hopper_420_odd.jpg" \
 	"$CORE/hopper_gray_odd.jpg" "$CORE/hopper_420_sof1.jpg" \
 	"$CORE/small_422.jpg" "$CORE/small_440.jpg" "$CORE/small_444.jpg" \
 	"$CORE/reject_arithmetic.jpg" "$CORE/reject_progressive.jpg" \
-	"$CORE/scan_420_111.jpg" "$CORE/scan_422_21.jpg" "$CORE/scan_440_12.jpg" \
+	"$CORE/scan_420_111.jpg" "$CORE/scan_420_111_restart.jpg" \
+	"$CORE/scan_422_21.jpg" "$CORE/scan_440_12.jpg" \
 	"$APPLE/"
 
 echo "fixtures regenerated"

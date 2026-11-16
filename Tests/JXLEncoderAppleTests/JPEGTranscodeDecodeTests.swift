@@ -17,7 +17,10 @@
 		@Test(
 			"serialized sequential scan layouts preserve decoded pixels")
 		func sequentialScanSerializationPreservesPixels() throws {
-			for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+			for name in [
+				"scan_420_111", "scan_420_111_restart", "scan_422_21",
+				"scan_440_12",
+			] {
 				for optimize in [true, false] {
 					let error = try Self.meanError(name, optimize: optimize)
 					#expect(
