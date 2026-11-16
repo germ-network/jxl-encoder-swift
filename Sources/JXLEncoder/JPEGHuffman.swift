@@ -9,6 +9,13 @@
 /// Canonical Huffman decoder built from a DHT segment's per-length code counts
 /// and value list.
 struct JPEGHuffmanTable {
+	struct Entry: Equatable {
+		var bits: UInt8
+		var value: UInt16
+	}
+
+	private(set) var entries: [Entry] = []
+
 	/// First code of each length, indexed 1...16.
 	private let minCode: [Int32]
 	/// Last code of each length, `-1` when the length carries no codes. Held as
@@ -119,6 +126,10 @@ struct JPEGBitReader {
 		bitCount = 0
 		paddedBytes = 0
 		reachedMarker = false
+	}
+
+	mutating func finish() throws -> Int {
+		fatalError("Unimplemented consumed-bit boundary contract")
 	}
 
 	/// `n` must be at most 16, which keeps `bitCount` under 32 bits.

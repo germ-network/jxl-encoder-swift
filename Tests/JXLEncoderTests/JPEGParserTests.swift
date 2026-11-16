@@ -12,6 +12,29 @@ import Testing
 struct JPEGParserTests {
 
 	@Test(
+		"DHT selectors, alphabets, counts and duplicate values obey the selected reader",
+		.disabled("Pending implementation"))
+	func dhtValidationMatchesSource() throws {
+		Issue.record("Implement bounded DHT validation cases")
+	}
+
+	@Test(
+		"every DHT read stays inside its exact declared segment",
+		.disabled("Pending implementation"))
+	func dhtBoundsAreExact() throws {
+		Issue.record("Implement truncated header, counts and values cases")
+	}
+
+	@Test(
+		"empty DHT segments preserve tables and redefinitions replace all old entries",
+		.disabled("Pending implementation"))
+	func dhtRedefinitionsReplaceTables() throws {
+		Issue.record(
+			"Implement empty segment, empty definition and dense-to-sparse replacement cases"
+		)
+	}
+
+	@Test(
 		"APP0, first valid Adobe marker, and ordered component IDs determine color eligibility"
 	)
 	func markerColorPrecedence() throws {
