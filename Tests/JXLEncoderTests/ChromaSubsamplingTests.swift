@@ -152,12 +152,12 @@ struct SubsampledEncodingTests {
 		return ChannelPlanes(planes: data, widths: widths, heights: heights)
 	}
 
-	static func encode(subsampling: ChromaSubsampling) -> (bits: Int, dc: [[Int32]]) {
+	static func encode(subsampling: ChromaSubsampling) -> (bits: Int, dc: [[Float]]) {
 		let blocks = 8
 		let full = blocks * DCT.blockDim
 		let planes = planes(fullWidth: full, fullHeight: full, subsampling: subsampling)
-		var quantDC = (0..<3).map { channel in
-			[Int32](
+		var rawDC = (0..<3).map { channel in
+			[Float](
 				repeating: 0,
 				count: subsampling.blocksAcross(
 					channel: channel, fullWidthInBlocks: blocks)
@@ -168,14 +168,14 @@ struct SubsampledEncodingTests {
 			planes: planes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: subsampling,
 			quantField: [UInt8](repeating: 5, count: blocks * blocks),
-			scale: 0.112_075_805_664_062_5, scaleDC: 1.0, xQuantMatrixScale: 2,
-			quantDC: &quantDC)
+			scale: 0.112_075_805_664_062_5, xQuantMatrixScale: 2,
+			rawDC: &rawDC)
 		var writer = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.tokenizeGroup(
 			coefficients: coefficients, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: subsampling, order: CoeffOrder.Result.identity.orders,
 			writer: &writer)
-		return (writer.bitsWritten, quantDC)
+		return (writer.bitsWritten, rawDC)
 	}
 
 	@Test("chroma DC arrays hold a quarter as many entries at 4:2:0")
@@ -197,10 +197,10 @@ struct SubsampledEncodingTests {
 		let planes = Self.planes(fullWidth: full, fullHeight: full, subsampling: cs)
 		// a value the encoder cannot produce, so an unwritten slot is visible
 		// rather than hiding behind a plausible zero
-		let sentinel = Int32.min
+		let sentinel = Float.nan
 
-		var quantDC = (0..<3).map { channel in
-			[Int32](
+		var rawDC = (0..<3).map { channel in
+			[Float](
 				repeating: sentinel,
 				count: cs.blocksAcross(channel: channel, fullWidthInBlocks: blocks)
 					* cs.blocksDown(
@@ -210,11 +210,11 @@ struct SubsampledEncodingTests {
 			planes: planes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: cs,
 			quantField: [UInt8](repeating: 5, count: blocks * blocks),
-			scale: 0.112_075_805_664_062_5, scaleDC: 1.0, xQuantMatrixScale: 2,
-			quantDC: &quantDC)
+			scale: 0.112_075_805_664_062_5, xQuantMatrixScale: 2,
+			rawDC: &rawDC)
 
 		for channel in 0..<3 {
-			let unwritten = quantDC[channel].filter { $0 == sentinel }.count
+			let unwritten = rawDC[channel].filter { $0.isNaN }.count
 			#expect(
 				unwritten == 0,
 				"channel \(channel) left \(unwritten) slots unwritten")
@@ -248,22 +248,22 @@ struct SubsampledEncodingTests {
 			).planes)
 		let quantField = [UInt8](repeating: 5, count: blocks * blocks)
 
-		var dcA = [[Int32]](repeating: [Int32](repeating: 0, count: 64), count: 3)
+		var dcA = [[Float]](repeating: [Float](repeating: 0, count: 64), count: 3)
 		let coefficientsA = ACGroupEncoder.computeGroup(
 			xyb: stripe, widthInBlocks: blocks, heightInBlocks: blocks,
-			quantField: quantField, scale: 0.112_075_805_664_062_5, scaleDC: 1.0,
-			xQuantMatrixScale: 2, quantDC: &dcA)
+			quantField: quantField, scale: 0.112_075_805_664_062_5,
+			xQuantMatrixScale: 2, rawDC: &dcA)
 		var writerA = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.tokenizeGroup(
 			coefficients: coefficientsA, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: .none, order: CoeffOrder.Result.identity.orders,
 			writer: &writerA)
 
-		var dcB = [[Int32]](repeating: [Int32](repeating: 0, count: 64), count: 3)
+		var dcB = [[Float]](repeating: [Float](repeating: 0, count: 64), count: 3)
 		let coefficientsB = ACGroupEncoder.computeGroup(
 			planes: stripe.channelPlanes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: .none, quantField: quantField, scale: 0.112_075_805_664_062_5,
-			scaleDC: 1.0, xQuantMatrixScale: 2, quantDC: &dcB)
+			xQuantMatrixScale: 2, rawDC: &dcB)
 		var writerB = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.tokenizeGroup(
 			coefficients: coefficientsB, widthInBlocks: blocks, heightInBlocks: blocks,

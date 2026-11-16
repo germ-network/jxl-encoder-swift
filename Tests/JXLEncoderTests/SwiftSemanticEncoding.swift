@@ -110,7 +110,8 @@ enum SwiftSemanticEncoding {
 				$0, order: order.orders, mode: .staging(acCode),
 				blockContextMap: blockContextMap)
 		}
-		Encoder.assemble(outputs: outputs, dim: dim, sections: &sections)
+		try Encoder.assemble(
+			outputs: outputs, dim: dim, params: params, sections: &sections)
 		dcCode = SectionOptimizer.optimize(
 			sections: &sections, range: 1..<(1 + dim.dcGroupCount), baseCode: dcCode)
 		acCode = SectionOptimizer.optimize(

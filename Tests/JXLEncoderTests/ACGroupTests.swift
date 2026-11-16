@@ -13,7 +13,6 @@ import Testing
 struct ACGroupTests {
 	static let scale: Float = 0.112_075_805_664_062_5
 	static let quant: UInt8 = 5
-	static let scaleDC: Float = 1.0
 	static let xQuantMatrixScale: UInt32 = 2
 
 	@Test("bitstream records the inherited libjxl-tiny comparison")
@@ -35,8 +34,8 @@ struct ACGroupTests {
 		let quantField = [UInt8](
 			repeating: Self.quant, count: dim.widthInBlocks * dim.heightInBlocks)
 
-		var quantDC = [[Int32]](
-			repeating: [Int32](
+		var rawDC = [[Float]](
+			repeating: [Float](
 				repeating: 0, count: dim.widthInBlocks * dim.heightInBlocks),
 			count: 3)
 		let coefficients = ACGroupEncoder.computeGroup(
@@ -45,9 +44,8 @@ struct ACGroupTests {
 			heightInBlocks: dim.heightInBlocks,
 			quantField: quantField,
 			scale: Self.scale,
-			scaleDC: Self.scaleDC,
 			xQuantMatrixScale: Self.xQuantMatrixScale,
-			quantDC: &quantDC)
+			rawDC: &rawDC)
 		var writer = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.tokenizeGroup(
 			coefficients: coefficients,
@@ -90,13 +88,4 @@ struct ACGroupTests {
 		}
 	}
 
-	/// 0.5 isn't a chosen constant — `AddVarDCTDC`'s scale terms cancel down to
-	/// `DCQuant(1) * InvDCQuant(2)`, which is exactly this value, applied at
-	/// the default color correlation `-e 4` always uses. See
-	/// `ColorCorrelationTests.factorsMatchDefaultCorrelation` for the full
-	/// derivation this pins the same way.
-	@Test("B DC carries the default color correlation's factor")
-	func bDCDecorrelation() {
-		#expect(ACGroupEncoder.dcCflFactor == [0, 0, 0.5])
-	}
 }

@@ -9,23 +9,6 @@
 //
 
 public enum ACGroupEncoder {
-	/// Computes quantized AC coefficients and extracts unquantized DC samples.
-	public static func computeGroup(
-		xyb: PaddedStripe, widthInBlocks: Int, heightInBlocks: Int,
-		quantField: [UInt8], scale: Float, xQuantMatrixScale: UInt32,
-		rawDC: inout [[Float]]
-	) -> [[Int32]] {
-		fatalError("Raw DC extraction is not implemented")
-	}
-
-	/// Computes quantized AC coefficients and extracts DC at each channel's resolution.
-	public static func computeGroup(
-		planes: ChannelPlanes, widthInBlocks: Int, heightInBlocks: Int,
-		subsampling: ChromaSubsampling, quantField: [UInt8], scale: Float,
-		xQuantMatrixScale: UInt32, rawDC: inout [[Float]]
-	) -> [[Int32]] {
-		fatalError("Raw DC extraction is not implemented")
-	}
 
 	/// `-e 4` never computes a non-default color-correlation map (both
 	/// `CfLHeuristics` gates are stricter than `kCheetah` — see
@@ -38,15 +21,6 @@ public enum ACGroupEncoder {
 	static let xFactor: Float = 0
 	static let bFactor: Float = 1
 
-	/// DC quantization steps, from encoder/quant_weights.h.
-	static let inverseDCQuant: [Float] = [4096.0, 512.0, 256.0]
-	static let dcQuant: [Float] = [1.0 / 4096.0, 1.0 / 512.0, 1.0 / 256.0]
-
-	/// B's DC is decorrelated against Y's DC at the same default correlation
-	/// `bFactor` applies to AC: `AddVarDCTDC`'s scale terms cancel down to
-	/// `kInvDCQuant[2] * kDCQuant[1] * bFactor`, which is `0.5` here.
-	static let dcCflFactor: [Float] = [0, 0, inverseDCQuant[2] * dcQuant[1] * bFactor]
-
 	/// A channel's flat index into a per-channel, block-major array — both
 	/// `computeGroup`'s coefficient storage and `tokenizeGroup`'s read of it
 	/// — given that channel's own subsampled block position. Shared so the
@@ -57,31 +31,16 @@ public enum ACGroupEncoder {
 		sy[channel] * channelWidths[channel] + sx[channel]
 	}
 
-	/// Quantizes one DC coefficient.
-	///
-	/// Uses scalar Float multiply-subtract evaluation. The folded correction
-	/// remains an inherited approximation of the e4 weighted-predictor path.
-	///
-	/// Rounding is ties-away-from-zero (`std::round`), unlike the ties-to-even
-	/// used when quantizing AC coefficients.
-	static func quantizedDC(
-		coefficient: Float, inverseFactor: Float, yDC: Int32, cflFactor: Float
-	) -> Int32 {
-		let correction = Float(yDC) * cflFactor
-		let value = coefficient * inverseFactor - correction
-		return Int32(value.rounded(.toNearestOrAwayFromZero))
-	}
-
-	/// Computes one group's quantized AC coefficients and fills in its DC
-	/// image, without tokenizing — tokenization needs the frame-global
+	/// Computes one group's quantized AC coefficients and extracts raw DC
+	/// coefficients, without tokenizing — tokenization needs the frame-global
 	/// coefficient order (`CoeffOrder`), which in turn needs every group's
 	/// coefficients counted first, so the two are separate passes over the
 	/// same per-block computation.
 	///
 	/// `xyb` is the padded XYB image for the group; `quantField` holds one value
-	/// per block in group-raster order. `quantDC` receives one DC value per
-	/// block per channel — DC is just the lowest-frequency coefficient of the
-	/// same transform, so this pass produces both outputs. Returns one flat
+	/// per block in group-raster order. `rawDC` has one block-raster Float plane
+	/// per channel, each `widthInBlocks × heightInBlocks`, and receives pre-CfL
+	/// DC coefficients for later full-DC-group preparation. Returns one flat
 	/// array of quantized coefficients per channel, block-major
 	/// (`coefficients[channel][block * 64 ..< block * 64 + 64]`).
 	public static func computeGroup(
@@ -90,9 +49,8 @@ public enum ACGroupEncoder {
 		heightInBlocks: Int,
 		quantField: [UInt8],
 		scale: Float,
-		scaleDC: Float,
 		xQuantMatrixScale: UInt32,
-		quantDC: inout [[Int32]]
+		rawDC: inout [[Float]]
 	) -> [[Int32]] {
 		computeGroup(
 			planes: xyb.channelPlanes,
@@ -101,12 +59,14 @@ public enum ACGroupEncoder {
 			subsampling: .none,
 			quantField: quantField,
 			scale: scale,
-			scaleDC: scaleDC,
 			xQuantMatrixScale: xQuantMatrixScale,
-			quantDC: &quantDC)
+			rawDC: &rawDC)
 	}
 
-	/// As above, with per-channel resolutions.
+	/// As above, with per-channel resolutions. Each `rawDC[channel]` plane has
+	/// `subsampling.blocksAcross(channel:fullWidthInBlocks:)` columns and
+	/// `subsampling.blocksDown(channel:fullHeightInBlocks:)` rows, in block-raster
+	/// order.
 	///
 	/// The loop runs over the full-resolution block grid; a subsampled channel
 	/// codes only where its own grid aligns, which is how the format interleaves
@@ -119,11 +79,9 @@ public enum ACGroupEncoder {
 		subsampling: ChromaSubsampling,
 		quantField: [UInt8],
 		scale: Float,
-		scaleDC: Float,
 		xQuantMatrixScale: UInt32,
-		quantDC: inout [[Int32]]
+		rawDC: inout [[Float]]
 	) -> [[Int32]] {
-		let inverseFactor = inverseDCQuant.map { $0 * scaleDC }
 		// The X channel's quant matrix is scaled by distance-dependent steps.
 		let xMatrixMultiplier = Float.pow(1.25, Float(xQuantMatrixScale) - 2.0)
 
@@ -133,6 +91,11 @@ public enum ACGroupEncoder {
 		let channelHeights = (0..<3).map {
 			subsampling.blocksDown(channel: $0, fullHeightInBlocks: heightInBlocks)
 		}
+		precondition(rawDC.count == 3)
+		precondition(
+			(0..<3).allSatisfy {
+				rawDC[$0].count == channelWidths[$0] * channelHeights[$0]
+			})
 		var coefficients: [[Int32]] = (0..<3).map {
 			[Int32](
 				repeating: 0,
@@ -169,12 +132,7 @@ public enum ACGroupEncoder {
 				coefficients[1].replaceSubrange(
 					yBase..<yBase + DCT.blockSize, with: yQuantized)
 
-				// For DCT8 the DC is simply the lowest-frequency coefficient.
-				// `std::round` here rounds ties away from zero, unlike the
-				// half-to-even rounding the AC quantizer uses.
-				quantDC[1][index(1)] = Int32(
-					(inverseFactor[1] * yCoefficients[0])
-						.rounded(.toNearestOrAwayFromZero))
+				rawDC[1][index(1)] = yCoefficients[0]
 
 				for channel in [0, 2] {
 					// Without this guard a subsampled chroma block would be
@@ -191,6 +149,7 @@ public enum ACGroupEncoder {
 						stride: planes.widths[channel],
 						originX: sx[channel] * DCT.blockDim,
 						originY: sy[channel] * DCT.blockDim)
+					rawDC[channel][index(channel)] = blockCoefficients[0]
 					let factor = channel == 0 ? xFactor : bFactor
 					for k in 0..<DCT.blockSize {
 						blockCoefficients[k] = blockCoefficients[k]
@@ -210,15 +169,6 @@ public enum ACGroupEncoder {
 					coefficients[channel].replaceSubrange(
 						channelBase..<channelBase + DCT.blockSize,
 						with: quantized)
-
-					// Taken from the decorrelated coefficients, then B has Y's
-					// DC subtracted on top.
-					//
-					quantDC[channel][index(channel)] = quantizedDC(
-						coefficient: blockCoefficients[0],
-						inverseFactor: inverseFactor[channel],
-						yDC: quantDC[1][index(1)],
-						cflFactor: dcCflFactor[channel])
 				}
 			}
 		}

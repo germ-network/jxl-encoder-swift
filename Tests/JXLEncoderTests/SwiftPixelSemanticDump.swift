@@ -41,7 +41,7 @@ extension SemanticDump {
 				"inverse_quant_matrix.dct8.c\(channel)",
 				.floats(Array(QuantMatrices.inverseMatrix(channel: channel))))
 		}
-		record("dc_quant_matrix.values", .floats(ACGroupEncoder.dcQuant))
-		record("inverse_dc_quant_matrix.values", .floats(ACGroupEncoder.inverseDCQuant))
+		record("dc_quant_matrix.values", .floats(DCGroupEncoder.dcQuant))
+		record("inverse_dc_quant_matrix.values", .floats(DCGroupEncoder.inverseDCQuant))
 	}
 }

@@ -68,7 +68,7 @@ public enum Encoder {
 		let widthInBlocks: Int
 		let heightInBlocks: Int
 		let section: SectionWriter
-		let quantDC: [[Int32]]
+		let rawDC: [[Float]]
 		let quantField: [UInt8]
 	}
 
@@ -83,7 +83,7 @@ public enum Encoder {
 		/// Per channel, flat and block-major — `ACGroupEncoder.computeGroup`'s
 		/// output, passed straight through to `tokenizeGroup`.
 		let coefficients: [[Int32]]
-		let quantDC: [[Int32]]
+		let rawDC: [[Float]]
 		let quantField: [UInt8]
 	}
 
@@ -162,11 +162,10 @@ public enum Encoder {
 			width: paddedWidth,
 			height: groupDim.heightInBlocks * Geometry.blockDim,
 			planes: xybPlanes)
-		var groupDC = [[Int32]](
-			repeating: [Int32](
+		var rawDC = [[Float]](
+			repeating: [Float](
 				repeating: 0,
-				count: groupDim.widthInBlocks
-					* groupDim.heightInBlocks),
+				count: groupDim.widthInBlocks * groupDim.heightInBlocks),
 			count: 3)
 
 		let coefficients = ACGroupEncoder.computeGroup(
@@ -175,15 +174,14 @@ public enum Encoder {
 			heightInBlocks: groupDim.heightInBlocks,
 			quantField: quantField,
 			scale: params.scale,
-			scaleDC: params.scaleDC,
 			xQuantMatrixScale: params.xQuantMatrixScale,
-			quantDC: &groupDC)
+			rawDC: &rawDC)
 
 		return ACGroupCompute(
 			groupX: imageGX, groupY: imageGY,
 			widthInBlocks: groupDim.widthInBlocks,
 			heightInBlocks: groupDim.heightInBlocks,
-			coefficients: coefficients, quantDC: groupDC, quantField: quantField)
+			coefficients: coefficients, rawDC: rawDC, quantField: quantField)
 	}
 
 	/// Tokenizes one already-computed AC group using the frame-global
@@ -216,7 +214,7 @@ public enum Encoder {
 			groupX: compute.groupX, groupY: compute.groupY,
 			widthInBlocks: compute.widthInBlocks,
 			heightInBlocks: compute.heightInBlocks,
-			section: writer, quantDC: compute.quantDC, quantField: compute.quantField)
+			section: writer, rawDC: compute.rawDC, quantField: compute.quantField)
 	}
 
 	/// Reduces every group's coefficients into the frame-global zero
@@ -248,8 +246,9 @@ public enum Encoder {
 	/// Kept apart from the computation so the sequential and concurrent drivers
 	/// share it exactly and cannot drift.
 	static func assemble(
-		outputs: [ACGroupOutput], dim: ImageDim, sections: inout [SectionWriter]
-	) {
+		outputs: [ACGroupOutput], dim: ImageDim, params: DistanceParams,
+		sections: inout [SectionWriter]
+	) throws {
 		var dcData: [DCGroupData] = (0..<dim.dcGroupCount).map { i in
 			let rect = dim.pixelRect(
 				ix: i % dim.widthInDCGroups, iy: i / dim.widthInDCGroups,
@@ -258,6 +257,13 @@ public enum Encoder {
 			return DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks)
+		}
+		var rawDCByGroup = dcData.map { data in
+			(0..<3).map { _ in
+				[Float](
+					repeating: 0,
+					count: data.widthInBlocks * data.heightInBlocks)
+			}
 		}
 
 		for output in outputs {
@@ -287,8 +293,8 @@ public enum Encoder {
 					dcData[index].rawQuantField[target] =
 						output.quantField[by * output.widthInBlocks + bx]
 					for c in 0..<3 {
-						dcData[index].quantDC[c][target] =
-							output.quantDC[c][
+						rawDCByGroup[index][c][target] =
+							output.rawDC[c][
 								by * output.widthInBlocks + bx]
 					}
 				}
@@ -296,6 +302,9 @@ public enum Encoder {
 		}
 
 		for i in 0..<dim.dcGroupCount {
+			try DCGroupEncoder.preparePixel(
+				rawDC: rawDCByGroup[i], scaleDC: params.scaleDC,
+				data: &dcData[i])
 			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
 		}
 	}
@@ -366,7 +375,7 @@ public enum Encoder {
 					compute, order: coeffOrder.orders, mode: acMode,
 					blockContextMap: blockContextMap))
 		}
-		assemble(outputs: outputs, dim: dim, sections: &sections)
+		try assemble(outputs: outputs, dim: dim, params: params, sections: &sections)
 
 		if optimizeCodes {
 			let dcRange = 1..<(1 + dim.dcGroupCount)
@@ -507,7 +516,7 @@ extension Encoder {
 		// Frees the frame's coefficients before assembly/optimisation rather
 		// than leaving them reachable for the rest of the encode.
 		computes = []
-		assemble(outputs: outputs, dim: dim, sections: &sections)
+		try assemble(outputs: outputs, dim: dim, params: params, sections: &sections)
 
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
 		if optimizeCodes {

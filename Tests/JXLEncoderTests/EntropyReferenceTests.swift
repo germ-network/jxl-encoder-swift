@@ -1192,7 +1192,8 @@ struct EntropyReferenceTests {
 			let group = Encoder.ACGroupCompute(
 				groupX: 0, groupY: 0, widthInBlocks: width,
 				heightInBlocks: height, coefficients: coefficients,
-				quantDC: Array(repeating: qdc, count: 3), quantField: qf)
+				rawDC: Array(repeating: qdc.map(Float.init), count: 3),
+				quantField: qf)
 			let actual = SwiftEntropySemanticEncoding.acTokens(
 				group: group, order: Array(repeating: order, count: 3))
 			let differences = actual.differences(from: fixture.expected)

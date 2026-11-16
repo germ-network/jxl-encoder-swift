@@ -70,14 +70,92 @@ public struct DCGroupData: Sendable {
 }
 
 public enum DCGroupEncoder {
+	static let inverseDCQuant: [Float] = [4096, 512, 256]
+	static let dcQuant: [Float] = [1 / 4096, 1 / 512, 1 / 256]
+
 	static func preparePixel(
 		rawDC: [[Float]], scaleDC: Float, data: inout DCGroupData
 	) throws {
-		fatalError("DC preparation is not implemented")
+		let width = data.widthInBlocks
+		let height = data.heightInBlocks
+		let count = width * height
+		precondition(data.subsampling.is444)
+		precondition(rawDC.count == 3)
+		precondition((0..<3).allSatisfy { rawDC[$0].count == count })
+		data.extraDCPrecision = 1
+		data.quantDC = (0..<3).map { _ in [Int32](repeating: 0, count: count) }
+
+		let mul: Float = 2
+		let inverseFactors = inverseDCQuant.map { $0 * scaleDC * mul }
+		let yFactor = (scaleDC * dcQuant[1]) / mul
+		for channel in [1, 0, 2] {
+			var predictor = DCPredictor.WeightedState(width: width)
+			for y in 0..<height {
+				for x in 0..<width {
+					let index = y * width + x
+					let left =
+						x > 0
+						? data.quantDC[channel][index - 1]
+						: (y > 0 ? data.quantDC[channel][index - width] : 0)
+					let north =
+						y > 0 ? data.quantDC[channel][index - width] : left
+					let northWest =
+						x > 0 && y > 0
+						? data.quantDC[channel][index - width - 1] : left
+					let northEast =
+						x + 1 < width && y > 0
+						? data.quantDC[channel][index - width + 1] : north
+					let northNorth =
+						y > 1
+						? data.quantDC[channel][index - 2 * width] : north
+					let prediction = predictor.predict(
+						x: x, y: y, north: north, west: left,
+						northEast: northEast, northWest: northWest,
+						northNorth: northNorth)
+
+					let value: Float
+					if channel == 1 {
+						value =
+							rawDC[channel][index]
+							* inverseFactors[channel]
+					} else {
+						let cflFactor =
+							channel == 0
+							? ACGroupEncoder.xFactor
+							: ACGroupEncoder.bFactor
+						let corrected =
+							rawDC[channel][index]
+							- Float(data.quantDC[1][index])
+							* (yFactor * cflFactor)
+						value = corrected * inverseFactors[channel]
+					}
+					let quantized = try quantizedValue(
+						scaledResidual: value - Float(prediction.guess),
+						prediction: prediction.guess)
+					data.quantDC[channel][index] = quantized
+					predictor.updateErrors(value: quantized, x: x, y: y)
+				}
+			}
+		}
 	}
 
 	static func quantizedValue(scaledResidual: Float, prediction: Int64) throws -> Int32 {
-		fatalError("Nonlinear DC quantization is not implemented")
+		guard scaledResidual.isFinite else { throw EncoderError.unsupportedDCRange }
+		let deadzoned =
+			scaledResidual > -0.62 && scaledResidual < 0.62
+			? Float(0) : scaledResidual
+		var residual = deadzoned.rounded(.toNearestOrAwayFromZero)
+		if residual > 2 || residual < -2 {
+			residual = (deadzoned * 0.5).rounded(.toNearestOrAwayFromZero) * 2
+		}
+		guard let residualValue = Int32(exactly: residual) else {
+			throw EncoderError.unsupportedDCRange
+		}
+		let (value, overflow) = prediction.addingReportingOverflow(Int64(residualValue))
+		guard !overflow, let quantizedValue = Int32(exactly: value) else {
+			throw EncoderError.unsupportedDCRange
+		}
+		return quantizedValue
 	}
 
 	static func tokenStreams(

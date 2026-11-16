@@ -237,8 +237,9 @@ struct PixelSemanticFixtureTests {
 			let encoded = try SwiftSemanticEncoding.encode(
 				loadPPM(fixture: name), distance: 1)
 			let groups = try #require(encoded.decisions.pixelGroups)
-			let swift = SwiftSemanticEncoding.coefficients(
-				from: groups, dimension: ImageDim(width: width, height: height))
+			let swift = try SwiftSemanticEncoding.coefficients(
+				from: groups, dimension: ImageDim(width: width, height: height),
+				scaleDC: try DistanceParams(distance: 1).scaleDC)
 			let dimension = ImageDim(width: width, height: height)
 			let metadata = try SemanticDump(fixture: name + ".stages")
 			let groupValues: [Int64]
@@ -358,7 +359,7 @@ struct PixelSemanticFixtureTests {
 	}
 
 	@Test("full-frame coefficient placement preserves channel, group, and block identity")
-	func coefficientPlacementPreservesDistinctValues() {
+	func coefficientPlacementPreservesDistinctValues() throws {
 		let dimension = ImageDim(width: 513, height: 257)
 		var groups: [Encoder.ACGroupCompute] = []
 		for index in 0..<dimension.groupCount {
@@ -392,10 +393,12 @@ struct PixelSemanticFixtureTests {
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks,
 				coefficients: coefficients,
-				quantDC: quantDC, quantField: [])
+				rawDC: (0..<3).map { channel in quantDC[channel].map(Float.init) },
+				quantField: [])
 			groups.append(group)
 		}
-		let result = SwiftSemanticEncoding.coefficients(from: groups, dimension: dimension)
+		let result = try SwiftSemanticEncoding.coefficients(
+			from: groups, dimension: dimension, scaleDC: 1)
 		for channel in 0..<3 {
 			for group in groups {
 				for block in 0..<(group.widthInBlocks * group.heightInBlocks) {
@@ -418,8 +421,8 @@ struct PixelSemanticFixtureTests {
 									* 64 + 64)])
 							== (0..<64).map { base + Int32($0) })
 					#expect(
-						result.dc[channel][destination]
-							== Int32(
+						result.rawDC[channel][destination]
+							== Float(
 								channel * 1000
 									+ (group.groupY
 										* dimension

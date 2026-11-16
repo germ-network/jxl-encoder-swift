@@ -54,7 +54,7 @@ struct ModularDCContractTests {
 		#expect(changed.property == baseline.property)
 	}
 
-	@Test("nonlinear DC uses strict deadzone and even residual transitions", .disabled())
+	@Test("nonlinear DC uses strict deadzone and even residual transitions")
 	func nonlinearDCDeadzoneAndEvenResidualBoundaries() throws {
 		let cases: [(Float, Int32)] = [
 			(-0.62, -1), (-0.61, 0), (0.61, 0), (0.62, 1),
@@ -68,37 +68,110 @@ struct ModularDCContractTests {
 		}
 	}
 
-	@Test("pixel DC folds prepared luma across AC-group boundaries", .disabled())
+	@Test("pixel DC folds prepared luma across AC-group boundaries")
 	func foldedDCUsesPreparedLumaAcrossACGroupBoundary() throws {
 		var data = DCGroupData(widthInBlocks: 33, heightInBlocks: 2)
-		let rawDC = [[Float]](repeating: [Float](repeating: 0, count: 66), count: 3)
-		try DCGroupEncoder.preparePixel(rawDC: rawDC, scaleDC: 1, data: &data)
+		var rawDC = [[Float]](repeating: [Float](repeating: 0, count: 66), count: 3)
+		rawDC[1][31] = 0.25
+		rawDC[1][32] = 0.25
+		rawDC[2][32] = 0.25
+		try DCGroupEncoder.preparePixel(rawDC: rawDC, scaleDC: 1.5, data: &data)
 		#expect(data.extraDCPrecision == 1)
-		Issue.record(
-			"Use asymmetric luma/B values at columns31/32 and compare fixed prepared samples"
-		)
+		#expect(data.quantDC[1][31] == 384)
+		#expect(data.quantDC[1][32] == 384)
+		#expect(data.quantDC[2][32] == -240)
+	}
+
+	@Test("AC-group extraction keeps original Float DC before CfL")
+	func rawDCExtractionPrecedesCfL() {
+		let width = 16
+		let height = 8
+		let planes = ChannelPlanes(
+			planes: [
+				(0..<width * height).map { Float($0 % 13) / 16 },
+				(0..<width * height).map { Float($0 % 7) / 8 },
+				(0..<width * height).map { Float($0 % 11) / 9 },
+			],
+			widths: [width, width, width], heights: [height, height, height])
+		var rawDC = (0..<3).map { _ in [Float](repeating: .nan, count: 2) }
+		_ = ACGroupEncoder.computeGroup(
+			planes: planes, widthInBlocks: 2, heightInBlocks: 1,
+			subsampling: .none, quantField: [5, 5], scale: 0.1,
+			xQuantMatrixScale: 2, rawDC: &rawDC)
+		for channel in 0..<3 {
+			let expected = (0..<2).map { block in
+				DCT.forward8x8(
+					pixels: planes.planes[channel], stride: width,
+					originX: block * DCT.blockDim, originY: 0)[0]
+			}
+			#expect(rawDC[channel] == expected)
+		}
 	}
 
 	@Test(
-		"DC keeps Int32 samples and rejects unsupported sample or residual ranges",
-		.disabled())
+		"DC keeps Int32 samples and rejects unsupported sample or residual ranges")
 	func dcPreparationPreservesInt32AndRejectsUnsupportedRange() throws {
 		#expect(
 			try DCGroupEncoder.quantizedValue(scaledResidual: 0, prediction: 40_000)
 				== 40_000)
+		#expect(
+			try DCGroupEncoder.quantizedValue(scaledResidual: 0, prediction: -40_000)
+				== -40_000)
 		#expect(throws: EncoderError.unsupportedDCRange) {
 			try DCGroupEncoder.quantizedValue(scaledResidual: .infinity, prediction: 0)
 		}
-		Issue.record(
-			"Cover negative Int16 crossing, NaN, Float/Int32 limits and predictor-plus-residual overflow"
-		)
+		#expect(throws: EncoderError.unsupportedDCRange) {
+			try DCGroupEncoder.quantizedValue(scaledResidual: .nan, prediction: 0)
+		}
+		#expect(throws: EncoderError.unsupportedDCRange) {
+			try DCGroupEncoder.quantizedValue(
+				scaledResidual: 2_147_483_648, prediction: 0)
+		}
+		#expect(throws: EncoderError.unsupportedDCRange) {
+			try DCGroupEncoder.quantizedValue(scaledResidual: 0, prediction: Int64.max)
+		}
+		#expect(throws: EncoderError.unsupportedDCRange) {
+			try DCGroupEncoder.quantizedValue(scaledResidual: 1, prediction: Int64.max)
+		}
 	}
 
-	@Test("JPEG DC preserves coefficient integers and subsampled plane geometry", .disabled())
+	@Test("JPEG DC preserves coefficient integers and subsampled plane geometry")
 	func jpegDCPreservesCoefficientsAndSubsampledGeometry() throws {
-		Issue.record(
-			"Run the production JPEG caller with exact coefficient values and a partial subsampled group"
+		let transcode = try JPEGTranscode(
+			JPEGParser.parse(JPEGParserTests.fixture("hopper_420_restart")))
+		let alignment = (
+			x: 1 << transcode.subsampling.maxHorizontalShift,
+			y: 1 << transcode.subsampling.maxVerticalShift
 		)
+		let dim = ImageDim(
+			width: transcode.width, height: transcode.height,
+			blockAlignment: alignment)
+		var quantDC = (0..<3).map { channel in
+			let width = transcode.subsampling.blocksAcross(
+				channel: channel, fullWidthInBlocks: dim.widthInBlocks)
+			let height = transcode.subsampling.blocksDown(
+				channel: channel, fullHeightInBlocks: dim.heightInBlocks)
+			return [Int32](repeating: 0, count: width * height)
+		}
+		var writer = SectionWriter(mode: .direct(.staticAC))
+		ACGroupEncoder.encodeJPEG(
+			transcode: transcode, blockX0: 0, blockY0: 0,
+			widthInBlocks: dim.widthInBlocks, heightInBlocks: dim.heightInBlocks,
+			quantDC: &quantDC, blockContextMap: nil,
+			order: CoeffOrder.Result.identity.orders, writer: &writer)
+		for channel in 0..<3 {
+			let width = transcode.subsampling.blocksAcross(
+				channel: channel, fullWidthInBlocks: dim.widthInBlocks)
+			let height = transcode.subsampling.blocksDown(
+				channel: channel, fullHeightInBlocks: dim.heightInBlocks)
+			let expected = (0..<height).flatMap { y in
+				(0..<width).map { x in
+					transcode.block(channel: channel, x: x, y: y)[0]
+				}
+			}
+			#expect(quantDC[channel].count == width * height)
+			#expect(quantDC[channel] == expected)
+		}
 	}
 
 	@Test(
