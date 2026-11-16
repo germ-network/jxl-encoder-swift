@@ -9,6 +9,24 @@
 //
 
 public enum ACGroupEncoder {
+	/// Computes quantized AC coefficients and extracts unquantized DC samples.
+	public static func computeGroup(
+		xyb: PaddedStripe, widthInBlocks: Int, heightInBlocks: Int,
+		quantField: [UInt8], scale: Float, xQuantMatrixScale: UInt32,
+		rawDC: inout [[Float]]
+	) -> [[Int32]] {
+		fatalError("Raw DC extraction is not implemented")
+	}
+
+	/// Computes quantized AC coefficients and extracts DC at each channel's resolution.
+	public static func computeGroup(
+		planes: ChannelPlanes, widthInBlocks: Int, heightInBlocks: Int,
+		subsampling: ChromaSubsampling, quantField: [UInt8], scale: Float,
+		xQuantMatrixScale: UInt32, rawDC: inout [[Float]]
+	) -> [[Int32]] {
+		fatalError("Raw DC extraction is not implemented")
+	}
+
 	/// `-e 4` never computes a non-default color-correlation map (both
 	/// `CfLHeuristics` gates are stricter than `kCheetah` — see
 	/// `FrameAssembly.writeColorCorrelationDC`), so these are full libjxl's
@@ -47,11 +65,11 @@ public enum ACGroupEncoder {
 	/// Rounding is ties-away-from-zero (`std::round`), unlike the ties-to-even
 	/// used when quantizing AC coefficients.
 	static func quantizedDC(
-		coefficient: Float, inverseFactor: Float, yDC: Int16, cflFactor: Float
-	) -> Int16 {
+		coefficient: Float, inverseFactor: Float, yDC: Int32, cflFactor: Float
+	) -> Int32 {
 		let correction = Float(yDC) * cflFactor
 		let value = coefficient * inverseFactor - correction
-		return Int16(value.rounded(.toNearestOrAwayFromZero))
+		return Int32(value.rounded(.toNearestOrAwayFromZero))
 	}
 
 	/// Computes one group's quantized AC coefficients and fills in its DC
@@ -74,7 +92,7 @@ public enum ACGroupEncoder {
 		scale: Float,
 		scaleDC: Float,
 		xQuantMatrixScale: UInt32,
-		quantDC: inout [[Int16]]
+		quantDC: inout [[Int32]]
 	) -> [[Int32]] {
 		computeGroup(
 			planes: xyb.channelPlanes,
@@ -103,7 +121,7 @@ public enum ACGroupEncoder {
 		scale: Float,
 		scaleDC: Float,
 		xQuantMatrixScale: UInt32,
-		quantDC: inout [[Int16]]
+		quantDC: inout [[Int32]]
 	) -> [[Int32]] {
 		let inverseFactor = inverseDCQuant.map { $0 * scaleDC }
 		// The X channel's quant matrix is scaled by distance-dependent steps.
@@ -154,7 +172,7 @@ public enum ACGroupEncoder {
 				// For DCT8 the DC is simply the lowest-frequency coefficient.
 				// `std::round` here rounds ties away from zero, unlike the
 				// half-to-even rounding the AC quantizer uses.
-				quantDC[1][index(1)] = Int16(
+				quantDC[1][index(1)] = Int32(
 					(inverseFactor[1] * yCoefficients[0])
 						.rounded(.toNearestOrAwayFromZero))
 
@@ -298,7 +316,7 @@ extension ACGroupEncoder {
 		blockY0: Int,
 		widthInBlocks: Int,
 		heightInBlocks: Int,
-		quantDC: inout [[Int16]],
+		quantDC: inout [[Int32]],
 		/// Non-nil switches every block to the adaptive per-image context
 		/// assignment; nil keeps the fixed formula `ACContext.blockContext`
 		/// already computes, unchanged. The static-table (`optimizeCodes:
@@ -369,7 +387,7 @@ extension ACGroupEncoder {
 					let localY = subsampling.subsampledY(
 						channel: channel, blockY: by)
 					quantDC[channel][localY * channelWidths[channel] + localX] =
-						Int16(clamping: block[0])
+						Int32(clamping: block[0])
 				}
 
 				// Every channel's context at this position shares the same

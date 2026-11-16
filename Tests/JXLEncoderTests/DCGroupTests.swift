@@ -15,7 +15,7 @@ struct DCGroupTests {
 			for y in 0..<heightInBlocks {
 				for x in 0..<widthInBlocks {
 					let v = Int((x * 7 + y * 13 + c * 29) % 61) - 30
-					data.quantDC[c][y * widthInBlocks + x] = Int16(
+					data.quantDC[c][y * widthInBlocks + x] = Int32(
 						v * (c == 1 ? 5 : 1))
 				}
 			}

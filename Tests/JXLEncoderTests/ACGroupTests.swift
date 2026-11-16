@@ -35,8 +35,8 @@ struct ACGroupTests {
 		let quantField = [UInt8](
 			repeating: Self.quant, count: dim.widthInBlocks * dim.heightInBlocks)
 
-		var quantDC = [[Int16]](
-			repeating: [Int16](
+		var quantDC = [[Int32]](
+			repeating: [Int32](
 				repeating: 0, count: dim.widthInBlocks * dim.heightInBlocks),
 			count: 3)
 		let coefficients = ACGroupEncoder.computeGroup(

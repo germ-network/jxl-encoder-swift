@@ -119,6 +119,12 @@ public struct SectionWriter: Sendable {
 }
 
 enum SectionOptimizer {
+	static func modularCode(
+		tokenStreams: [[Token]], contextCount: Int, extraDCPrecision: UInt8
+	) -> EntropyCode {
+		fatalError("Selected modular entropy preparation is not implemented")
+	}
+
 	/// libjxl's cluster limit (`kClustersLimit`, enc_context_map.h). Tiny's
 	/// static tables pre-bucket the raw context space down to as few as 8
 	/// entries before optimisation ever runs; clustering at the reference's

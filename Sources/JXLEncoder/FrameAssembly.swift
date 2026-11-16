@@ -122,6 +122,20 @@ enum FrameAssembly {
 		params: DistanceParams,
 		dcGroupCount: Int,
 		code: EntropyCode,
+		modularTree: (tree: ContextTree.Prepared, code: EntropyCode),
+		dcQuantization: [Float]? = nil,
+		globalScale: Int? = nil,
+		quantDC: Int? = nil,
+		blockContextMap: JPEGBlockContextMap.Result? = nil,
+		writer: inout BitWriter
+	) throws {
+		fatalError("Prepared modular global writing is not implemented")
+	}
+
+	static func writeDCGlobal(
+		params: DistanceParams,
+		dcGroupCount: Int,
+		code: EntropyCode,
 		/// Per-channel DC quantization for a JPEG transcode, `255 * 8 / quant[0]`.
 		/// Nil on the pixel path, which uses the built-in values.
 		dcQuantization: [Float]? = nil,

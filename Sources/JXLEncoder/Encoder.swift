@@ -68,7 +68,7 @@ public enum Encoder {
 		let widthInBlocks: Int
 		let heightInBlocks: Int
 		let section: SectionWriter
-		let quantDC: [[Int16]]
+		let quantDC: [[Int32]]
 		let quantField: [UInt8]
 	}
 
@@ -83,7 +83,7 @@ public enum Encoder {
 		/// Per channel, flat and block-major — `ACGroupEncoder.computeGroup`'s
 		/// output, passed straight through to `tokenizeGroup`.
 		let coefficients: [[Int32]]
-		let quantDC: [[Int16]]
+		let quantDC: [[Int32]]
 		let quantField: [UInt8]
 	}
 
@@ -162,8 +162,8 @@ public enum Encoder {
 			width: paddedWidth,
 			height: groupDim.heightInBlocks * Geometry.blockDim,
 			planes: xybPlanes)
-		var groupDC = [[Int16]](
-			repeating: [Int16](
+		var groupDC = [[Int32]](
+			repeating: [Int32](
 				repeating: 0,
 				count: groupDim.widthInBlocks
 					* groupDim.heightInBlocks),
@@ -677,8 +677,8 @@ extension Encoder {
 				let blockX0 = gx * Geometry.groupDimInBlocks
 				let blockY0 = gy * Geometry.groupDimInBlocks
 
-				var groupDC = [[Int16]](
-					repeating: [Int16](
+				var groupDC = [[Int32]](
+					repeating: [Int32](
 						repeating: 0,
 						count: groupDim.widthInBlocks
 							* groupDim.heightInBlocks),

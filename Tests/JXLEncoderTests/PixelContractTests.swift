@@ -341,7 +341,7 @@ struct PixelSemanticFixtureTests {
 				let expectedChannelDC = upstreamDC[
 					dcStart..<(dcStart + dimension.widthInBlocks
 						* dimension.heightInBlocks)]
-				let actualChannelDC = swift.dc[channel].map(Int32.init)
+				let actualChannelDC = swift.dc[channel]
 				let dcDifferences = zip(actualChannelDC, expectedChannelDC)
 					.enumerated().filter { $0.element.0 != $0.element.1 }
 				let dcDifferenceCount = dcDifferences.count
@@ -368,7 +368,7 @@ struct PixelSemanticFixtureTests {
 			let groupDim = ImageDim(width: rect.width, height: rect.height)
 			let blocks = groupDim.widthInBlocks * groupDim.heightInBlocks
 			var coefficients = [[Int32]](repeating: [], count: 3)
-			var quantDC = [[Int16]](repeating: [], count: 3)
+			var quantDC = [[Int32]](repeating: [], count: 3)
 			for channel in 0..<3 {
 				var channelCoefficients: [Int32] = []
 				channelCoefficients.reserveCapacity(blocks * 64)
@@ -379,11 +379,11 @@ struct PixelSemanticFixtureTests {
 				}
 				coefficients[channel] = channelCoefficients
 
-				var channelDC: [Int16] = []
+				var channelDC: [Int32] = []
 				channelDC.reserveCapacity(blocks)
 				for block in 0..<blocks {
 					channelDC.append(
-						Int16(channel * 1000 + index * 100 + block))
+						Int32(channel * 1000 + index * 100 + block))
 				}
 				quantDC[channel] = channelDC
 			}
@@ -419,7 +419,7 @@ struct PixelSemanticFixtureTests {
 							== (0..<64).map { base + Int32($0) })
 					#expect(
 						result.dc[channel][destination]
-							== Int16(
+							== Int32(
 								channel * 1000
 									+ (group.groupY
 										* dimension

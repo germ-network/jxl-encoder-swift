@@ -987,7 +987,7 @@ struct EntropyReferenceTests {
 		for channel in 0..<3 {
 			wpData.quantDC[channel] = try values(
 				wp, "input.modular.group0.channel\(channel)"
-			).map(Int16.init)
+			).map(Int32.init)
 		}
 		let wpBaseline = SwiftEntropySemanticEncoding.modularTokens(data: wpData)
 		let wpBaselineParts = try tokenParts(wpBaseline)
@@ -1102,7 +1102,7 @@ struct EntropyReferenceTests {
 			var data = DCGroupData(widthInBlocks: width, heightInBlocks: height)
 			for channel in 0..<3 {
 				let samples = try integers("\(prefix).channel\(channel)")
-				data.quantDC[channel] = samples.map(Int16.init)
+				data.quantDC[channel] = samples.map(Int32.init)
 			}
 			let actual = SwiftEntropySemanticEncoding.modularTokens(data: data)
 			let referenceTokens = try expectedIntegers(
@@ -1137,7 +1137,7 @@ struct EntropyReferenceTests {
 		for channel in 0..<3 {
 			data.quantDC[channel] = try wpIntegers("\(firstGroup).channel\(channel)")
 				.map(
-					Int16.init)
+					Int32.init)
 		}
 		let wpActual = SwiftEntropySemanticEncoding.modularTokens(data: data)
 		guard
@@ -1184,7 +1184,7 @@ struct EntropyReferenceTests {
 			let width = Int(try integers("input.ac_tokens.width")[0])
 			let height = Int(try integers("input.ac_tokens.height")[0])
 			let order = try integers("input.ac_tokens.order").map(Int.init)
-			let qdc = try integers("input.ac_tokens.qdc").map(Int16.init)
+			let qdc = try integers("input.ac_tokens.qdc").map(Int32.init)
 			let qf = try integers("input.ac_tokens.qf").map(UInt8.init)
 			let coefficients = try (0..<3).map { channel in
 				try integers("input.ac_tokens.channel\(channel)").map(Int32.init)

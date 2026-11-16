@@ -267,8 +267,8 @@ struct QuantizerTests {
 		let params = try DistanceParams(distance: 1)
 		#expect(quant == [Int64](repeating: Int64(params.uniformQuant), count: 10))
 		let blockCount = input.height / DCT.blockDim
-		var quantDC = [[Int16]](
-			repeating: [Int16](repeating: 0, count: blockCount), count: 3)
+		var quantDC = [[Int32]](
+			repeating: [Int32](repeating: 0, count: blockCount), count: 3)
 		let actual = ACGroupEncoder.computeGroup(
 			xyb: PaddedStripe(
 				width: input.width, height: input.height, planes: input.planes),

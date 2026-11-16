@@ -14,7 +14,9 @@
 /// Per-block state a DC group encodes alongside the DC image.
 public struct DCGroupData: Sendable {
 	/// One plane per channel, each at its own subsampled size.
-	public var quantDC: [[Int16]]
+	public var quantDC: [[Int32]]
+	/// Additional precision used to prepare the DC image.
+	public var extraDCPrecision: UInt8 = 0
 	public var rawQuantField: [UInt8]
 	/// Uniform per-block EPF sharpness for the selected encoding path.
 	public let epfSharpness: UInt8
@@ -57,7 +59,7 @@ public struct DCGroupData: Sendable {
 		planeWidths = widths
 		planeHeights = heights
 		quantDC = (0..<3).map {
-			[Int16](repeating: 0, count: widths[$0] * heights[$0])
+			[Int32](repeating: 0, count: widths[$0] * heights[$0])
 		}
 		rawQuantField = [UInt8](repeating: 1, count: widthInBlocks * heightInBlocks)
 		cmapWidth = Geometry.divCeil(widthInBlocks * Geometry.blockDim, 64)
@@ -68,6 +70,22 @@ public struct DCGroupData: Sendable {
 }
 
 public enum DCGroupEncoder {
+	static func preparePixel(
+		rawDC: [[Float]], scaleDC: Float, data: inout DCGroupData
+	) throws {
+		fatalError("DC preparation is not implemented")
+	}
+
+	static func quantizedValue(scaledResidual: Float, prediction: Int64) throws -> Int32 {
+		fatalError("Nonlinear DC quantization is not implemented")
+	}
+
+	static func tokenStreams(
+		data: DCGroupData, groupIndex: Int, tree: ContextTree.Prepared
+	) throws -> (dc: [Token], metadata: [Token]) {
+		fatalError("Modular DC tokenization is not implemented")
+	}
+
 	/// Gradient-predicts one plane and emits the residuals.
 	///
 	/// The neighbour fallbacks are deliberately asymmetric, matching the

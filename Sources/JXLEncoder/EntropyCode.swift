@@ -11,6 +11,9 @@
 
 /// A context map plus the prefix codes it selects between.
 public struct EntropyCode: Sendable {
+	var uintConfigurations: [HybridUintConfiguration]? = nil
+	var logAlphabetSize: Int = ANSConstants.logAlphaSize
+
 	public let contextMap: [UInt8]
 	public let prefixCodes: [PrefixCode]
 	/// Set when this code re-clusters an earlier one's buckets. The decoder

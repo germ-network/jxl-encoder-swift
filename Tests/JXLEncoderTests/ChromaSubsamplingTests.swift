@@ -152,12 +152,12 @@ struct SubsampledEncodingTests {
 		return ChannelPlanes(planes: data, widths: widths, heights: heights)
 	}
 
-	static func encode(subsampling: ChromaSubsampling) -> (bits: Int, dc: [[Int16]]) {
+	static func encode(subsampling: ChromaSubsampling) -> (bits: Int, dc: [[Int32]]) {
 		let blocks = 8
 		let full = blocks * DCT.blockDim
 		let planes = planes(fullWidth: full, fullHeight: full, subsampling: subsampling)
 		var quantDC = (0..<3).map { channel in
-			[Int16](
+			[Int32](
 				repeating: 0,
 				count: subsampling.blocksAcross(
 					channel: channel, fullWidthInBlocks: blocks)
@@ -197,10 +197,10 @@ struct SubsampledEncodingTests {
 		let planes = Self.planes(fullWidth: full, fullHeight: full, subsampling: cs)
 		// a value the encoder cannot produce, so an unwritten slot is visible
 		// rather than hiding behind a plausible zero
-		let sentinel = Int16.min
+		let sentinel = Int32.min
 
 		var quantDC = (0..<3).map { channel in
-			[Int16](
+			[Int32](
 				repeating: sentinel,
 				count: cs.blocksAcross(channel: channel, fullWidthInBlocks: blocks)
 					* cs.blocksDown(
@@ -248,7 +248,7 @@ struct SubsampledEncodingTests {
 			).planes)
 		let quantField = [UInt8](repeating: 5, count: blocks * blocks)
 
-		var dcA = [[Int16]](repeating: [Int16](repeating: 0, count: 64), count: 3)
+		var dcA = [[Int32]](repeating: [Int32](repeating: 0, count: 64), count: 3)
 		let coefficientsA = ACGroupEncoder.computeGroup(
 			xyb: stripe, widthInBlocks: blocks, heightInBlocks: blocks,
 			quantField: quantField, scale: 0.112_075_805_664_062_5, scaleDC: 1.0,
@@ -259,7 +259,7 @@ struct SubsampledEncodingTests {
 			subsampling: .none, order: CoeffOrder.Result.identity.orders,
 			writer: &writerA)
 
-		var dcB = [[Int16]](repeating: [Int16](repeating: 0, count: 64), count: 3)
+		var dcB = [[Int32]](repeating: [Int32](repeating: 0, count: 64), count: 3)
 		let coefficientsB = ACGroupEncoder.computeGroup(
 			planes: stripe.channelPlanes, widthInBlocks: blocks, heightInBlocks: blocks,
 			subsampling: .none, quantField: quantField, scale: 0.112_075_805_664_062_5,

@@ -48,7 +48,7 @@ enum SwiftJPEGSemanticEncoding {
 					blockAlignment: alignment)
 				var section = SectionWriter(mode: .staging(baseCode))
 				var quantDC = (0..<3).map { channel in
-					[Int16](
+					[Int32](
 						repeating: 0,
 						count:
 							transcode.subsampling.blocksAcross(
@@ -140,7 +140,7 @@ enum SwiftJPEGSemanticEncoding {
 					dcData[index].quantDC[channel][
 						localY * dcData[index].planeWidths[channel] + localX
 					] =
-						Int16(
+						Int32(
 							clamping: t.dc(
 								channel: channel, x: sx, y: sy))
 				}
@@ -297,7 +297,7 @@ enum SwiftJPEGSemanticEncoding {
 						y: 1 << transcode.subsampling.maxVerticalShift
 					))
 				var quantDC = (0..<3).map { channel in
-					[Int16](
+					[Int32](
 						repeating: 0,
 						count: transcode.subsampling.blocksAcross(
 							channel: channel,

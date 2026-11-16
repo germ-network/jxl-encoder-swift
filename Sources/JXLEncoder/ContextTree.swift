@@ -17,6 +17,28 @@
 //
 
 enum ContextTree {
+	enum Predictor: UInt32, Sendable {
+		case zero = 0
+		case left = 1
+		case gradient = 5
+		case weighted = 6
+	}
+
+	enum Node: Sendable {
+		case split(property: Int, threshold: Int32, greater: Int, notGreater: Int)
+		case leaf(predictor: Predictor, context: UInt32)
+	}
+
+	struct Prepared: Sendable {
+		let nodes: [Node]
+		let tokens: [Token]
+		let contextCount: Int
+	}
+
+	static func prepare(groups: [DCGroupData], jpegTranscode: Bool) -> Prepared {
+		fatalError("Selected modular tree is not implemented")
+	}
+
 	/// Contexts in the tree's own token stream.
 	static let treeContextCount = 6
 

@@ -25,9 +25,9 @@ struct DCQuantizationTests {
 	@Test("DC uses native scalar multiply-subtract")
 	func nativeScalarArithmetic() {
 		for (bits, expected) in [
-			(UInt32(0xBF64_2040), Int16(-257)),
-			(UInt32(0xBEE3_ADF7), Int16(-129)),
-			(UInt32(0xBDE1_003F), Int16(-33)),
+			(UInt32(0xBF64_2040), Int32(-257)),
+			(UInt32(0xBEE3_ADF7), Int32(-129)),
+			(UInt32(0xBDE1_003F), Int32(-33)),
 		] {
 			let actual = ACGroupEncoder.quantizedDC(
 				coefficient: Float(bitPattern: bits),
@@ -51,7 +51,7 @@ struct DCQuantizationTests {
 			],
 			widths: [8, 8, 8],
 			heights: [8, 8, 8])
-		var quantDC = [[Int16]](repeating: [0], count: 3)
+		var quantDC = [[Int32]](repeating: [0], count: 3)
 		_ = ACGroupEncoder.computeGroup(
 			planes: planes,
 			widthInBlocks: 1,

@@ -11,6 +11,23 @@
 //
 
 enum DCPredictor {
+	struct WeightedState {
+		init(width: Int) {
+			fatalError("Weighted prediction is not implemented")
+		}
+
+		mutating func predict(
+			x: Int, y: Int, north: Int32, west: Int32, northEast: Int32,
+			northWest: Int32, northNorth: Int32
+		) -> (guess: Int64, property: Int64) {
+			fatalError("Weighted prediction is not implemented")
+		}
+
+		mutating func updateErrors(value: Int32, x: Int, y: Int) {
+			fatalError("Weighted prediction is not implemented")
+		}
+	}
+
 	static let gradRangeMin: Int = 0
 	static let gradRangeMid: Int = 512
 	static let gradRangeMax: Int = 1023

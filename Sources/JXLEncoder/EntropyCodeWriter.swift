@@ -11,6 +11,10 @@
 //
 
 enum EntropyCodeWriter {
+	static func writeTokens(_ tokens: [Token], code: EntropyCode, writer: inout BitWriter) {
+		fatalError("Configured modular token writing is not implemented")
+	}
+
 	static func writeContextMap(_ code: EntropyCode, writer: inout BitWriter) {
 		guard code.transmittedContextCount != 0 else { return }
 

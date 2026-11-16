@@ -3,10 +3,10 @@
 extension SwiftSemanticEncoding {
 	static func coefficients(
 		from groups: [Encoder.ACGroupCompute], dimension: ImageDim
-	) -> (ac: [[Int32]], dc: [[Int16]]) {
+	) -> (ac: [[Int32]], dc: [[Int32]]) {
 		let blockCount = dimension.widthInBlocks * dimension.heightInBlocks
 		var ac = (0..<3).map { _ in [Int32](repeating: 0, count: blockCount * 64) }
-		var dc = (0..<3).map { _ in [Int16](repeating: 0, count: blockCount) }
+		var dc = (0..<3).map { _ in [Int32](repeating: 0, count: blockCount) }
 		for group in groups {
 			for y in 0..<group.heightInBlocks {
 				for x in 0..<group.widthInBlocks {
