@@ -41,6 +41,14 @@ Phase A (a filter-flag decision driven by "does this beat e7", not by what
 e4 actually does) and is dropped as a criterion. e4 is chosen because it is
 the simplest rung to reach first:
 
+For JPEG input, `--container=0` does not disable the reconstruction or
+metadata behavior reached through the retained original JPEG bytes in the
+pinned cjxl configuration. The historical JPEG size observations below use a
+reconstruction-enabled reference and are not evidence for a bare codestream.
+JR-03/04 therefore remain programme work; ICC and orientation decoded meaning
+remain required, with no blanket metadata waiver or programme feature
+exclusion. See [the selected JPEG configuration proof](../Reference/jpeg-container-configuration.md).
+
 - **e1–e4 are DCT8-only.** `AcStrategyHeuristics::ProcessRect` fills the
   whole strategy image with DCT8 at `speed_tier >= kCheetah` (= e4). The
   existing 8×8-only core is a *correct implementation choice* for this

@@ -15,6 +15,11 @@ The target configuration is `cjxl -d <D> -e 4 --container=0` for pixels
 (`SpeedTier::kCheetah`, since `-e N` maps to `SpeedTier(10 - N)`) and the same with
 `-j 1` for lossless JPEG recompression.
 
+For the JPEG path, the late `--container=0` argument reset does not change the
+already-copied `params.jpeg_store_metadata`; original JPEG bytes still reach
+the container/reconstruction path. JR-03/04 therefore remain outstanding
+source and metadata obligations. See [the selected JPEG configuration proof](jpeg-container-configuration.md).
+
 `DecisionInventoryTests` (in `JXLEncoderTests`) enforces every rule below.
 
 ## Files
