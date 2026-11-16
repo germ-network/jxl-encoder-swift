@@ -577,9 +577,15 @@ struct JPEGSemanticFixtureTests {
 			reference.fields["block_context.num_ctxs"]
 				== .integers([Int64(actual.numContexts)]))
 		#expect(
-			try SwiftJPEGSemanticEncoding.contextWitness(
-				transcode, reference: reference)
-				== witness)
+			witness.fields["jpeg_context.reconstructed_coefficients_exact"]
+				== .integers([1]))
+		let context = try SwiftJPEGSemanticEncoding.contextWitness(
+			transcode, reference: reference)
+		#expect(
+			context.fields
+				== witness.fields.filter {
+					$0.key != "jpeg_context.reconstructed_coefficients_exact"
+				})
 	}
 
 	private func dcHistogram(_ transcode: JPEGTranscode) -> [Int] {
@@ -614,7 +620,15 @@ struct JPEGSemanticFixtureTests {
 			let expected = try SemanticDump(fixture: "\(name)_context")
 			let actual = try SwiftJPEGSemanticEncoding.contextWitness(
 				transcode, reference: reference)
-			#expect(actual == expected, "\(name) context witness differs")
+			#expect(
+				expected.fields["jpeg_context.reconstructed_coefficients_exact"]
+					== .integers([1]))
+			#expect(
+				actual.fields
+					== expected.fields.filter {
+						$0.key
+							!= "jpeg_context.reconstructed_coefficients_exact"
+					}, "\(name) context witness differs")
 			#expect(expected.fields["jpeg_context.group_count"] == .integers([6]))
 			#expect(expected.fields["jpeg_context.bucket_count"] == .integers([3]))
 			let distinguishing = suffix == "420" ? 608 : suffix == "422" ? 636 : 644

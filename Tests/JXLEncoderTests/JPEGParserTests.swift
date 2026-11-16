@@ -11,27 +11,137 @@ import Testing
 @Suite("JPEGParser")
 struct JPEGParserTests {
 
-	@Test(
-		"DHT selectors, alphabets, counts and duplicate values obey the selected reader",
-		.disabled("Pending implementation"))
+	@Test("DHT selectors, limits and duplicate values are validated")
 	func dhtValidationMatchesSource() throws {
-		Issue.record("Implement bounded DHT validation cases")
+		let base = try Self.fixture("small_444")
+		for selector in [UInt8(0x00), 0x01, 0x02, 0x03, 0x10, 0x11, 0x12, 0x13] {
+			let definition = Self.dhtDefinition(
+				selector: selector, counts: [1], values: [0])
+			#expect(throws: Never.self) {
+				try JPEGParser.parse(
+					Self.withMarker(0xC4, payload: definition, in: base))
+			}
+		}
+		for selector in [UInt8(0x04), 0x0F, 0x14, 0x20, 0xFF] {
+			let result = Self.withMarker(0xC4, payload: [selector], in: base)
+			#expect(
+				throws: JPEGParseError.invalidHuffmanTable(
+					isAC: selector >> 4 == 1, index: Int(selector & 15))
+			) {
+				try JPEGParser.parse(result)
+			}
+		}
+		let maxDC = Self.dhtDefinition(
+			selector: 0x03, counts: [0, 0, 0, 11, 1], values: Array(0...11))
+		let maxAC = Self.dhtDefinition(
+			selector: 0x13, counts: [0, 0, 0, 0, 0, 0, 0, 0, 255, 1],
+			values: Array(0...255).map(UInt8.init))
+		#expect(throws: Never.self) {
+			try JPEGParser.parse(
+				Self.withMarker(0xC4, payload: maxDC + maxAC, in: base))
+		}
+		for (selector, values): (UInt8, [UInt8]) in [(0, [12])] {
+			let definition = Self.dhtDefinition(
+				selector: selector, counts: [UInt8(values.count)], values: values)
+			#expect(
+				throws: JPEGParseError.invalidHuffmanTable(
+					isAC: selector == 0x10, index: Int(selector & 15))
+			) {
+				try JPEGParser.parse(
+					Self.withMarker(0xC4, payload: definition, in: base))
+			}
+		}
+		let duplicateAC = Self.dhtDefinition(
+			selector: 0x10, counts: [1, 1], values: [7, 7])
+		#expect(
+			throws: JPEGParseError.invalidHuffmanTable(isAC: true, index: 0)
+		) {
+			try JPEGParser.parse(Self.withMarker(0xC4, payload: duplicateAC, in: base))
+		}
+		let tooManyDC = Self.dhtDefinition(selector: 0, counts: [13], values: Array(0...12))
+		#expect(throws: JPEGParseError.invalidHuffmanTable(isAC: false, index: 0)) {
+			try JPEGParser.parse(Self.withMarker(0xC4, payload: tooManyDC, in: base))
+		}
+		var overfullACCounts = [UInt8](repeating: 0, count: 16)
+		overfullACCounts[7] = 255
+		overfullACCounts[8] = 2
+		let tooManyAC = Self.dhtDefinition(
+			selector: 0x10, counts: overfullACCounts,
+			values: Array(0...255).map(UInt8.init) + [0])
+		#expect(throws: JPEGParseError.invalidHuffmanTable(isAC: true, index: 0)) {
+			try JPEGParser.parse(Self.withMarker(0xC4, payload: tooManyAC, in: base))
+		}
 	}
 
-	@Test(
-		"every DHT read stays inside its exact declared segment",
-		.disabled("Pending implementation"))
+	@Test("every DHT read stays inside its exact declared segment")
 	func dhtBoundsAreExact() throws {
-		Issue.record("Implement truncated header, counts and values cases")
+		let base = try Self.fixture("small_444")
+		for (payload, length) in [
+			([UInt8(0)], 3), ([UInt8(0)] + [UInt8](repeating: 0, count: 16), 10),
+			([UInt8(0)] + [1] + [UInt8](repeating: 0, count: 15) + [0], 19),
+		] {
+			let malformed = Self.withDHT(payload, declaredLength: length, in: base)
+			#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xC4)) {
+				try JPEGParser.parse(malformed)
+			}
+		}
 	}
 
-	@Test(
-		"empty DHT segments preserve tables and redefinitions replace all old entries",
-		.disabled("Pending implementation"))
+	@Test("empty DHT segments preserve tables and empty definitions replace them")
 	func dhtRedefinitionsReplaceTables() throws {
-		Issue.record(
-			"Implement empty segment, empty definition and dense-to-sparse replacement cases"
-		)
+		let base = try Self.fixture("small_444")
+		let baseline = try JPEGParser.parse(base)
+		let emptySegment = try JPEGParser.parse(
+			Self.withMarker(0xC4, payload: [], in: base))
+		#expect(emptySegment.components == baseline.components)
+		let zeroDC = Self.dhtDefinition(selector: 0, counts: [], values: [])
+		let replaced = Self.withDHTAfterExisting(zeroDC, in: base)
+		#expect(throws: JPEGParseError.invalidHuffmanCode) {
+			try JPEGParser.parse(replaced)
+		}
+		let dhtOffset = try #require(Self.segmentOffset(base, marker: 0xC4))
+		let dhtLength = Int(base[dhtOffset]) << 8 | Int(base[dhtOffset + 1])
+		let originalDefinitions = Array(base[(dhtOffset + 2)..<(dhtOffset + dhtLength)])
+		let restored = Self.withDHTAfterExisting(zeroDC + originalDefinitions, in: base)
+		#expect(throws: Never.self) { try JPEGParser.parse(restored) }
+		let sparse = Self.dhtDefinition(selector: 0, counts: [1, 1], values: [0, 1])
+		let short = Self.dhtDefinition(selector: 0, counts: [1], values: [0])
+		let denseToSparse = Self.withDHTAfterExisting(sparse, in: base)
+		let longToShort = Self.withDHTAfterExisting(
+			Self.dhtDefinition(
+				selector: 0, counts: [0, 0, 0, 0, 0, 0, 0, 0, 1], values: [0])
+				+ short,
+			in: base)
+		#expect(throws: JPEGParseError.invalidHuffmanCode) {
+			try JPEGParser.parse(denseToSparse)
+		}
+		#expect(throws: JPEGParseError.invalidHuffmanCode) {
+			try JPEGParser.parse(longToShort)
+		}
+	}
+
+	static func dhtDefinition(selector: UInt8, counts: [UInt8], values: [UInt8]) -> [UInt8] {
+		precondition(counts.count <= 16)
+		return [selector] + counts + [UInt8](repeating: 0, count: 16 - counts.count)
+			+ values
+	}
+
+	static func withDHT(_ payload: [UInt8], declaredLength: Int, in data: [UInt8]) -> [UInt8] {
+		let segment =
+			[
+				UInt8(0xFF), 0xC4, UInt8(declaredLength >> 8),
+				UInt8(declaredLength & 255),
+			] + payload
+		return Array(data.prefix(2)) + segment + Array(data.dropFirst(2))
+	}
+
+	static func withDHTAfterExisting(_ payload: [UInt8], in data: [UInt8]) -> [UInt8] {
+		guard let offset = segmentOffset(data, marker: 0xC4) else { return data }
+		let end = offset + (Int(data[offset]) << 8 | Int(data[offset + 1]))
+		let length = payload.count + 2
+		let segment: [UInt8] =
+			[0xFF, 0xC4, UInt8(length >> 8), UInt8(length & 255)] + payload
+		return Array(data[..<end]) + segment + Array(data[end...])
 	}
 
 	@Test(

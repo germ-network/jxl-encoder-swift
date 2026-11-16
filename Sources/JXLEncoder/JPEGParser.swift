@@ -397,10 +397,14 @@ private struct JPEGSegmentParser {
 		let end = try segmentEnd(marker: 0xC4)
 		while index < end {
 			let header = try byte()
-			let isAC = header >> 4 == 1
+			let tableClass = header >> 4
+			let isAC = tableClass == 1
 			let table = Int(header & 0x0F)
-			guard header >> 4 <= 1, table < 4 else {
+			guard tableClass <= 1, table < 4 else {
 				throw JPEGParseError.invalidHuffmanTable(isAC: isAC, index: table)
+			}
+			guard index + 16 <= end else {
+				throw JPEGParseError.invalidSegmentLength(marker: 0xC4)
 			}
 
 			var counts = [Int](repeating: 0, count: 16)
