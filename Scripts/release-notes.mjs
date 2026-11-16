@@ -4,6 +4,13 @@ import { pathToFileURL } from "node:url";
 
 export const DEFAULT_MAX = 120_000;
 
+function updateFence(fence, line) {
+  const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
+  if (!fence) return match ? { char: match[1][0], length: match[1].length } : null;
+  if (match && match[1][0] === fence.char && match[1].length >= fence.length && !match[2].trim()) return null;
+  return fence;
+}
+
 export function changelogSection(changelog, version) {
   if (typeof changelog !== "string" || typeof version !== "string" || !version.trim()) {
     throw new TypeError("A changelog and version are required");
@@ -47,18 +54,18 @@ export function releaseNotes(section, { tag, max = DEFAULT_MAX }) {
   const footer = `[Full changelog](https://github.com/germ-network/jxl-encoder-swift/blob/${encodeURIComponent(tag)}/CHANGELOG.md)`;
   if (!Number.isSafeInteger(max) || max <= footer.length + 4) throw new RangeError("Release notes budget is invalid or too small");
   const normalized = section.replace(/\r\n?/g, "\n").trim();
-  const complete = `${normalized}\n\n${footer}`;
+  const lines = normalized.split("\n");
+  let openFence = null;
+  for (const line of lines) openFence = updateFence(openFence, line);
+  const sectionClosure = openFence ? `\n${openFence.char.repeat(openFence.length)}` : "";
+  const complete = `${normalized}${sectionClosure}\n\n${footer}`;
   if (complete.length <= max) return complete;
 
   const notice = "[Release notes truncated; see the full changelog.]";
-  const lines = normalized.split("\n");
   let body = "";
   let fence = null;
   for (const line of lines) {
-    const match = line.match(/^ {0,3}(`{3,}|~{3,})(.*)$/);
-    const nextFence = fence
-      ? (match && match[1][0] === fence.char && match[1].length >= fence.length && !match[2].trim() ? null : fence)
-      : (match ? { char: match[1][0], length: match[1].length } : null);
+    const nextFence = updateFence(fence, line);
     const candidateBody = body ? `${body}\n${line}` : line;
     const closure = nextFence ? `\n${nextFence.char.repeat(nextFence.length)}\n\n` : "\n\n";
     const candidate = `${candidateBody}${closure}${notice}\n\n${footer}`;

@@ -47,12 +47,27 @@ test('omits an oversized first line rather than cutting it midline', () => {
 });
 
 test('closes an open backtick or tilde fence before the footer', () => {
+  const footer = "[Full changelog](https://github.com/germ-network/jxl-encoder-swift/blob/v1/CHANGELOG.md)";
   for (const fence of ["```js\n", "~~~js\n"]) {
     const result = releaseNotes(`${fence}${"body\n".repeat(100)}`, { tag: "v1", max: 240 });
     const footerAt = result.indexOf("Full changelog");
     const beforeFooter = result.slice(0, footerAt);
     assert.match(beforeFooter, /(?:```|~~~)\n\n\[Release notes truncated/);
     assert.ok(result.length <= 240);
+
+    const short = releaseNotes(`${fence}body`, { tag: "v1" });
+    const shortFooterAt = short.indexOf(footer);
+    assert.ok(short.slice(0, shortFooterAt).endsWith(`${fence[0].repeat(3)}\n\n`));
+    assert.ok(!short.includes("truncated"));
+    assert.ok(short.length < DEFAULT_MAX);
+
+    const longSection = `${fence}${"body line\n".repeat(30)}`;
+    const max = `${longSection.trim()}\n\n${footer}`.length;
+    const bounded = releaseNotes(longSection, { tag: "v1", max });
+    const noticeAt = bounded.indexOf("[Release notes truncated");
+    assert.ok(noticeAt >= 0);
+    assert.ok(bounded.slice(0, noticeAt).endsWith(`${fence[0].repeat(3)}\n\n`));
+    assert.ok(bounded.length <= max);
   }
 });
 
