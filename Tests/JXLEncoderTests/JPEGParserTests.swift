@@ -10,25 +10,82 @@ import Testing
 /// scan and the MCU layout at once.
 @Suite("JPEGParser")
 struct JPEGParserTests {
-	@Test(
-		"each selected component binds the quantizer active at its scan",
-		.disabled("Pending approved reader implementation"))
+	@Test("each selected component binds the quantizer active at its scan")
 	func quantizationTablesBindAtSelectedScan() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("scan_420_111_dqt_redefined")
+		let image = try JPEGParser.parse(data)
+		let reference = try JPEGCoefficientDump(fixture: "scan_420_111_dqt_canonical")
+		for (parsed, expected) in zip(image.components, reference.components) {
+			#expect(parsed.coefficients == expected.coefficients)
+			#expect(
+				image.quantTables[parsed.quantTableIndex]
+					== (try #require(
+						reference.quantTables[expected.quantTableIndex])))
+		}
+		#expect(image.components.map(\.quantTableIndex) == [4, 0, 0])
+
+		var delayed = try Self.fixture("scan_420_111")
+		let frame = try #require(Self.segmentOffset(delayed, marker: 0xC0)) + 2
+		delayed[frame + 8] = 3
+		let scans = Self.markerOffsets(0xDA, in: delayed)
+		delayed.insert(
+			contentsOf: Self.quantTableSegment(destination: 3, value: 11), at: scans[1])
+		let delayedImage = try JPEGParser.parse(delayed)
+		#expect(delayedImage.components[0].quantTableIndex == 3)
+		#expect(delayedImage.quantTables[3] == [UInt16](repeating: 11, count: 64))
+
+		var missing = try Self.fixture("scan_420_111")
+		let missingFrame = try #require(Self.segmentOffset(missing, marker: 0xC0)) + 2
+		missing[missingFrame + 8] = 3
+		let afterScans = Self.quantTableSegment(destination: 3, value: 11)
+		missing = Array(missing.dropLast(2)) + afterScans + Array(missing.suffix(2))
+		#expect(throws: JPEGParseError.undefinedQuantTable(index: 3)) {
+			try JPEGParser.parse(missing)
+		}
+
+		var repeated = try Self.fixture("small_444")
+		let repeatedSOS = try #require(Self.markerOffsets(0xDA, in: repeated).first)
+		let replacements = (5...10).flatMap {
+			Self.quantTableSegment(destination: 0, value: UInt8($0))
+		}
+		repeated.insert(contentsOf: replacements, at: repeatedSOS)
+		let repeatedImage = try JPEGParser.parse(repeated)
+		#expect(repeatedImage.quantTables[0] == [UInt16](repeating: 10, count: 64))
 	}
 
-	@Test(
-		"quantizer replacement preserves previously decoded component meaning",
-		.disabled("Pending approved reader implementation"))
+	@Test("quantizer replacement preserves previously decoded component meaning")
 	func quantizationRedefinitionsPreserveBoundValues() throws {
-		Issue.record("Pending behavioral assertions")
+		var data = try Self.fixture("scan_420_111")
+		let frame = try #require(Self.segmentOffset(data, marker: 0xC0)) + 2
+		for component in 0..<3 { data[frame + 6 + component * 3 + 2] = 0 }
+		let scans = Self.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: Self.quantTableSegment(destination: 0, value: 7), at: scans[1])
+		let afterFirstReplacement = Self.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: Self.quantTableSegment(destination: 0, value: 9),
+			at: afterFirstReplacement[2])
+		let afterLastScan = Self.quantTableSegment(destination: 0, value: 11)
+		data = Array(data.dropLast(2)) + afterLastScan + Array(data.suffix(2))
+		let image = try JPEGParser.parse(data)
+		#expect(image.components.map(\.quantTableIndex) == [4, 5, 0])
+		#expect(image.quantTables[0] != image.quantTables[4])
+		#expect(image.quantTables[4] == [UInt16](repeating: 7, count: 64))
+		#expect(image.quantTables[5] == [UInt16](repeating: 9, count: 64))
 	}
 
-	@Test(
-		"scan-bound quantizers preserve sparse destination compatibility",
-		.disabled("Pending approved reader implementation"))
+	@Test("scan-bound quantizers preserve sparse destination compatibility")
 	func quantizationBindingsPreserveSparseDestinations() throws {
-		Issue.record("Pending behavioral assertions")
+		var data = try Self.fixture("small_444")
+		let frame = try #require(Self.segmentOffset(data, marker: 0xC0)) + 2
+		let dqt = try #require(Self.segmentOffset(data, marker: 0xDB)) + 2
+		data[frame + 8] = 3
+		data[dqt] = (data[dqt] & 0xF0) | 3
+		let image = try JPEGParser.parse(data)
+		#expect(image.components.map(\.quantTableIndex) == [3, 1, 1])
+		#expect(image.quantTables.count == 4)
+		#expect(image.quantTables[0].isEmpty)
+		#expect(!image.quantTables[3].isEmpty)
 	}
 
 	@Test("selected marker parsing reaches a required EOI")
@@ -202,11 +259,21 @@ struct JPEGParserTests {
 		let firstScan = try #require(Self.markerOffsets(0xDA, in: data).first)
 		let nextTable = try #require(
 			Self.markerOffsets(0xC4, in: data).first(where: { $0 > firstScan }))
-		let partial = Array(data[..<nextTable]) + [0xFF, 0xD9]
+		var partial = Array(data[..<nextTable]) + [0xFF, 0xD9]
+		partial[Self.frameComponentQuantOffset(partial, component: 2)!] = 0
 		let image = try JPEGParser.parse(partial)
 		#expect(image.components[0].coefficients.allSatisfy { $0 == 0 })
 		#expect(image.components[1].coefficients.allSatisfy { $0 == 0 })
 		#expect(image.components[2].coefficients.contains { $0 != 0 })
+		var lateTable = Array(partial.dropLast(2))
+		lateTable += Self.quantTableSegment(destination: 0, value: 13)
+		lateTable += [0xFF, 0xD9]
+		let finalized = try JPEGParser.parse(lateTable)
+		#expect(finalized.components[0].quantTableIndex == 4)
+		#expect(finalized.components[2].quantTableIndex == 0)
+		#expect(finalized.components[0].coefficients.allSatisfy { $0 == 0 })
+		#expect(finalized.quantTables[0] != finalized.quantTables[4])
+		#expect(finalized.quantTables[4] == [UInt16](repeating: 13, count: 64))
 	}
 
 	@Test("later scan bytes cannot satisfy an earlier scan's entropy floor")
@@ -570,6 +637,15 @@ struct JPEGParserTests {
 
 	static func withMarker(_ marker: UInt8, payload: [UInt8], in data: [UInt8]) -> [UInt8] {
 		withMarkers([(marker, payload)], in: data)
+	}
+
+	static func quantTableSegment(destination: UInt8, value: UInt8) -> [UInt8] {
+		[0xFF, 0xDB, 0, 67, destination]
+			+ [UInt8](repeating: value, count: 64)
+	}
+
+	static func frameComponentQuantOffset(_ data: [UInt8], component: Int) -> Int? {
+		segmentOffset(data, marker: 0xC0).map { $0 + 2 + 6 + component * 3 + 2 }
 	}
 
 	static func withMarkers(_ markers: [(UInt8, [UInt8])], in data: [UInt8]) -> [UInt8] {

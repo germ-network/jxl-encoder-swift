@@ -171,14 +171,15 @@ private struct JPEGSegmentParser {
 	let data: [UInt8]
 	let maxCoefficientBytes: Int
 	var index = 0
-	var quantTables = [[UInt16]?](repeating: nil, count: 4)
+	var activeQuantTables = [[UInt16]?](repeating: nil, count: 4)
+	var boundQuantTables = [[UInt16]?](repeating: nil, count: 4)
+	var boundQuantTableIndices: [Int?] = []
 	var dcTables = [JPEGHuffmanTable?](repeating: nil, count: 4)
 	var acTables = [JPEGHuffmanTable?](repeating: nil, count: 4)
 	var restartInterval = 0
 	var hasRestartInterval = false
 	var frame: JPEGFrame?
 	var planes: [[Int32]]?
-	var scannedComponents = Set<Int>()
 	var hasAPP0 = false
 	var adobeTransform: UInt8?
 	var hasICCProfileTag = false
@@ -231,20 +232,29 @@ private struct JPEGSegmentParser {
 		}
 
 		guard let frame else { throw JPEGParseError.missingFrameHeader }
-		guard let planes, !scannedComponents.isEmpty else {
+		guard let planes, boundQuantTableIndices.contains(where: { $0 != nil }) else {
 			throw JPEGParseError.missingScan
+		}
+		for componentIndex in frame.components.indices
+		where boundQuantTableIndices[componentIndex] == nil {
+			try bindQuantTable(for: componentIndex, frame: frame)
 		}
 		let components = frame.components.enumerated().map { c, component in
 			JPEGComponent(
 				identifier: component.identifier,
 				horizontalSampling: component.horizontalSampling,
 				verticalSampling: component.verticalSampling,
-				quantTableIndex: component.quantTableIndex,
+				quantTableIndex: boundQuantTableIndices[c]!,
 				blocksPerLine: frame.mcusPerLine * component.horizontalSampling,
 				blocksPerColumn: frame.mcusPerColumn * component.verticalSampling,
 				coefficients: planes[c])
 		}
-		let highestTable = quantTables.lastIndex(where: { $0 != nil }).map { $0 + 1 } ?? 0
+		for tableIndex in activeQuantTables.indices
+		where boundQuantTables[tableIndex] == nil {
+			boundQuantTables[tableIndex] = activeQuantTables[tableIndex]
+		}
+		let highestTable =
+			boundQuantTables.lastIndex(where: { $0 != nil }).map { $0 + 1 } ?? 0
 		let sourceIsRGB: Bool
 		if components.count == 1 || hasAPP0 {
 			sourceIsRGB = false
@@ -257,7 +267,7 @@ private struct JPEGSegmentParser {
 			width: frame.width,
 			height: frame.height,
 			components: components,
-			quantTables: (0..<highestTable).map { quantTables[$0] ?? [] },
+			quantTables: (0..<highestTable).map { boundQuantTables[$0] ?? [] },
 			restartInterval: restartInterval)
 		image.hasSupportedColorInterpretation = !sourceIsRGB && !hasICCProfileTag
 		return image
@@ -412,6 +422,7 @@ private struct JPEGSegmentParser {
 			maxVertical: maxVertical,
 			mcusPerLine: ceilDiv(width, 8 * maxHorizontal),
 			mcusPerColumn: ceilDiv(height, 8 * maxVertical))
+		boundQuantTableIndices = [Int?](repeating: nil, count: count)
 	}
 
 	private mutating func readQuantTables() throws {
@@ -440,7 +451,7 @@ private struct JPEGSegmentParser {
 				}
 				values[JPEGParser.zigzag[k]] = value
 			}
-			quantTables[table] = values
+			activeQuantTables[table] = values
 		}
 		guard index == end else {
 			throw JPEGParseError.invalidSegmentLength(marker: 0xDB)
@@ -566,19 +577,33 @@ private struct JPEGSegmentParser {
 			dc.append(table)
 			ac.append(acTable)
 		}
-		for componentIndex in order
-		where quantTables[frame.components[componentIndex].quantTableIndex] == nil {
-			let component = frame.components[componentIndex]
-			throw JPEGParseError.undefinedQuantTable(index: component.quantTableIndex)
-		}
-		guard order.allSatisfy({ !scannedComponents.contains($0) }) else {
+		guard order.allSatisfy({ boundQuantTableIndices[$0] == nil }) else {
 			throw JPEGParseError.multipleScansNotSupported
+		}
+		for componentIndex in order {
+			try bindQuantTable(for: componentIndex, frame: frame)
 		}
 		let entropy = scanEntropyBounds(from: index)
 		try decodeScan(
 			frame: frame, order: order, dcTables: dc, acTables: ac,
 			entropyByteCount: entropy.byteCount, scanEnd: entropy.end)
-		scannedComponents.formUnion(order)
+	}
+
+	private mutating func bindQuantTable(for componentIndex: Int, frame: JPEGFrame) throws {
+		let destination = frame.components[componentIndex].quantTableIndex
+		guard let values = activeQuantTables[destination] else {
+			throw JPEGParseError.undefinedQuantTable(index: destination)
+		}
+		if boundQuantTables[destination] == nil {
+			boundQuantTables[destination] = values
+			boundQuantTableIndices[componentIndex] = destination
+		} else if boundQuantTables[destination] == values {
+			boundQuantTableIndices[componentIndex] = destination
+		} else {
+			let newIndex = boundQuantTables.count
+			boundQuantTables.append(values)
+			boundQuantTableIndices[componentIndex] = newIndex
+		}
 	}
 
 	private func scanEntropyBounds(from start: Int) -> (end: Int, byteCount: Int) {

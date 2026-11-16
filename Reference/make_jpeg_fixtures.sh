@@ -110,6 +110,96 @@ cjpeg -quality 85 -sample 2x2 -scans "$WORK/scans_111.txt" -outfile "$CORE/scan_
 cjpeg -quality 85 -sample 2x2 -restart 1B -scans "$WORK/scans_111.txt" -outfile "$CORE/scan_420_111_restart.jpg" "$WORK/odd_420.ppm"
 cjpeg -quality 85 -sample 2x1 -scans "$WORK/scans_21.txt" -outfile "$CORE/scan_422_21.jpg" "$WORK/odd.ppm"
 cjpeg -quality 85 -sample 1x2 -scans "$WORK/scans_12.txt" -outfile "$CORE/scan_440_12.jpg" "$WORK/odd.ppm"
+# Build a T.81 table-replacement source and an equivalent stable-destination
+# JPEG. The entropy and component coefficients are identical in both files.
+python3 - "$CORE/scan_420_111.jpg" "$CORE/scan_420_111_dqt_redefined.jpg" <<'PY'
+import sys
+
+source = bytearray(open(sys.argv[1], "rb").read())
+
+def sos_positions(data):
+    positions = []
+    pos = 2
+    while pos + 3 < len(data):
+        if data[pos] != 0xFF:
+            raise ValueError("expected marker")
+        start = pos
+        while data[pos] == 0xFF:
+            pos += 1
+        marker = data[pos]
+        pos += 1
+        if marker == 0xD9:
+            break
+        if marker == 0xDA:
+            positions.append(start)
+        length = (data[pos] << 8) | data[pos + 1]
+        pos += length
+        if marker != 0xDA:
+            continue
+        while pos + 1 < len(data):
+            if data[pos] != 0xFF:
+                pos += 1
+                continue
+            code = data[pos + 1]
+            if code == 0 or 0xD0 <= code <= 0xD7:
+                pos += 2
+                continue
+            break
+    return positions
+
+first_sos = sos_positions(source)[0]
+tables = {}
+pos = 2
+while pos < first_sos:
+    marker = source[pos + 1]
+    length = (source[pos + 2] << 8) | source[pos + 3]
+    end = pos + 2 + length
+    if marker == 0xDB:
+        cursor = pos + 4
+        while cursor < end:
+            header = source[cursor]
+            cursor += 1
+            precision, destination = header >> 4, header & 15
+            size = 64 * (precision + 1)
+            tables[destination] = bytes([header]) + bytes(source[cursor:cursor + size])
+            cursor += size
+    pos = end
+if 0 not in tables or 1 not in tables:
+    raise ValueError("expected luma and chroma DQT destinations")
+
+def dqt(destination, definition):
+    payload = bytes([(definition[0] & 0xF0) | destination]) + definition[1:]
+    return bytes([0xFF, 0xDB, 0, len(payload) + 2]) + payload
+
+# Remove initial definitions and make all components refer to one destination.
+prefix = bytearray(source[:first_sos])
+filtered = bytearray(prefix[:2])
+pos = 2
+while pos < len(prefix):
+    length = (prefix[pos + 2] << 8) | prefix[pos + 3]
+    end = pos + 2 + length
+    if prefix[pos + 1] != 0xDB:
+        filtered.extend(prefix[pos:end])
+    pos = end
+source = filtered + source[first_sos:]
+frame = next(i for i in range(2, len(source) - 1) if source[i] == 0xFF and source[i + 1] in (0xC0, 0xC1))
+frame_payload = frame + 4
+component_count = source[frame_payload + 5]
+for component in range(component_count):
+    source[frame_payload + 6 + component * 3 + 2] = 0
+
+scans = sos_positions(source)
+if len(scans) != 3:
+    raise ValueError("expected three sequential scans")
+insertions = [
+    (scans[0], dqt(0, tables[1])),
+    (scans[1], dqt(0, tables[0])),
+    (scans[2], dqt(0, tables[1])),
+]
+for offset, segment in reversed(insertions):
+    source[offset:offset] = segment
+open(sys.argv[2], "wb").write(source)
+PY
 # Quality 2 pushes the quantization tables past 255, which forces 16-bit DQT
 # entries and, with them, an extended-sequential SOF1 frame.
 cjpeg -quality 2 -sample 2x2 -outfile "$CORE/hopper_420_sof1.jpg" "$WORK/full.ppm"
@@ -122,6 +212,21 @@ for name in small_444 small_422 small_440 small_411 hopper_420_odd hopper_gray_o
 	scan_420_111 scan_420_111_restart scan_422_21 scan_440_12; do
 	"$OUT/dump_jpeg_coefficients" "$CORE/$name.jpg" "$CORE/$name.coef"
 done
+cp "$CORE/scan_420_111.jpg" "$CORE/scan_420_111_dqt_canonical.jpg"
+python3 - "$CORE/scan_420_111_dqt_canonical.jpg" <<'PY'
+import sys
+path = sys.argv[1]
+data = bytearray(open(path, "rb").read())
+pos = next(i for i in range(2, len(data) - 1) if data[i] == 0xFF and data[i + 1] in (0xC0, 0xC1))
+payload = pos + 4
+for component, destination in enumerate((0, 1, 1)):
+    data[payload + 6 + component * 3 + 2] = destination
+open(path, "wb").write(data)
+PY
+"$OUT/dump_jpeg_coefficients" "$CORE/scan_420_111_dqt_canonical.jpg" "$CORE/scan_420_111_dqt_canonical.coef"
+djpeg -ppm -outfile "$WORK/dqt-original.ppm" "$CORE/scan_420_111_dqt_redefined.jpg"
+djpeg -ppm -outfile "$WORK/dqt-canonical.ppm" "$CORE/scan_420_111_dqt_canonical.jpg"
+cmp "$WORK/dqt-original.ppm" "$WORK/dqt-canonical.ppm"
 
 cp "$CORE/rgb_color.jpg" "$APPLE/rgb_color.jpg"
 cp "$CORE/display_p3_profile.jpg" "$APPLE/display_p3_profile.jpg"
@@ -137,5 +242,7 @@ cp "$CORE/hopper_420_restart.jpg" "$CORE/hopper_420_odd.jpg" \
 	"$CORE/scan_420_111.jpg" "$CORE/scan_420_111_restart.jpg" \
 	"$CORE/scan_422_21.jpg" "$CORE/scan_440_12.jpg" \
 	"$APPLE/"
+cp "$CORE/scan_420_111_dqt_redefined.jpg" "$APPLE/"
+cp "$CORE/scan_420_111_dqt_canonical.jpg" "$APPLE/"
 
 echo "fixtures regenerated"

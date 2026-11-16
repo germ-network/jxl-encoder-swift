@@ -11,9 +11,12 @@
 			.enabled(if: harness != nil))
 		func readerSerializationPreservesSourceCoefficients() throws {
 			guard let harness = Self.harness else { return }
-			for name in [
-				"scan_420_111", "scan_420_111_restart", "scan_422_21",
-				"scan_440_12",
+			for (name, expected) in [
+				("scan_420_111", "scan_420_111"),
+				("scan_420_111_restart", "scan_420_111_restart"),
+				("scan_422_21", "scan_422_21"),
+				("scan_440_12", "scan_440_12"),
+				("scan_420_111_dqt_redefined", "scan_420_111_dqt_canonical"),
 			] {
 				let source = try JPEGParserTests.fixture(name)
 				let transcode = try JPEGTranscode(JPEGParser.parse(source))
@@ -22,14 +25,16 @@
 				try FileManager.default.createDirectory(
 					at: directory, withIntermediateDirectories: true)
 				defer { try? FileManager.default.removeItem(at: directory) }
-				let sourceURL = directory.appendingPathComponent("source.jpg")
+				let expectedURL = directory.appendingPathComponent("expected.jpg")
 				let codestreamURL = directory.appendingPathComponent("encoded.jxl")
-				try Data(source).write(to: sourceURL)
+				try Data(JPEGParserTests.fixture(expected)).write(to: expectedURL)
 				try Data(Encoder.encodeJPEG(transcode)).write(to: codestreamURL)
 				let process = Process()
 				process.executableURL = URL(fileURLWithPath: harness)
 				process.arguments = [
-					"jpeg-witness", sourceURL.path, codestreamURL.path,
+					"jpeg-witness",
+					expectedURL.path,
+					codestreamURL.path,
 				]
 				let output = Pipe()
 				let errors = Pipe()

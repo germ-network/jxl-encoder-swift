@@ -8,11 +8,26 @@ import Testing
 /// as swapped colours or a transposed image rather than as a coding error.
 @Suite("JPEG transcode layout")
 struct JPEGTranscodeTests {
-	@Test(
-		"channel quantization views consume immutable component-bound values",
-		.disabled("Pending approved reader implementation"))
+	@Test("channel quantization views consume immutable component-bound values")
 	func quantizationViewsUseBoundTables() throws {
-		Issue.record("Pending behavioral assertions")
+		var data = try JPEGParserTests.fixture("scan_420_111")
+		let frame = try #require(JPEGParserTests.segmentOffset(data, marker: 0xC0)) + 2
+		for component in 0..<3 { data[frame + 6 + component * 3 + 2] = 0 }
+		let scans = JPEGParserTests.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: JPEGParserTests.quantTableSegment(destination: 0, value: 7),
+			at: scans[1])
+		let nextScans = JPEGParserTests.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: JPEGParserTests.quantTableSegment(destination: 0, value: 9),
+			at: nextScans[2])
+		let transcode = try JPEGTranscode(JPEGParser.parse(data))
+		#expect(transcode.component(0).quantTableIndex == 5)
+		#expect(transcode.component(1).quantTableIndex == 4)
+		#expect(transcode.component(2).quantTableIndex == 0)
+		#expect(transcode.quantTable(channel: 0) == [UInt16](repeating: 9, count: 64))
+		#expect(transcode.quantTable(channel: 1) == [UInt16](repeating: 7, count: 64))
+		#expect(transcode.dcQuantization(channel: 0) == Float(255 * 8) / 9)
 	}
 
 	@Test(
