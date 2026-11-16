@@ -176,6 +176,7 @@ private struct JPEGSegmentParser {
 	var dcTables = [JPEGHuffmanTable?](repeating: nil, count: 4)
 	var acTables = [JPEGHuffmanTable?](repeating: nil, count: 4)
 	var restartInterval = 0
+	var hasRestartInterval = false
 	var frame: JPEGFrame?
 	var components: [JPEGComponent]?
 	var hasAPP0 = false
@@ -190,12 +191,7 @@ private struct JPEGSegmentParser {
 
 		loop: while true {
 			guard let marker = nextMarker() else {
-				// A file that stops right after its last MCU, with no EOI, is
-				// still fully decodable.
-				guard components != nil else {
-					throw JPEGParseError.unexpectedEndOfData
-				}
-				break loop
+				throw JPEGParseError.unexpectedEndOfData
 			}
 			switch marker {
 			case 0xC0, 0xC1:
@@ -223,7 +219,7 @@ private struct JPEGSegmentParser {
 				components = try readScan()
 			case 0xD9:
 				break loop
-			case 0x01, 0xD0...0xD7:
+			case 0xD0...0xD7:
 				continue  // standalone markers, no payload
 			case 0xE0:
 				hasAPP0 = true
@@ -271,14 +267,33 @@ private struct JPEGSegmentParser {
 		return Int(high) << 8 | Int(try byte())
 	}
 
-	/// Advances to the next marker, skipping any `FF` fill bytes and any stray
-	/// bytes between segments. Returns nil at the end of the input.
+	/// Advances to a recognized marker, skipping fill and inter-marker bytes.
 	private mutating func nextMarker() -> UInt8? {
-		while index < data.count, data[index] != 0xFF { index += 1 }
-		while index < data.count, data[index] == 0xFF { index += 1 }
-		guard index < data.count else { return nil }
-		defer { index += 1 }
-		return data[index]
+		while index + 1 < data.count {
+			guard data[index] == 0xFF else {
+				index += 1
+				continue
+			}
+			let marker = data[index + 1]
+			guard Self.isMarker(marker) else {
+				index += 1
+				continue
+			}
+			index += 2
+			return marker
+		}
+		index = data.count
+		return nil
+	}
+
+	private static func isMarker(_ marker: UInt8) -> Bool {
+		switch marker {
+		case 0xC0...0xCF, 0xD0...0xD7, 0xD9...0xDB, 0xDD...0xDF,
+			0xE0...0xEF, 0xFE:
+			true
+		default:
+			false
+		}
 	}
 
 	/// Segment length covers itself, so the payload is `length - 2` bytes.
@@ -322,6 +337,9 @@ private struct JPEGSegmentParser {
 	private mutating func readFrameHeader(marker: UInt8) throws {
 		guard frame == nil else { throw JPEGParseError.multipleFramesNotSupported }
 		let end = try segmentEnd(marker: marker)
+		guard end - index >= 6 else {
+			throw JPEGParseError.invalidSegmentLength(marker: marker)
+		}
 
 		let precision = Int(try byte())
 		guard precision == 8 else {
@@ -341,8 +359,13 @@ private struct JPEGSegmentParser {
 		}
 
 		var components: [JPEGFrame.Component] = []
+		var identifiers = Set<UInt8>()
 		for _ in 0..<count {
 			let identifier = try byte()
+			guard identifiers.insert(identifier).inserted else {
+				throw JPEGParseError.duplicateComponentIdentifier(
+					identifier: identifier)
+			}
 			let sampling = try byte()
 			let horizontal = Int(sampling >> 4)
 			let vertical = Int(sampling & 0x0F)
@@ -363,6 +386,15 @@ private struct JPEGSegmentParser {
 
 		let maxHorizontal = components.reduce(1) { max($0, $1.horizontalSampling) }
 		let maxVertical = components.reduce(1) { max($0, $1.verticalSampling) }
+		guard
+			components.allSatisfy({
+				maxHorizontal.isMultiple(of: $0.horizontalSampling)
+					&& maxVertical.isMultiple(of: $0.verticalSampling)
+			})
+		else {
+			throw JPEGParseError.unsupportedSamplingFactors(
+				horizontal: maxHorizontal, vertical: maxVertical)
+		}
 		frame = JPEGFrame(
 			width: width,
 			height: height,
@@ -375,12 +407,19 @@ private struct JPEGSegmentParser {
 
 	private mutating func readQuantTables() throws {
 		let end = try segmentEnd(marker: 0xDB)
+		guard index < end else {
+			throw JPEGParseError.invalidSegmentLength(marker: 0xDB)
+		}
 		while index < end {
 			let header = try byte()
 			let precision = Int(header >> 4)
 			let table = Int(header & 0x0F)
 			guard table < 4, precision <= 1 else {
 				throw JPEGParseError.invalidQuantTable(index: table)
+			}
+			let tableBytes = 64 * (precision + 1)
+			guard index + tableBytes <= end else {
+				throw JPEGParseError.invalidSegmentLength(marker: 0xDB)
 			}
 			var values = [UInt16](repeating: 0, count: 64)
 			for k in 0..<64 {
@@ -445,11 +484,15 @@ private struct JPEGSegmentParser {
 	}
 
 	private mutating func readRestartInterval() throws {
+		guard !hasRestartInterval else {
+			throw JPEGParseError.duplicateRestartInterval
+		}
 		let end = try segmentEnd(marker: 0xDD)
-		restartInterval = try uint16()
-		guard index == end else {
+		guard end - index == 2 else {
 			throw JPEGParseError.invalidSegmentLength(marker: 0xDD)
 		}
+		restartInterval = try uint16()
+		hasRestartInterval = true
 	}
 
 	// MARK: - Scan
@@ -457,6 +500,9 @@ private struct JPEGSegmentParser {
 	private mutating func readScan() throws -> [JPEGComponent] {
 		guard let frame else { throw JPEGParseError.missingFrameHeader }
 		let end = try segmentEnd(marker: 0xDA)
+		guard index < end else {
+			throw JPEGParseError.invalidSegmentLength(marker: 0xDA)
+		}
 
 		let count = Int(try byte())
 		// The scan has to cover the whole frame. Sequential JPEG may split a
@@ -465,11 +511,19 @@ private struct JPEGSegmentParser {
 		guard count == frame.components.count else {
 			throw JPEGParseError.multipleScansNotSupported
 		}
+		guard end == index + count * 2 + 3 else {
+			throw JPEGParseError.invalidSegmentLength(marker: 0xDA)
+		}
 		var dcSelectors = [Int](repeating: 0, count: count)
 		var acSelectors = [Int](repeating: 0, count: count)
 		var order: [Int] = []
+		var identifiers = Set<UInt8>()
 		for i in 0..<count {
 			let identifier = try byte()
+			guard identifiers.insert(identifier).inserted else {
+				throw JPEGParseError.duplicateComponentIdentifier(
+					identifier: identifier)
+			}
 			guard
 				let component = frame.components.firstIndex(where: {
 					$0.identifier == identifier

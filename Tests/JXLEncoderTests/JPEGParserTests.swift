@@ -31,39 +31,116 @@ struct JPEGParserTests {
 		Issue.record("Pending behavioral assertions")
 	}
 
-	@Test(
-		"selected marker parsing reaches a required EOI",
-		.disabled("Pending approved reader implementation"))
+	@Test("selected marker parsing reaches a required EOI")
 	func markerDispatchRequiresEOI() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("small_444")
+		let baseline = try JPEGParser.parse(data)
+		#expect(throws: Never.self) { try JPEGParser.parse(data) }
+		let interMarkerData =
+			Array(data.prefix(2))
+			+ [
+				0xFF, 0x00, 0xFF, 0x01, 0xFF, 0xD8, 0xFF, 0xDC, 0, 2,
+				0xFF, 0xF0, 0, 2, 0xFF, 0x02, 0xFF, 0xFF,
+			]
+			+ Array(data.dropFirst(2))
+		let interMarkerImage = try JPEGParser.parse(interMarkerData)
+		#expect(interMarkerImage.components == baseline.components)
+		#expect(interMarkerImage.quantTables == baseline.quantTables)
+		#expect(throws: JPEGParseError.unexpectedEndOfData) {
+			try JPEGParser.parse(Array(data.dropLast(2)) + [0, 0])
+		}
+		#expect(
+			throws: JPEGParseError.unsupportedFrameType(marker: 0xDE)
+		) {
+			try JPEGParser.parse(Self.withMarker(0xDE, payload: [], in: data))
+		}
 	}
 
-	@Test(
-		"segment fields stay inside their declared payloads",
-		.disabled("Pending approved reader implementation"))
+	@Test("segment fields stay inside their declared payloads")
 	func segmentReadsRespectDeclaredBounds() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("small_444")
+		for (marker, length): (UInt8, Int) in [(0xC0, 8), (0xDA, 6)] {
+			var malformed = data
+			let offset = try #require(Self.segmentOffset(malformed, marker: marker))
+			malformed[offset] = UInt8(length >> 8)
+			malformed[offset + 1] = UInt8(length & 255)
+			#expect(throws: JPEGParseError.invalidSegmentLength(marker: marker)) {
+				try JPEGParser.parse(malformed)
+			}
+		}
+		let shortSOF: [UInt8] = [0xFF, 0xD8, 0xFF, 0xC0, 0, 2, 0xFF, 0xD9]
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xC0)) {
+			try JPEGParser.parse(shortSOF)
+		}
+		let scanOffset = try #require(Self.segmentOffset(data, marker: 0xDA))
+		let shortSOS =
+			Array(data.prefix(scanOffset - 2)) + [
+				0xFF, 0xDA, 0, 2, 0xFF, 0xD9,
+			]
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDA)) {
+			try JPEGParser.parse(shortSOS)
+		}
+		var malformedDRI = Self.withMarker(0xDD, payload: [0, 1], in: data)
+		let driOffset = try #require(Self.segmentOffset(malformedDRI, marker: 0xDD))
+		malformedDRI[driOffset] = 0
+		malformedDRI[driOffset + 1] = 3
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDD)) {
+			try JPEGParser.parse(malformedDRI)
+		}
+		let emptyDQT = Self.withMarker(0xDB, payload: [], in: data)
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDB)) {
+			try JPEGParser.parse(emptyDQT)
+		}
+		var truncatedDQT = Self.withMarker(0xDB, payload: [0], in: data)
+		let offset = try #require(Self.segmentOffset(truncatedDQT, marker: 0xDB))
+		truncatedDQT[offset] = 0
+		truncatedDQT[offset + 1] = 3
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDB)) {
+			try JPEGParser.parse(truncatedDQT)
+		}
 	}
 
-	@Test(
-		"frame and scan component identifiers are unique",
-		.disabled("Pending approved reader implementation"))
+	@Test("frame and scan component identifiers are unique")
 	func componentIdentifiersAreUnique() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("small_444")
+		let repeatedFrameID = Self.withFrameComponentIDs([1, 1, 3], in: data)
+		#expect(throws: JPEGParseError.duplicateComponentIdentifier(identifier: 1)) {
+			try JPEGParser.parse(repeatedFrameID)
+		}
+		let repeatedScanID = Self.withScanComponentIDs([1, 1, 3], in: data)
+		#expect(throws: JPEGParseError.duplicateComponentIdentifier(identifier: 1)) {
+			try JPEGParser.parse(repeatedScanID)
+		}
 	}
 
-	@Test(
-		"frame sampling ratios are integral",
-		.disabled("Pending approved reader implementation"))
+	@Test("frame sampling ratios are integral")
 	func frameSamplingRatiosAreIntegral() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("small_444")
+		#expect(throws: Never.self) { try JPEGParser.parse(data) }
+		var malformed = data
+		let offset = try #require(Self.segmentOffset(malformed, marker: 0xC0))
+		let payload = offset + 2
+		malformed[payload + 7] = 0x32
+		malformed[payload + 10] = 0x22
+		#expect(
+			throws: JPEGParseError.unsupportedSamplingFactors(
+				horizontal: 3, vertical: 2)
+		) {
+			try JPEGParser.parse(malformed)
+		}
 	}
 
-	@Test(
-		"a second restart interval definition is rejected",
-		.disabled("Pending approved reader implementation"))
+	@Test("a second restart interval definition is rejected")
 	func duplicateRestartIntervalIsRejected() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("small_444")
+		#expect(throws: Never.self) {
+			try JPEGParser.parse(Self.withMarker(0xDD, payload: [0, 0], in: data))
+		}
+		let duplicated = Self.withMarkers(
+			[(0xDD, [0, 0]), (0xDD, [0, 0])], in: data)
+		#expect(throws: JPEGParseError.duplicateRestartInterval) {
+			try JPEGParser.parse(duplicated)
+		}
 	}
 
 	@Test(
@@ -398,6 +475,26 @@ struct JPEGParserTests {
 		for (index, id) in ids.enumerated() {
 			result[scanPayload + 1 + index * 2] = id
 		}
+		return result
+	}
+
+	static func withFrameComponentIDs(_ ids: [UInt8], in data: [UInt8]) -> [UInt8] {
+		var result = data
+		guard ids.count == 3, let offset = segmentOffset(result, marker: 0xC0) else {
+			return result
+		}
+		let payload = offset + 2
+		for (index, id) in ids.enumerated() { result[payload + 6 + index * 3] = id }
+		return result
+	}
+
+	static func withScanComponentIDs(_ ids: [UInt8], in data: [UInt8]) -> [UInt8] {
+		var result = data
+		guard ids.count == 3, let offset = segmentOffset(result, marker: 0xDA) else {
+			return result
+		}
+		let payload = offset + 2
+		for (index, id) in ids.enumerated() { result[payload + 1 + index * 2] = id }
 		return result
 	}
 
