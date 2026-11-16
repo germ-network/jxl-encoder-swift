@@ -110,15 +110,35 @@ enum SwiftSemanticEncoding {
 				$0, order: order.orders, mode: .staging(acCode),
 				blockContextMap: blockContextMap)
 		}
-		Encoder.assemble(outputs: outputs, dim: dim, sections: &sections)
-		dcCode = SectionOptimizer.optimize(
-			sections: &sections, range: 1..<(1 + dim.dcGroupCount), baseCode: dcCode)
+		let dcData = try Encoder.assemble(
+			outputs: outputs, dim: dim, params: params,
+			optimizeCodes: true, sections: &sections)
+		let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
+		let streams = try dcData.enumerated().map {
+			try DCGroupEncoder.tokenStreams(
+				data: $0.element, groupIndex: $0.offset, tree: tree)
+		}
+		let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+		dcCode = SectionOptimizer.modularCode(
+			tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+			extraDCPrecision: 1)
+		let treeCode = SectionOptimizer.modularCode(
+			tokenStreams: [tree.tokens],
+			contextCount: ContextTree.treeContextCount, extraDCPrecision: 1)
+		for index in dcData.indices {
+			var section = BitWriter()
+			try DCGroupEncoder.write(
+				data: dcData[index], streams: streams[index],
+				code: dcCode, writer: &section)
+			sections[1 + index] = SectionWriter(prewritten: section)
+		}
 		acCode = SectionOptimizer.optimize(
 			sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
 		altering.acCode(&acCode)
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+			modularTree: (tree: tree, code: treeCode),
 			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 		var acGlobal = BitWriter()

@@ -339,8 +339,17 @@ enum PrefixCodeWriter {
 	/// Writes a set of prefix codes: the hybrid-uint configuration for each,
 	/// then their alphabet sizes, then the codes themselves. The caller
 	/// writes `use_prefix_code` — this only ever runs for the prefix path.
-	static func writePrefixCodes(_ codes: [PrefixCode], writer: inout BitWriter) {
-		writeUintConfigs(count: codes.count, logAlphaSize: prefixMaxBits, writer: &writer)
+	static func writePrefixCodes(
+		_ codes: [PrefixCode], uintConfigurations: [HybridUintConfiguration]? = nil,
+		writer: inout BitWriter
+	) {
+		if let uintConfigurations {
+			writeUintConfigs(
+				uintConfigurations, logAlphaSize: prefixMaxBits, writer: &writer)
+		} else {
+			writeUintConfigs(
+				count: codes.count, logAlphaSize: prefixMaxBits, writer: &writer)
+		}
 		func symbolCount(_ code: PrefixCode) -> Int {
 			var count = 1
 			for i in code.depths.indices where code.depths[i] != 0 {

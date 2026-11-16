@@ -100,7 +100,8 @@ bool ExtractCodestream(const std::vector<uint8_t>& input,
 }
 
 jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame,
-                   bool capture_modular_tree) {
+                   bool capture_modular_tree,
+                   jxl::jpeg::JPEGData* jpeg_coefficient_shell) {
   // Retained decoder images refer to this allocator after this function returns.
   static JxlMemoryManager manager = [] { JxlMemoryManager m; if (!jxl::MemoryManagerInit(&m, nullptr)) std::abort(); return m; }();
   jxl::Status closed = true; size_t offset;
@@ -129,6 +130,16 @@ jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame,
         frame->state->output_encoding_info.SetFromMetadata(frame->metadata));
   }
   jxl::ImageBundle image(&manager, &frame->metadata.m);
+  if (jpeg_coefficient_shell != nullptr) {
+    image.jpeg_data = jxl::make_unique<jxl::jpeg::JPEGData>(
+        *jpeg_coefficient_shell);
+    for (auto& component : image.jpeg_data->components) {
+      component.coeffs.clear();
+      component.width_in_blocks = 0;
+      component.height_in_blocks = 0;
+    }
+    for (auto& table : image.jpeg_data->quant) table.values.fill(0);
+  }
   jxl::FrameDecoder decoder(frame->state.get(), frame->metadata, nullptr,
                             /*use_slow_rendering_pipeline=*/false);
   jxl::BitReader reader(
@@ -192,6 +203,9 @@ jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame,
   JXL_RETURN_IF_ERROR(closed);
   JXL_RETURN_IF_ERROR(section_result);
   JXL_RETURN_IF_ERROR(decoder.FinalizeFrame());
+  if (jpeg_coefficient_shell != nullptr) {
+    *jpeg_coefficient_shell = std::move(*image.jpeg_data);
+  }
   if (capture_modular_tree) {
     const jxl::Tree tree = CaptureModularTree(decoder);
     layout.modular_tree_node_count = tree.size();
@@ -231,10 +245,11 @@ jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame,
 }
 }
 bool DecodeFirstFrame(const std::vector<uint8_t>& codestream, DecodedFrame* frame,
-                      bool capture_modular_tree) {
+                      bool capture_modular_tree,
+                      jxl::jpeg::JPEGData* jpeg_coefficient_shell) {
   std::vector<uint8_t> extracted;
   if (ExtractCodestream(codestream, &extracted) &&
-      Decode(extracted, frame, capture_modular_tree))
+      Decode(extracted, frame, capture_modular_tree, jpeg_coefficient_shell))
     return true;
   std::fprintf(stderr, "dump: invalid or unsupported first frame\n"); return false;
 }

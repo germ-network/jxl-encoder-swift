@@ -30,7 +30,7 @@ struct EncoderTests {
 			PlaneBuffer.copyAndPad(
 				source: interleaved, sourceWidth: width, rect: rect)
 		}
-		//these fixtures were produced with static entropy tables, so they gate
+		//these fixtures were produced with legacy static entropy tables, so they gate
 		//the unoptimised path
 		try Encoder.encodeFrame(
 			stripeAt: stripeAt, width: linear.width, height: linear.height,

@@ -2,19 +2,21 @@
 //  DCGroupEncoder.swift
 //  JXLEncoder
 //
-//  Port of `WriteDCGroup`, `WriteDCTokens` and `WriteACMetadataTokens` from
-//  libjxl-tiny's encoder/enc_frame.cc.
+//  Port of pixel and JPEG DC-group preparation and modular tokenization from
+//  the pinned libjxl modular encoder.
 //
 //  A DC group carries the DC image plus the per-block control fields: the
-//  chroma-from-luma maps, the AC strategy, the quant field and the edge-
-//  preserving-filter sharpness. All of them are gradient-predicted and coded
-//  with the same modular entropy code.
+//  chroma-from-luma maps, the AC strategy, the quant field and EPF sharpness.
+//  DC uses the selected weighted predictor; metadata uses its tree-selected
+//  zero, left or gradient predictor. All streams share the modular entropy code.
 //
 
 /// Per-block state a DC group encodes alongside the DC image.
 public struct DCGroupData: Sendable {
 	/// One plane per channel, each at its own subsampled size.
-	public var quantDC: [[Int16]]
+	public var quantDC: [[Int32]]
+	/// Additional precision used to prepare the DC image.
+	public var extraDCPrecision: UInt8 = 0
 	public var rawQuantField: [UInt8]
 	/// Uniform per-block EPF sharpness for the selected encoding path.
 	public let epfSharpness: UInt8
@@ -57,7 +59,7 @@ public struct DCGroupData: Sendable {
 		planeWidths = widths
 		planeHeights = heights
 		quantDC = (0..<3).map {
-			[Int16](repeating: 0, count: widths[$0] * heights[$0])
+			[Int32](repeating: 0, count: widths[$0] * heights[$0])
 		}
 		rawQuantField = [UInt8](repeating: 1, count: widthInBlocks * heightInBlocks)
 		cmapWidth = Geometry.divCeil(widthInBlocks * Geometry.blockDim, 64)
@@ -68,6 +70,208 @@ public struct DCGroupData: Sendable {
 }
 
 public enum DCGroupEncoder {
+	static let inverseDCQuant: [Float] = [4096, 512, 256]
+	static let dcQuant: [Float] = [1 / 4096, 1 / 512, 1 / 256]
+
+	static func preparePixel(
+		rawDC: [[Float]], globalScale: Int, quantDC: Int,
+		data: inout DCGroupData
+	) throws {
+		let width = data.widthInBlocks
+		let height = data.heightInBlocks
+		let count = width * height
+		precondition(data.subsampling.is444)
+		precondition(rawDC.count == 3)
+		precondition((0..<3).allSatisfy { rawDC[$0].count == count })
+		data.extraDCPrecision = 1
+		data.quantDC = (0..<3).map { _ in [Int32](repeating: 0, count: count) }
+
+		let mul: Float = 2
+		let scale = Float(Double(globalScale) * (1.0 / Double(1 << 16)))
+		let inverseGlobalScale = Float(Double(1 << 16) / Double(globalScale))
+		let dcScale = scale * Float(quantDC)
+		let inverseFactors = inverseDCQuant.map { $0 * dcScale * mul }
+		let inverseQuantDC = inverseGlobalScale / Float(quantDC)
+		let yFactor = (inverseQuantDC * dcQuant[1]) / mul
+		for channel in [1, 0, 2] {
+			var predictor = DCPredictor.WeightedState(width: width)
+			for y in 0..<height {
+				for x in 0..<width {
+					let index = y * width + x
+					let left =
+						x > 0
+						? data.quantDC[channel][index - 1]
+						: (y > 0 ? data.quantDC[channel][index - width] : 0)
+					let north =
+						y > 0 ? data.quantDC[channel][index - width] : left
+					let northWest =
+						x > 0 && y > 0
+						? data.quantDC[channel][index - width - 1] : left
+					let northEast =
+						x + 1 < width && y > 0
+						? data.quantDC[channel][index - width + 1] : north
+					let northNorth =
+						y > 1
+						? data.quantDC[channel][index - 2 * width] : north
+					let prediction = predictor.predict(
+						x: x, y: y, north: north, west: left,
+						northEast: northEast, northWest: northWest,
+						northNorth: northNorth)
+
+					let value: Float
+					if channel == 1 {
+						value =
+							rawDC[channel][index]
+							* inverseFactors[channel]
+					} else {
+						let cflFactor =
+							channel == 0
+							? ACGroupEncoder.xFactor
+							: ACGroupEncoder.bFactor
+						let corrected =
+							rawDC[channel][index]
+							- Float(data.quantDC[1][index])
+							* (yFactor * cflFactor)
+						value = corrected * inverseFactors[channel]
+					}
+					let quantized = try quantizedValue(
+						scaledResidual: value - Float(prediction.guess),
+						prediction: prediction.guess)
+					data.quantDC[channel][index] = quantized
+					predictor.updateErrors(value: quantized, x: x, y: y)
+				}
+			}
+		}
+	}
+
+	static func quantizedValue(scaledResidual: Float, prediction: Int64) throws -> Int32 {
+		guard scaledResidual.isFinite else { throw EncoderError.unsupportedDCRange }
+		let deadzoned =
+			scaledResidual > -0.62 && scaledResidual < 0.62
+			? Float(0) : scaledResidual
+		var residual = deadzoned.rounded(.toNearestOrAwayFromZero)
+		if residual > 2 || residual < -2 {
+			residual = (deadzoned * 0.5).rounded(.toNearestOrAwayFromZero) * 2
+		}
+		guard let residualValue = Int32(exactly: residual) else {
+			throw EncoderError.unsupportedDCRange
+		}
+		let (value, overflow) = prediction.addingReportingOverflow(Int64(residualValue))
+		guard !overflow, let quantizedValue = Int32(exactly: value) else {
+			throw EncoderError.unsupportedDCRange
+		}
+		return quantizedValue
+	}
+
+	static func tokenStreams(
+		data: DCGroupData, groupIndex: Int, tree: ContextTree.Prepared
+	) throws -> (dc: [Token], metadata: [Token]) {
+		var dcTokens: [Token] = []
+		for (channel, storageChannel) in ACTokenizer.channelOrder.enumerated() {
+			let values = data.quantDC[storageChannel]
+			let width = data.planeWidths[storageChannel]
+			let height = data.planeHeights[storageChannel]
+			var predictor = DCPredictor.WeightedState(width: width)
+			for y in 0..<height {
+				for x in 0..<width {
+					let index = y * width + x
+					let left: Int32 =
+						x > 0
+						? values[index - 1]
+						: (y > 0 ? values[index - width] : 0)
+					let north = y > 0 ? values[index - width] : left
+					let northWest =
+						x > 0 && y > 0 ? values[index - width - 1] : left
+					let northEast =
+						x + 1 < width && y > 0
+						? values[index - width + 1] : north
+					let northNorth = y > 1 ? values[index - 2 * width] : north
+					let prediction = predictor.predict(
+						x: x, y: y, north: north, west: left,
+						northEast: northEast, northWest: northWest,
+						northNorth: northNorth)
+					let leaf = tree.leaf(
+						streamID: groupIndex + 1, channel: channel, row: y,
+						north: north, west: left,
+						weightedProperty: prediction.property)
+					guard case .leaf(let mode, let context) = leaf,
+						mode == .weighted,
+						let guess = Int32(exactly: prediction.guess)
+					else { throw EncoderError.unsupportedDCRange }
+					let (residual, overflow) = values[index]
+						.subtractingReportingOverflow(guess)
+					guard !overflow else {
+						throw EncoderError.unsupportedDCRange
+					}
+					dcTokens.append(
+						Token(context: context, value: packSigned(residual))
+					)
+					predictor.updateErrors(value: values[index], x: x, y: y)
+				}
+			}
+		}
+
+		var metadataTokens: [Token] = []
+		let metadataStreamID = 1 + 2 * tree.dcGroupCount + groupIndex
+		func appendPlane(
+			values: (Int, Int) -> Int32, width: Int, height: Int, channel: Int
+		) throws {
+			for y in 0..<height {
+				for x in 0..<width {
+					let current = values(x, y)
+					let left =
+						x > 0
+						? values(x - 1, y) : (y > 0 ? values(x, y - 1) : 0)
+					let north = y > 0 ? values(x, y - 1) : left
+					let northWest = x > 0 && y > 0 ? values(x - 1, y - 1) : left
+					let leaf = tree.leaf(
+						streamID: metadataStreamID, channel: channel,
+						row: y,
+						north: north, west: left, weightedProperty: 0)
+					guard case .leaf(let predictor, let context) = leaf else {
+						throw EncoderError.unsupportedDCRange
+					}
+					let guess: Int32
+					switch predictor {
+					case .zero: guess = 0
+					case .left: guess = left
+					case .gradient:
+						guess = DCPredictor.clampedGradient(
+							top: north, left: left, topLeft: northWest)
+					case .weighted: throw EncoderError.unsupportedDCRange
+					}
+					let (residual, overflow) =
+						current.subtractingReportingOverflow(guess)
+					guard !overflow else {
+						throw EncoderError.unsupportedDCRange
+					}
+					metadataTokens.append(
+						Token(context: context, value: packSigned(residual))
+					)
+				}
+			}
+		}
+
+		for channel in 0..<2 {
+			let map = channel == 0 ? data.ytoxMap : data.ytobMap
+			try appendPlane(
+				values: { x, y in Int32(map[y * data.cmapWidth + x]) },
+				width: data.cmapWidth, height: data.cmapHeight, channel: channel)
+		}
+		let blocks = data.widthInBlocks * data.heightInBlocks
+		try appendPlane(
+			values: { x, y in
+				y == 0
+					? Int32(ACTokenizer.dct8StrategyCode)
+					: Int32(data.rawQuantField[x]) - 1
+			},
+			width: blocks, height: 2, channel: 2)
+		try appendPlane(
+			values: { x, y in Int32(data.epfSharpness) },
+			width: data.widthInBlocks, height: data.heightInBlocks, channel: 3)
+		return (dcTokens, metadataTokens)
+	}
+
 	/// Gradient-predicts one plane and emits the residuals.
 	///
 	/// The neighbour fallbacks are deliberately asymmetric, matching the
@@ -192,5 +396,20 @@ public enum DCGroupEncoder {
 		writer.writeRaw(4, 3)  // global tree again, for the control fields
 
 		writeACMetadataTokens(data: data, writer: &writer)
+	}
+
+	static func write(
+		data: DCGroupData, streams: (dc: [Token], metadata: [Token]),
+		code: EntropyCode, writer: inout BitWriter
+	) throws {
+		writer.write(2, UInt64(data.extraDCPrecision))
+		writer.write(4, 3)
+		EntropyCodeWriter.writeTokens(streams.dc, code: code, writer: &writer)
+		let blockCount = data.widthInBlocks * data.heightInBlocks
+		let bitCount =
+			blockCount <= 1 ? 0 : Int.bitWidth - (blockCount - 1).leadingZeroBitCount
+		if bitCount != 0 { writer.write(bitCount, UInt64(blockCount - 1)) }
+		writer.write(4, 3)
+		EntropyCodeWriter.writeTokens(streams.metadata, code: code, writer: &writer)
 	}
 }

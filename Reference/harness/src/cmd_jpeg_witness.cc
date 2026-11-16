@@ -23,6 +23,57 @@ std::vector<uint8_t> Read(const std::string& path) {
   return {std::istreambuf_iterator<char>(file), {}};
 }
 
+bool SameCoefficients(const jxl::jpeg::JPEGData& source,
+                      const jxl::jpeg::JPEGData& decoded) {
+  if (source.width != decoded.width || source.height != decoded.height ||
+      source.components.size() != decoded.components.size()) {
+    std::fprintf(stderr, "jpeg-witness: dimensions or component count differ\n");
+    return false;
+  }
+  for (size_t i = 0; i < source.components.size(); ++i) {
+    const auto& a = source.components[i];
+    const auto& b = decoded.components[i];
+    if (a.h_samp_factor != b.h_samp_factor ||
+        a.v_samp_factor != b.v_samp_factor ||
+        a.width_in_blocks != b.width_in_blocks ||
+        a.height_in_blocks != b.height_in_blocks ||
+        a.coeffs.size() != b.coeffs.size()) {
+      std::fprintf(stderr, "jpeg-witness: component %zu geometry differs\n", i);
+      return false;
+    }
+    if (a.quant_idx >= source.quant.size() || b.quant_idx >= decoded.quant.size() ||
+        source.quant[a.quant_idx].values != decoded.quant[b.quant_idx].values) {
+      std::fprintf(stderr, "jpeg-witness: component %zu quantization differs\n", i);
+      return false;
+    }
+    for (size_t k = 0; k < a.coeffs.size(); ++k) {
+      if (a.coeffs[k] != b.coeffs[k]) {
+        std::fprintf(stderr,
+                     "jpeg-witness: component %zu block %zu coefficient %zu "
+                     "source %d decoded %d\n",
+                     i, k / 64, k % 64, static_cast<int>(a.coeffs[k]),
+                     static_cast<int>(b.coeffs[k]));
+        return false;
+      }
+    }
+  }
+  return true;
+}
+
+jxl::jpeg::JPEGData CoefficientShell(const jxl::jpeg::JPEGData& source) {
+  jxl::jpeg::JPEGData shell;
+  shell.components.resize(source.components.size());
+  for (size_t i = 0; i < source.components.size(); ++i) {
+    shell.components[i].quant_idx = source.components[i].quant_idx;
+  }
+  uint32_t max_quant_idx = 0;
+  for (const auto& component : source.components) {
+    max_quant_idx = std::max(max_quant_idx, component.quant_idx);
+  }
+  shell.quant.resize(source.components.empty() ? 0 : max_quant_idx + 1);
+  return shell;
+}
+
 jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
                     SemanticDumpWriter* out) {
   const auto jpeg_bytes = Read(jpeg_path);
@@ -34,7 +85,12 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
       jpeg_bytes.data(), jpeg_bytes.size(), jxl::jpeg::JpegReadMode::kReadAll,
       &jpeg));
   DecodedFrame frame;
-  if (!DecodeFirstFrame(jxl_bytes, &frame)) return false;
+  jxl::jpeg::JPEGData decoded_jpeg = CoefficientShell(jpeg);
+  if (!DecodeFirstFrame(jxl_bytes, &frame, false, &decoded_jpeg)) return false;
+  if (!SameCoefficients(jpeg, decoded_jpeg)) {
+    std::fprintf(stderr, "jpeg-witness: reconstructed coefficients differ\n");
+    return false;
+  }
   if (jpeg.components.size() != 3 || frame.header.color_transform != jxl::ColorTransform::kYCbCr ||
       frame.header.encoding != jxl::FrameEncoding::kVarDCT ||
       frame.header.passes.num_passes != 1 || frame.state->used_acs != 1) {
@@ -190,6 +246,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
 
   out->Integers("jpeg_context.size", {static_cast<int64_t>(dim.xsize_blocks),
                                        static_cast<int64_t>(dim.ysize_blocks)});
+  out->Integers("jpeg_context.reconstructed_coefficients_exact", {1});
   out->Integers("jpeg_context.group_count",
                 {static_cast<int64_t>(dim.num_groups)});
   out->Integers("jpeg_context.buckets", buckets);

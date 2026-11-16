@@ -11,6 +11,9 @@
 
 /// A context map plus the prefix codes it selects between.
 public struct EntropyCode: Sendable {
+	var uintConfigurations: [HybridUintConfiguration]? = nil
+	var logAlphabetSize: Int = ANSConstants.logAlphaSize
+
 	public let contextMap: [UInt8]
 	public let prefixCodes: [PrefixCode]
 	/// Set when this code re-clusters an earlier one's buckets. The decoder
@@ -29,26 +32,44 @@ public struct EntropyCode: Sendable {
 		originalContextMap: [UInt8]? = nil,
 		ansInfoTables: [[ANSEncSymbolInfo]]? = nil
 	) {
-		self.contextMap = contextMap
-		self.prefixCodes = prefixCodes
-		self.originalContextMap = originalContextMap
-		self.ansInfoTables = ansInfoTables
+		self.init(
+			contextMap: contextMap, prefixCodes: prefixCodes,
+			originalContextMap: originalContextMap, ansInfoTables: ansInfoTables,
+			uintConfigurations: nil, logAlphabetSize: ANSConstants.logAlphaSize)
 	}
 
 	init(
 		contextMap: [UInt8], prefixCodes: [PrefixCode],
-		originalContextMap: [UInt8]? = nil, ansHistograms: [ANSEncodingHistogram]
+		originalContextMap: [UInt8]? = nil,
+		ansInfoTables: [[ANSEncSymbolInfo]]? = nil,
+		uintConfigurations: [HybridUintConfiguration]?, logAlphabetSize: Int
+	) {
+		self.contextMap = contextMap
+		self.prefixCodes = prefixCodes
+		self.originalContextMap = originalContextMap
+		self.ansInfoTables = ansInfoTables
+		self.uintConfigurations = uintConfigurations
+		self.logAlphabetSize = logAlphabetSize
+	}
+
+	init(
+		contextMap: [UInt8], prefixCodes: [PrefixCode],
+		originalContextMap: [UInt8]? = nil, ansHistograms: [ANSEncodingHistogram],
+		uintConfigurations: [HybridUintConfiguration]? = nil,
+		logAlphabetSize: Int = ANSConstants.logAlphaSize
 	) {
 		precondition(!ansHistograms.isEmpty)
 		self.contextMap = contextMap
 		self.prefixCodes = prefixCodes
 		self.originalContextMap = originalContextMap
 		self.ansHistograms = ansHistograms
+		self.uintConfigurations = uintConfigurations
+		self.logAlphabetSize = logAlphabetSize
 		self.ansInfoTables = ansHistograms.map { histogram in
 			ANSInfoTable.build(
 				distribution: histogram.normalizedCounts,
 				alphabetSize: histogram.alphabetSize,
-				logAlphaSize: ANSConstants.logAlphaSize)
+				logAlphaSize: logAlphabetSize)
 		}
 	}
 

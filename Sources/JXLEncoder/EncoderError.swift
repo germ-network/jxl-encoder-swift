@@ -10,6 +10,8 @@ public enum EncoderError: Error, Equatable, Sendable {
 	/// rather than silently encoded at the minimum distance.
 	case losslessNotSupported
 	case invalidDistance(Float)
+	/// DC preparation cannot represent a sample or residual safely.
+	case unsupportedDCRange
 	case pixelCountMismatch(expected: Int, actual: Int)
 	/// Only 3 (RGB) and 4 (RGBA stride, alpha ignored) are meaningful; anything
 	/// else would misalign every pixel read.

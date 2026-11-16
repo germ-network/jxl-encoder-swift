@@ -41,8 +41,12 @@ enum FrameAssembly {
 		writer.write(1, 0)  // not all default
 		writer.write(2, 0)  // regular frame
 		writer.write(1, 0)  // vardct
-		writer.write(2, 2)  // flags selector bits (17 .. 272)
-		writer.write(8, 111)  // skip adaptive dc flag (128)
+		if case .ycbcr = colorMode {
+			writer.write(2, 2)  // flags selector bits (17 .. 272)
+			writer.write(8, 111)  // skip adaptive dc smoothing (128)
+		} else {
+			writer.write(2, 0)  // no frame flags
+		}
 
 		// Only present when the image header said `xyb_encoded` is false: the
 		// bit chooses YCbCr over none.
@@ -122,6 +126,7 @@ enum FrameAssembly {
 		params: DistanceParams,
 		dcGroupCount: Int,
 		code: EntropyCode,
+		modularTree: (tree: ContextTree.Prepared, code: EntropyCode)? = nil,
 		/// Per-channel DC quantization for a JPEG transcode, `255 * 8 / quant[0]`.
 		/// Nil on the pixel path, which uses the built-in values.
 		dcQuantization: [Float]? = nil,
@@ -167,7 +172,12 @@ enum FrameAssembly {
 		}
 
 		try writeColorCorrelationDC(jpegCompatible: dcQuantization != nil, writer: &writer)
-		ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
+		if let modularTree {
+			ContextTree.write(
+				modularTree.tree, code: modularTree.code, writer: &writer)
+		} else {
+			ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
+		}
 		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(code, writer: &writer)
 	}

@@ -267,15 +267,14 @@ struct QuantizerTests {
 		let params = try DistanceParams(distance: 1)
 		#expect(quant == [Int64](repeating: Int64(params.uniformQuant), count: 10))
 		let blockCount = input.height / DCT.blockDim
-		var quantDC = [[Int16]](
-			repeating: [Int16](repeating: 0, count: blockCount), count: 3)
+		var rawDC = [[Float]](
+			repeating: [Float](repeating: 0, count: blockCount), count: 3)
 		let actual = ACGroupEncoder.computeGroup(
 			xyb: PaddedStripe(
 				width: input.width, height: input.height, planes: input.planes),
 			widthInBlocks: 1, heightInBlocks: blockCount,
 			quantField: quant.map(UInt8.init), scale: params.scale,
-			scaleDC: params.scaleDC, xQuantMatrixScale: params.xQuantMatrixScale,
-			quantDC: &quantDC)
+			xQuantMatrixScale: params.xQuantMatrixScale, rawDC: &rawDC)
 		for channel in 0..<3 {
 			let expected = try #require(
 				integers("\(comparison.category).c\(channel)"))

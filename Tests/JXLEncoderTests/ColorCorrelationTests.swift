@@ -44,27 +44,10 @@ struct ColorCorrelationTests {
 		#expect(writer.take() == [0, 0, 0, 0, 0, 0x04, 0x04])
 	}
 
-	/// The AC and DC factors both derive from the same default correlation
-	/// (`YtoXRatio(0) = 0`, `YtoBRatio(0) = kYToBRatio = 1`) — `dcCflFactor`
-	/// is defined in terms of `bFactor` at the source (`ACGroupEncoder.
-	/// swift`), not as an independently-maintained literal, so an edit to
-	/// one without the other can't happen by construction. What this test
-	/// actually pins is the *numeric result* of that shared derivation
-	/// (0.5) against the reference's own `AddVarDCTDC` cancellation
-	/// (`DCQuant(1) · InvDCQuant(2) · bFactor`), which the source coupling
-	/// alone doesn't guarantee is still right.
-	@Test("AC and DC factors both derive from the default correlation")
+	/// DC correlation is applied during full-group DC preparation.
+	@Test("AC factors retain the default correlation")
 	func factorsMatchDefaultCorrelation() {
-		// AC: `enc_group.cc`'s `x_factor`/`b_factor` at the default map.
 		#expect(ACGroupEncoder.xFactor == 0)  // YtoXRatio(0) = base_correlation_x_ = 0
-		// YtoBRatio(0) = base_correlation_b_ = kYToBRatio = 1
 		#expect(ACGroupEncoder.bFactor == 1)
-
-		// DC: `AddVarDCTDC`'s `y_factor · inv_factor` cancels every scale
-		// term down to `DCQuant(1) · InvDCQuant(2)`, times `bFactor` above.
-		let expectedB = ACGroupEncoder.dcQuant[1] * ACGroupEncoder.inverseDCQuant[2]
-		#expect(expectedB == 0.5)
-		#expect(ACGroupEncoder.dcCflFactor == [0, 0, expectedB * ACGroupEncoder.bFactor])
-		#expect(ACGroupEncoder.dcCflFactor[0] == ACGroupEncoder.xFactor)
 	}
 }

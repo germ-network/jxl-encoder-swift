@@ -126,17 +126,16 @@ struct DistanceParamsTests {
 		for (distance, expectedScale) in boundarySamples {
 			let params = try DistanceParams(distance: distance)
 			#expect(params.xQuantMatrixScale == expectedScale)
-			var quantDC = [[Int16]](
-				repeating: [Int16](repeating: 0, count: blockCount), count: 3)
+			var rawDC = [[Float]](
+				repeating: [Float](repeating: 0, count: blockCount), count: 3)
 			let actual = ACGroupEncoder.computeGroup(
 				xyb: xyb, widthInBlocks: widthInBlocks,
 				heightInBlocks: heightInBlocks,
 				quantField: [UInt8](
 					repeating: params.uniformQuant, count: blockCount),
 				scale: params.scale,
-				scaleDC: params.scaleDC,
 				xQuantMatrixScale: params.xQuantMatrixScale,
-				quantDC: &quantDC)
+				rawDC: &rawDC)
 			var expectedX: [Int32] = []
 			var expectedB: [Int32] = []
 			for by in 0..<heightInBlocks {
@@ -185,8 +184,8 @@ struct DistanceParamsTests {
 					heightInBlocks: heightInBlocks,
 					quantField: [UInt8](
 						repeating: params.uniformQuant, count: blockCount),
-					scale: params.scale, scaleDC: params.scaleDC,
-					xQuantMatrixScale: 3, quantDC: &quantDC)[0]
+					scale: params.scale,
+					xQuantMatrixScale: 3, rawDC: &rawDC)[0]
 				#expect(expectedX != defaultX)
 			}
 			#expect(actual[2] == expectedB)
@@ -200,7 +199,7 @@ struct DistanceParamsTests {
 			let bits = Array(writer.take()).flatMap { byte in
 				(0..<8).map { (byte >> $0) & 1 }
 			}
-			let signaledScale = bits[16..<19].enumerated().reduce(UInt32(0)) {
+			let signaledScale = bits[8..<11].enumerated().reduce(UInt32(0)) {
 				$0 | (UInt32($1.element) << UInt32($1.offset))
 			}
 			#expect(signaledScale == expectedScale)
@@ -259,17 +258,16 @@ struct DistanceParamsTests {
 				[Float](repeating: 0, count: DCT.blockSize), yPlane,
 				[Float](repeating: 0, count: DCT.blockSize),
 			])
-		var dc = [[Int16]](repeating: [Int16](repeating: 0, count: 1), count: 3)
+		var rawDC = [[Float]](repeating: [Float](repeating: 0, count: 1), count: 3)
 		_ = ACGroupEncoder.computeGroup(
 			xyb: stripe, widthInBlocks: 1, heightInBlocks: 1,
 			quantField: [params.uniformQuant], scale: params.scale,
-			scaleDC: params.scaleDC,
-			xQuantMatrixScale: params.xQuantMatrixScale, quantDC: &dc)
-		let coefficient = DCT.forward8x8(
-			pixels: yPlane, stride: DCT.blockDim, originX: 0, originY: 0)[0]
-		let expected = Int16(
-			(Float(512) * params.scaleDC * coefficient)
-				.rounded(.toNearestOrAwayFromZero))
-		#expect(dc[1][0] == expected)
+			xQuantMatrixScale: params.xQuantMatrixScale, rawDC: &rawDC)
+		var data = DCGroupData(widthInBlocks: 1, heightInBlocks: 1)
+		try DCGroupEncoder.preparePixel(
+			rawDC: rawDC, globalScale: params.globalScale, quantDC: params.quantDC,
+			data: &data)
+		#expect(data.extraDCPrecision == 1)
+		#expect(data.quantDC[1][0] != 0)
 	}
 }

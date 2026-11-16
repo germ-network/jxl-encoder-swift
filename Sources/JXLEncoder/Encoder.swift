@@ -68,7 +68,7 @@ public enum Encoder {
 		let widthInBlocks: Int
 		let heightInBlocks: Int
 		let section: SectionWriter
-		let quantDC: [[Int16]]
+		let rawDC: [[Float]]
 		let quantField: [UInt8]
 	}
 
@@ -83,7 +83,7 @@ public enum Encoder {
 		/// Per channel, flat and block-major — `ACGroupEncoder.computeGroup`'s
 		/// output, passed straight through to `tokenizeGroup`.
 		let coefficients: [[Int32]]
-		let quantDC: [[Int16]]
+		let rawDC: [[Float]]
 		let quantField: [UInt8]
 	}
 
@@ -162,11 +162,10 @@ public enum Encoder {
 			width: paddedWidth,
 			height: groupDim.heightInBlocks * Geometry.blockDim,
 			planes: xybPlanes)
-		var groupDC = [[Int16]](
-			repeating: [Int16](
+		var rawDC = [[Float]](
+			repeating: [Float](
 				repeating: 0,
-				count: groupDim.widthInBlocks
-					* groupDim.heightInBlocks),
+				count: groupDim.widthInBlocks * groupDim.heightInBlocks),
 			count: 3)
 
 		let coefficients = ACGroupEncoder.computeGroup(
@@ -175,15 +174,14 @@ public enum Encoder {
 			heightInBlocks: groupDim.heightInBlocks,
 			quantField: quantField,
 			scale: params.scale,
-			scaleDC: params.scaleDC,
 			xQuantMatrixScale: params.xQuantMatrixScale,
-			quantDC: &groupDC)
+			rawDC: &rawDC)
 
 		return ACGroupCompute(
 			groupX: imageGX, groupY: imageGY,
 			widthInBlocks: groupDim.widthInBlocks,
 			heightInBlocks: groupDim.heightInBlocks,
-			coefficients: coefficients, quantDC: groupDC, quantField: quantField)
+			coefficients: coefficients, rawDC: rawDC, quantField: quantField)
 	}
 
 	/// Tokenizes one already-computed AC group using the frame-global
@@ -216,7 +214,7 @@ public enum Encoder {
 			groupX: compute.groupX, groupY: compute.groupY,
 			widthInBlocks: compute.widthInBlocks,
 			heightInBlocks: compute.heightInBlocks,
-			section: writer, quantDC: compute.quantDC, quantField: compute.quantField)
+			section: writer, rawDC: compute.rawDC, quantField: compute.quantField)
 	}
 
 	/// Reduces every group's coefficients into the frame-global zero
@@ -248,8 +246,9 @@ public enum Encoder {
 	/// Kept apart from the computation so the sequential and concurrent drivers
 	/// share it exactly and cannot drift.
 	static func assemble(
-		outputs: [ACGroupOutput], dim: ImageDim, sections: inout [SectionWriter]
-	) {
+		outputs: [ACGroupOutput], dim: ImageDim, params: DistanceParams,
+		optimizeCodes: Bool, sections: inout [SectionWriter]
+	) throws -> [DCGroupData] {
 		var dcData: [DCGroupData] = (0..<dim.dcGroupCount).map { i in
 			let rect = dim.pixelRect(
 				ix: i % dim.widthInDCGroups, iy: i / dim.widthInDCGroups,
@@ -258,6 +257,13 @@ public enum Encoder {
 			return DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks)
+		}
+		var rawDCByGroup = dcData.map { data in
+			(0..<3).map { _ in
+				[Float](
+					repeating: 0,
+					count: data.widthInBlocks * data.heightInBlocks)
+			}
 		}
 
 		for output in outputs {
@@ -287,8 +293,8 @@ public enum Encoder {
 					dcData[index].rawQuantField[target] =
 						output.quantField[by * output.widthInBlocks + bx]
 					for c in 0..<3 {
-						dcData[index].quantDC[c][target] =
-							output.quantDC[c][
+						rawDCByGroup[index][c][target] =
+							output.rawDC[c][
 								by * output.widthInBlocks + bx]
 					}
 				}
@@ -296,8 +302,15 @@ public enum Encoder {
 		}
 
 		for i in 0..<dim.dcGroupCount {
-			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+			try DCGroupEncoder.preparePixel(
+				rawDC: rawDCByGroup[i], globalScale: params.globalScale,
+				quantDC: params.quantDC,
+				data: &dcData[i])
+			if !optimizeCodes {
+				DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+			}
 		}
+		return dcData
 	}
 
 	static func encodeFrame(
@@ -366,12 +379,35 @@ public enum Encoder {
 					compute, order: coeffOrder.orders, mode: acMode,
 					blockContextMap: blockContextMap))
 		}
-		assemble(outputs: outputs, dim: dim, sections: &sections)
+		let dcData = try assemble(
+			outputs: outputs, dim: dim, params: params,
+			optimizeCodes: optimizeCodes, sections: &sections)
+		var modularTree: ContextTree.Prepared?
+		var modularTreeCode: EntropyCode?
 
 		if optimizeCodes {
-			let dcRange = 1..<(1 + dim.dcGroupCount)
-			dcCode = SectionOptimizer.optimize(
-				sections: &sections, range: dcRange, baseCode: dcCode)
+			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
+			let streams = try dcData.enumerated().map {
+				try DCGroupEncoder.tokenStreams(
+					data: $0.element, groupIndex: $0.offset, tree: tree)
+			}
+			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+			dcCode = SectionOptimizer.modularCode(
+				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+				extraDCPrecision: 1)
+			let treeCode = SectionOptimizer.modularCode(
+				tokenStreams: [tree.tokens],
+				contextCount: ContextTree.treeContextCount,
+				extraDCPrecision: 1)
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index], streams: streams[index],
+					code: dcCode, writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			modularTree = tree
+			modularTreeCode = treeCode
 			acCode = SectionOptimizer.optimize(
 				sections: &sections, range: acRange, baseCode: acCode,
 				allowANS: true)
@@ -382,6 +418,9 @@ public enum Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+			modularTree: modularTree.flatMap { tree in
+				modularTreeCode.map { (tree: tree, code: $0) }
+			},
 			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
@@ -507,13 +546,36 @@ extension Encoder {
 		// Frees the frame's coefficients before assembly/optimisation rather
 		// than leaving them reachable for the rest of the encode.
 		computes = []
-		assemble(outputs: outputs, dim: dim, sections: &sections)
+		let dcData = try assemble(
+			outputs: outputs, dim: dim, params: params,
+			optimizeCodes: optimizeCodes, sections: &sections)
 
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
+		var modularTree: ContextTree.Prepared?
+		var modularTreeCode: EntropyCode?
 		if optimizeCodes {
-			dcCode = SectionOptimizer.optimize(
-				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
-				baseCode: dcCode)
+			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
+			let streams = try dcData.enumerated().map {
+				try DCGroupEncoder.tokenStreams(
+					data: $0.element, groupIndex: $0.offset, tree: tree)
+			}
+			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+			dcCode = SectionOptimizer.modularCode(
+				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+				extraDCPrecision: 1)
+			let treeCode = SectionOptimizer.modularCode(
+				tokenStreams: [tree.tokens],
+				contextCount: ContextTree.treeContextCount,
+				extraDCPrecision: 1)
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index], streams: streams[index],
+					code: dcCode, writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			modularTree = tree
+			modularTreeCode = treeCode
 			acCode = SectionOptimizer.optimize(
 				sections: &sections, range: acRange, baseCode: acCode,
 				allowANS: true)
@@ -522,6 +584,9 @@ extension Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+			modularTree: modularTree.flatMap { tree in
+				modularTreeCode.map { (tree: tree, code: $0) }
+			},
 			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
@@ -677,8 +742,8 @@ extension Encoder {
 				let blockX0 = gx * Geometry.groupDimInBlocks
 				let blockY0 = gy * Geometry.groupDimInBlocks
 
-				var groupDC = [[Int16]](
-					repeating: [Int16](
+				var groupDC = [[Int32]](
+					repeating: [Int32](
 						repeating: 0,
 						count: groupDim.widthInBlocks
 							* groupDim.heightInBlocks),
@@ -742,14 +807,38 @@ extension Encoder {
 			}
 		}
 
-		for i in 0..<dim.dcGroupCount {
-			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+		var modularTree: ContextTree.Prepared?
+		var modularTreeCode: EntropyCode?
+		if optimizeCodes {
+			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: true)
+			let streams = try dcData.enumerated().map {
+				try DCGroupEncoder.tokenStreams(
+					data: $0.element, groupIndex: $0.offset, tree: tree)
+			}
+			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+			dcCode = SectionOptimizer.modularCode(
+				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+				extraDCPrecision: 0)
+			let treeCode = SectionOptimizer.modularCode(
+				tokenStreams: [tree.tokens],
+				contextCount: ContextTree.treeContextCount,
+				extraDCPrecision: 0)
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index], streams: streams[index],
+					code: dcCode, writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			modularTree = tree
+			modularTreeCode = treeCode
+		} else {
+			for i in 0..<dim.dcGroupCount {
+				DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+			}
 		}
 
 		if optimizeCodes {
-			dcCode = SectionOptimizer.optimize(
-				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
-				baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
 				sections: &sections, range: acRange, baseCode: acCode,
 				allowANS: true)
@@ -759,6 +848,9 @@ extension Encoder {
 		try FrameAssembly.writeDCGlobal(
 			params: try DistanceParams(distance: 1.0),
 			dcGroupCount: dim.dcGroupCount, code: dcCode,
+			modularTree: modularTree.flatMap { tree in
+				modularTreeCode.map { (tree: tree, code: $0) }
+			},
 			dcQuantization: (0..<3).map { transcode.dcQuantization(channel: $0) },
 			globalScale: FrameAssembly.jpegGlobalScale,
 			quantDC: 1,

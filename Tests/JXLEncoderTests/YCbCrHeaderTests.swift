@@ -35,14 +35,24 @@ struct YCbCrHeaderTests {
 		return writer
 	}
 
-	/// The colour-transform bit and the subsampling modes only exist in YCbCr;
-	/// the two quant-matrix scales only exist in XYB. Net, YCbCr is one bit
-	/// longer: +1 transform, +6 subsampling, −6 scales.
+	/// The colour-transform bit and subsampling modes only exist in YCbCr; the
+	/// quant-matrix scales only exist in XYB. JPEG transcodes also carry flag 128.
 	@Test("YCbCr trades the quant-matrix scales for a transform and subsampling")
 	func fieldsSwapped() {
 		let xyb = Self.header(.xyb(xQuantMatrixScale: 3))
 		let ycbcr = Self.header(.ycbcr(subsampling: .none))
-		#expect(ycbcr.bitsWritten == xyb.bitsWritten + 1)
+		#expect(ycbcr.bitsWritten == xyb.bitsWritten + 9)
+	}
+
+	@Test("adaptive DC smoothing is skipped only for JPEG transcodes")
+	func dcSmoothingFlagMatchesSourcePath() {
+		var writer = Self.header(.xyb(xQuantMatrixScale: 3))
+		writer.zeroPadToByte()
+		var reader = BitReader(bytes: writer.take())
+		#expect(reader.read(1) == 0)
+		#expect(reader.read(2) == 0)
+		#expect(reader.read(1) == 0)
+		#expect(reader.read(2) == 0)
 	}
 
 	/// Walk the header to the colour transform and check it, rather than trusting
