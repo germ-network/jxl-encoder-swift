@@ -273,15 +273,38 @@ struct DistanceParamsTests {
 }
 
 extension DistanceParamsTests {
-	@Test(.disabled("Pending implementation"))
+	@Test
 	func thresholdNeighborsUseEffectiveDistanceAndOriginalMatrices() throws {
 		let below = try DistanceParams(distance: Float(10).nextDown)
 		let at = try DistanceParams(distance: 10)
 		let above = try DistanceParams(distance: Float(10).nextUp)
 		#expect(below.upsampling == 1)
+		#expect(below.originalDistance == Float(10).nextDown)
 		#expect(at.upsampling == 2 && above.upsampling == 2)
-		#expect(at.distance == 2.75 && at.originalDistance == 10)
+		#expect(at.distance == (Float(10) * 0.25) + 0.25)
+		#expect(at.originalDistance == 10)
+		#expect(above.originalDistance == Float(10).nextUp)
 		#expect(at.xQuantMatrixScale == 6)
+		#expect(at.epfIterations == 2)
+
+		let atFifteen = try DistanceParams(distance: 15)
+		let belowFifteen = try DistanceParams(distance: Float(15).nextDown)
+		let aboveFifteen = try DistanceParams(distance: Float(15).nextUp)
+		let effectiveFour = try DistanceParams(distance: 4)
+		#expect(belowFifteen.distance < 4)
+		#expect(atFifteen.distance == 4)
+		#expect(aboveFifteen.distance == 4)
+		#expect(belowFifteen.epfIterations == 2)
+		#expect(atFifteen.epfIterations == 3)
+		#expect(aboveFifteen.epfIterations == 3)
+		#expect(atFifteen.originalDistance == 15)
+		#expect(atFifteen.upsampling == 2)
+		#expect(atFifteen.xQuantMatrixScale == 6)
+		#expect(atFifteen.epfIterations == effectiveFour.epfIterations)
+		#expect(atFifteen.globalScale == effectiveFour.globalScale)
+		#expect(atFifteen.quantDC == effectiveFour.quantDC)
+		#expect(atFifteen.uniformQuant == effectiveFour.uniformQuant)
+		#expect(try DistanceParams(distance: 26).upsampling == 2)
 	}
 
 }
