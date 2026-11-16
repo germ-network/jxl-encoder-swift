@@ -8,9 +8,48 @@
 	struct CoeffOrderNativeIntegrationTests {
 		@Test(
 			"serialized scan-derived frames preserve source coefficients",
-			.disabled("Pending approved reader implementation"))
+			.enabled(if: harness != nil))
 		func readerSerializationPreservesSourceCoefficients() throws {
-			Issue.record("Pending behavioral assertions")
+			guard let harness = Self.harness else { return }
+			for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+				let source = try JPEGParserTests.fixture(name)
+				let transcode = try JPEGTranscode(JPEGParser.parse(source))
+				let directory = FileManager.default.temporaryDirectory
+					.appendingPathComponent("jpeg-reader-\(UUID().uuidString)")
+				try FileManager.default.createDirectory(
+					at: directory, withIntermediateDirectories: true)
+				defer { try? FileManager.default.removeItem(at: directory) }
+				let sourceURL = directory.appendingPathComponent("source.jpg")
+				let codestreamURL = directory.appendingPathComponent("encoded.jxl")
+				try Data(source).write(to: sourceURL)
+				try Data(Encoder.encodeJPEG(transcode)).write(to: codestreamURL)
+				let process = Process()
+				process.executableURL = URL(fileURLWithPath: harness)
+				process.arguments = [
+					"jpeg-witness", sourceURL.path, codestreamURL.path,
+				]
+				let output = Pipe()
+				let errors = Pipe()
+				process.standardOutput = output
+				process.standardError = errors
+				try process.run()
+				let data = output.fileHandleForReading.readDataToEndOfFile()
+				process.waitUntilExit()
+				let errorText = String(
+					decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+					as: UTF8.self)
+				#expect(
+					process.terminationStatus == 0,
+					Comment(rawValue: "\(name): \(errorText)"))
+				guard process.terminationStatus == 0 else { continue }
+				let witness = try SemanticDump(
+					parsing: String(decoding: data, as: UTF8.self))
+				#expect(
+					witness.fields[
+						"jpeg_context.reconstructed_coefficients_exact"]
+						== .integers([1]),
+					Comment(rawValue: name))
+			}
 		}
 
 		static let harness = ProcessInfo.processInfo.environment["JXL_HARNESS_PATH"]

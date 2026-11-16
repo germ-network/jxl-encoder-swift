@@ -16,10 +16,25 @@ struct JPEGTranscodeTests {
 	}
 
 	@Test(
-		"grayscale sampling uses source modes and existing fallback",
-		.disabled("Pending approved reader implementation"))
+		"grayscale sampling uses source modes and existing fallback")
 	func grayscaleSamplingUsesExistingModes() throws {
-		Issue.record("Pending behavioral assertions")
+		let gray = try JPEGParserTests.fixture("hopper_gray_odd")
+		let factorOffset =
+			try #require(JPEGParserTests.segmentOffset(gray, marker: 0xC0)) + 2 + 7
+		for factor: UInt8 in [0x11, 0x22] {
+			var modified = gray
+			modified[factorOffset] = factor
+			let transcode = try JPEGTranscode(JPEGParser.parse(modified))
+			#expect(transcode.componentMap == [0, 0, 0])
+			#expect(transcode.subsampling.is444)
+		}
+		var unsupported = gray
+		for factor: UInt8 in [0x33, 0x44] {
+			unsupported[factorOffset] = factor
+			#expect(throws: JPEGTranscode.TranscodeError.unsupportedSubsampling) {
+				try JPEGTranscode(JPEGParser.parse(unsupported))
+			}
+		}
 	}
 
 	@Test(

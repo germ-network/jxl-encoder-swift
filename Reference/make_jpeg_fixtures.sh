@@ -71,6 +71,7 @@ def crop(x0, y0, w, h, name):
 	open(f"{work}/{name}.ppm", "wb").write(b"P6\n%d %d\n255\n" % (w, h) + bytes(out))
 
 crop(40, 30, 101, 67, "odd")    # not a multiple of an MCU in either direction
+crop(0, 0, 199, 197, "odd_420") # larger odd 4:2:0 crop for pixel acceptance
 crop(60, 50, 37, 23, "small")   # small enough for a coefficient dump per subsampling
 crop(0, 0, 32, 32, "tiny")      # only used for the rejection cases
 PY
@@ -101,6 +102,13 @@ cjpeg -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/display_p
 cjpeg -quality 90 -sample 4x1 -outfile "$CORE/small_411.jpg" "$WORK/small.ppm"
 cjpeg -quality 85 -sample 2x2 -restart 3 -outfile "$CORE/hopper_420_odd.jpg" "$WORK/odd.ppm"
 cjpeg -quality 85 -grayscale -outfile "$CORE/hopper_gray_odd.jpg" "$WORK/odd.ppm"
+# Sequential scan partitions exercise interleaved and non-interleaved MCU grids.
+printf '2; 0; 1;\n' > "$WORK/scans_111.txt"
+printf '0 1; 2;\n' > "$WORK/scans_21.txt"
+printf '1; 0 2;\n' > "$WORK/scans_12.txt"
+cjpeg -quality 85 -sample 2x2 -scans "$WORK/scans_111.txt" -outfile "$CORE/scan_420_111.jpg" "$WORK/odd_420.ppm"
+cjpeg -quality 85 -sample 2x1 -scans "$WORK/scans_21.txt" -outfile "$CORE/scan_422_21.jpg" "$WORK/odd.ppm"
+cjpeg -quality 85 -sample 1x2 -scans "$WORK/scans_12.txt" -outfile "$CORE/scan_440_12.jpg" "$WORK/odd.ppm"
 # Quality 2 pushes the quantization tables past 255, which forces 16-bit DQT
 # entries and, with them, an extended-sequential SOF1 frame.
 cjpeg -quality 2 -sample 2x2 -outfile "$CORE/hopper_420_sof1.jpg" "$WORK/full.ppm"
@@ -109,7 +117,8 @@ cjpeg -quality 80 -progressive -outfile "$CORE/reject_progressive.jpg" "$WORK/ti
 cjpeg -quality 80 -arithmetic -outfile "$CORE/reject_arithmetic.jpg" "$WORK/tiny.ppm"
 cjpeg -lossless 1 -outfile "$CORE/reject_lossless.jpg" "$WORK/tiny.ppm"
 
-for name in small_444 small_422 small_440 small_411 hopper_420_odd hopper_gray_odd; do
+for name in small_444 small_422 small_440 small_411 hopper_420_odd hopper_gray_odd \
+	scan_420_111 scan_422_21 scan_440_12; do
 	"$OUT/dump_jpeg_coefficients" "$CORE/$name.jpg" "$CORE/$name.coef"
 done
 
@@ -124,6 +133,7 @@ cp "$CORE/hopper_420_restart.jpg" "$CORE/hopper_420_odd.jpg" \
 	"$CORE/hopper_gray_odd.jpg" "$CORE/hopper_420_sof1.jpg" \
 	"$CORE/small_422.jpg" "$CORE/small_440.jpg" "$CORE/small_444.jpg" \
 	"$CORE/reject_arithmetic.jpg" "$CORE/reject_progressive.jpg" \
+	"$CORE/scan_420_111.jpg" "$CORE/scan_422_21.jpg" "$CORE/scan_440_12.jpg" \
 	"$APPLE/"
 
 echo "fixtures regenerated"

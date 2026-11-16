@@ -12,17 +12,35 @@ import Testing
 @Suite("JPEG size limits")
 struct JPEGSizeLimitTests {
 	@Test(
-		"entropy feasibility counts coded scan blocks",
-		.disabled("Pending approved reader implementation"))
+		"entropy feasibility counts coded scan blocks")
 	func entropyFloorCountsOnlyCodedScanBlocks() throws {
-		Issue.record("Pending behavioral assertions")
+		let image = try JPEGParser.parse(Self.paddedChromaScan())
+		#expect(image.components[0].coefficients.allSatisfy { $0 == 0 })
+		#expect(image.components[1].coefficients.allSatisfy { $0 == 0 })
+		#expect(image.components[2].coefficients.allSatisfy { $0 == 0 })
 	}
 
 	@Test(
-		"coefficient budget covers persistent padded planes",
-		.disabled("Pending approved reader implementation"))
+		"coefficient budget covers persistent padded planes")
 	func coefficientBudgetCoversPersistentPaddedPlanes() throws {
-		Issue.record("Pending behavioral assertions")
+		let required = 96 * 64 * MemoryLayout<Int32>.size
+		#expect(
+			throws: JPEGParseError.coefficientBudgetExceeded(
+				required: required, budget: required - 1)
+		) {
+			try JPEGParser.parse(
+				Self.paddedChromaScan(), maxCoefficientBytes: required - 1)
+		}
+	}
+
+	static func paddedChromaScan() -> [UInt8] {
+		var data = crafted(width: 64, height: 64, entropyBytes: 0)
+		let frame = JPEGParserTests.segmentOffset(data, marker: 0xC0)! + 9
+		data[frame] = 0x22
+		let scan = JPEGParserTests.segmentOffset(data, marker: 0xDA)! - 2
+		let before = Array(data[..<scan])
+		return before + [0xFF, 0xDA, 0, 8, 1, 2, 0, 0, 63, 0]
+			+ [UInt8](repeating: 0, count: 20) + [0xFF, 0xD9]
 	}
 
 	/// A structurally valid baseline JPEG claiming `width` × `height`, followed

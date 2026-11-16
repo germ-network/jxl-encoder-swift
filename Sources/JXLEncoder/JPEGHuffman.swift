@@ -126,15 +126,17 @@ struct JPEGHuffmanTable {
 /// Bit-level reader over entropy-coded data.
 struct JPEGBitReader {
 	private let data: [UInt8]
+	private let scanEnd: Int
 	private(set) var index: Int
 	private var buffer: UInt32 = 0
 	private var bitCount = 0
 	private var markerBoundary: Int
 
-	init(data: [UInt8], index: Int) {
+	init(data: [UInt8], index: Int, scanEnd: Int? = nil) {
 		self.data = data
 		self.index = index
-		markerBoundary = max(data.count - 2, 0)
+		self.scanEnd = scanEnd ?? max(data.count - 2, 0)
+		markerBoundary = self.scanEnd
 	}
 
 	/// Resumes at `index` after a restart marker: the bit buffer does not carry
@@ -143,7 +145,7 @@ struct JPEGBitReader {
 		self.index = index
 		buffer = 0
 		bitCount = 0
-		markerBoundary = max(data.count - 2, 0)
+		markerBoundary = scanEnd
 	}
 
 	mutating func finish() throws -> Int {

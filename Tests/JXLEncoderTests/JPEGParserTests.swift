@@ -144,38 +144,122 @@ struct JPEGParserTests {
 	}
 
 	@Test(
-		"disjoint sequential scan partitions recover exact coefficients",
-		.disabled("Pending approved reader implementation"))
+		"disjoint sequential scan partitions recover exact coefficients")
 	func sequentialScanPartitionsMatchReference() throws {
-		Issue.record("Pending behavioral assertions")
+		for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+			let reference = try JPEGCoefficientDump(fixture: name)
+			let image = try JPEGParser.parse(Self.fixture(name))
+			#expect(image.width == reference.width)
+			#expect(image.height == reference.height)
+			try #require(image.components.count == reference.components.count)
+			for (parsed, expected) in zip(image.components, reference.components) {
+				#expect(parsed.identifier == expected.identifier)
+				#expect(parsed.blocksPerLine == expected.blocksPerLine)
+				#expect(parsed.blocksPerColumn == expected.blocksPerColumn)
+				#expect(
+					Self.firstDifference(
+						parsed.coefficients, expected.coefficients) == nil,
+					"component \(parsed.identifier) differs from libjpeg")
+			}
+		}
+		let data = try Self.fixture("scan_420_111")
+		let scans = Self.markerOffsets(0xDA, in: data)
+		let huffmanDefinitions = Self.markerOffsets(0xC4, in: data)
+		try #require(scans.count == 3)
+		#expect(huffmanDefinitions.contains { scans[0] < $0 && $0 < scans[1] })
 	}
 
-	@Test(
-		"scan order preserves frame component identity",
-		.disabled("Pending approved reader implementation"))
+	@Test("scan order preserves frame component identity")
 	func reorderedScanComponentsPreserveFrameOrder() throws {
-		Issue.record("Pending behavioral assertions")
+		for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+			let image = try JPEGParser.parse(Self.fixture(name))
+			#expect(image.components.map(\.identifier) == [1, 2, 3])
+		}
 	}
 
-	@Test(
-		"single-component scans preserve padded storage and zero edges",
-		.disabled("Pending approved reader implementation"))
+	@Test("single-component scans preserve padded storage and zero edges")
 	func singleComponentScansUsePaddedStride() throws {
-		Issue.record("Pending behavioral assertions")
+		let image = try JPEGParser.parse(Self.fixture("scan_420_111"))
+		let reference = try JPEGCoefficientDump(fixture: "scan_420_111")
+		for (component, expected) in zip(image.components, reference.components) {
+			#expect(
+				component.coefficients.count == component.blocksPerLine
+					* component.blocksPerColumn * 64)
+			#expect(
+				Self.firstDifference(component.coefficients, expected.coefficients)
+					== nil)
+		}
+		let chroma = image.components[1]
+		let codedWidth = (image.width + 15) / 16
+		let codedHeight = (image.height + 15) / 16
+		#expect(chroma.blocksPerLine == codedWidth)
+		#expect(chroma.blocksPerColumn == codedHeight)
 	}
 
-	@Test(
-		"sequential scans cannot decode a component twice",
-		.disabled("Pending approved reader implementation"))
+	@Test("unvisited components remain zero-filled when EOI follows one scan")
+	func unvisitedSequentialComponentsRemainZero() throws {
+		let data = try Self.fixture("scan_420_111")
+		let firstScan = try #require(Self.markerOffsets(0xDA, in: data).first)
+		let nextTable = try #require(
+			Self.markerOffsets(0xC4, in: data).first(where: { $0 > firstScan }))
+		let partial = Array(data[..<nextTable]) + [0xFF, 0xD9]
+		let image = try JPEGParser.parse(partial)
+		#expect(image.components[0].coefficients.allSatisfy { $0 == 0 })
+		#expect(image.components[1].coefficients.allSatisfy { $0 == 0 })
+		#expect(image.components[2].coefficients.contains { $0 != 0 })
+	}
+
+	@Test("later scan bytes cannot satisfy an earlier scan's entropy floor")
+	func scanEntropyFloorUsesOnlyCurrentScanBytes() throws {
+		let source = try Self.fixture("scan_420_111")
+		let originalScan = try #require(Self.markerOffsets(0xDA, in: source).first)
+		let invalidDC =
+			[0xFF, 0xC4, 0, 20, 0x03, 1]
+			+ [UInt8](repeating: 0, count: 15) + [0]
+		let data =
+			Array(source[..<originalScan]) + invalidDC + Array(source[originalScan...])
+		let firstScan = try #require(Self.markerOffsets(0xDA, in: data).first)
+		let nextTable = try #require(
+			Self.markerOffsets(0xC4, in: data).first(where: { $0 > firstScan }))
+		let entropyStart = firstScan + 10
+		var truncated = Array(data[..<entropyStart]) + [0x80] + Array(data[nextTable...])
+		truncated[firstScan + 6] = (truncated[firstScan + 6] & 0x0F) | 0x30
+		#expect(throws: JPEGParseError.truncatedEntropyData) {
+			try JPEGParser.parse(truncated)
+		}
+	}
+
+	@Test("sequential scans cannot decode a component twice")
 	func sequentialScansRejectOverlap() throws {
-		Issue.record("Pending behavioral assertions")
+		var data = try Self.fixture("scan_420_111")
+		let scans = Self.markerOffsets(0xDA, in: data)
+		try #require(scans.count == 3)
+		data[scans[1] + 5] = 3
+		#expect(throws: JPEGParseError.multipleScansNotSupported) {
+			try JPEGParser.parse(data)
+		}
 	}
 
 	@Test(
-		"range-valid sequential scan fields use source normalization",
-		.disabled("Pending approved reader implementation"))
+		"range-valid sequential scan fields use source normalization")
 	func sequentialScanParametersFollowSource() throws {
-		Issue.record("Pending behavioral assertions")
+		let data = try Self.fixture("small_444")
+		let baseline = try JPEGParser.parse(data)
+		for parameters: [UInt8] in [[1, 1, 0], [63, 63, 0], [0, 63, 0x31]] {
+			var modified = data
+			let sos = try #require(Self.markerOffsets(0xDA, in: modified).first)
+			let parametersOffset = sos + 5 + 2 * 3
+			modified.replaceSubrange(
+				parametersOffset..<(parametersOffset + 3), with: parameters)
+			#expect(try JPEGParser.parse(modified).components == baseline.components)
+		}
+	}
+
+	static func markerOffsets(_ marker: UInt8, in data: [UInt8]) -> [Int] {
+		guard data.count > 1 else { return [] }
+		return (0..<(data.count - 1)).filter {
+			data[$0] == 0xFF && data[$0 + 1] == marker
+		}
 	}
 
 	@Test(
@@ -530,7 +614,7 @@ struct JPEGParserTests {
 		"matches libjpeg's coefficients",
 		arguments: [
 			"small_444", "small_422", "small_440", "small_411", "hopper_420_odd",
-			"hopper_gray_odd",
+			"hopper_gray_odd", "scan_420_111", "scan_422_21", "scan_440_12",
 		])
 	func matchesReference(name: String) throws {
 		let reference = try JPEGCoefficientDump(fixture: name)
@@ -607,9 +691,8 @@ struct JPEGParserTests {
 	}
 
 	/// A lone component's sampling factors say nothing about its block grid —
-	/// it is always its own maximum — so a non-interleaved scan codes exactly
-	/// `ceil(width / 8)` blocks per line, not the MCU-padded count.
-	@Test("a single-component scan is not padded to the MCU grid")
+	/// it is always its own maximum, and persistent storage uses the padded MCU grid.
+	@Test("a single-component scan uses padded storage stride")
 	func nonInterleavedBlockGrid() throws {
 		let plain = try JPEGParser.parse(Self.fixture("hopper_gray_odd"))
 		#expect(plain.components[0].blocksPerLine == 13)  // ceil(101 / 8)
@@ -620,10 +703,20 @@ struct JPEGParserTests {
 		patched[sampling] = 0x22
 		let image = try JPEGParser.parse(patched)
 
-		// The MCU grid would be ceil(101 / 16) * 2 = 14 blocks wide.
-		#expect(image.components[0].blocksPerLine == 13)
-		#expect(image.components[0].blocksPerColumn == 9)
-		#expect(image.components[0].coefficients == plain.components[0].coefficients)
+		#expect(image.components[0].blocksPerLine == 14)
+		#expect(image.components[0].blocksPerColumn == 10)
+		for y in 0..<9 {
+			let row = y * 14 * 64
+			#expect(
+				Array(image.components[0].coefficients[row..<(row + 13 * 64)])
+					== Array(
+						plain.components[0].coefficients[
+							(y * 13 * 64)..<((y + 1) * 13 * 64)]))
+			#expect(
+				image.components[0].coefficients[(row + 13 * 64)..<(row + 14 * 64)]
+					.allSatisfy { $0 == 0 })
+		}
+		#expect(image.components[0].coefficients[(9 * 14 * 64)...].allSatisfy { $0 == 0 })
 	}
 
 	/// Destuffing is only covered because the fixtures actually contain `FF 00`.

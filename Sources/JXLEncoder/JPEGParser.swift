@@ -46,8 +46,7 @@ public enum JPEGParseError: Error, Equatable, Sendable {
 	/// so the frame header decides the allocation before any entropy data is
 	/// read.
 	case coefficientBudgetExceeded(required: Int, budget: Int)
-	/// Baseline requires a full spectral selection with no successive
-	/// approximation.
+	/// The scan spectral range is reversed or extends past coefficient 63.
 	case invalidScanParameters
 	case undefinedQuantTable(index: Int)
 	case undefinedHuffmanTable(isAC: Bool, index: Int)
@@ -178,7 +177,8 @@ private struct JPEGSegmentParser {
 	var restartInterval = 0
 	var hasRestartInterval = false
 	var frame: JPEGFrame?
-	var components: [JPEGComponent]?
+	var planes: [[Int32]]?
+	var scannedComponents = Set<Int>()
 	var hasAPP0 = false
 	var adobeTransform: UInt8?
 	var hasICCProfileTag = false
@@ -213,10 +213,7 @@ private struct JPEGSegmentParser {
 			case 0xDD:
 				try readRestartInterval()
 			case 0xDA:
-				guard components == nil else {
-					throw JPEGParseError.multipleScansNotSupported
-				}
-				components = try readScan()
+				try readScan()
 			case 0xD9:
 				break loop
 			case 0xD0...0xD7:
@@ -234,7 +231,19 @@ private struct JPEGSegmentParser {
 		}
 
 		guard let frame else { throw JPEGParseError.missingFrameHeader }
-		guard let components else { throw JPEGParseError.missingScan }
+		guard let planes, !scannedComponents.isEmpty else {
+			throw JPEGParseError.missingScan
+		}
+		let components = frame.components.enumerated().map { c, component in
+			JPEGComponent(
+				identifier: component.identifier,
+				horizontalSampling: component.horizontalSampling,
+				verticalSampling: component.verticalSampling,
+				quantTableIndex: component.quantTableIndex,
+				blocksPerLine: frame.mcusPerLine * component.horizontalSampling,
+				blocksPerColumn: frame.mcusPerColumn * component.verticalSampling,
+				coefficients: planes[c])
+		}
 		let highestTable = quantTables.lastIndex(where: { $0 != nil }).map { $0 + 1 } ?? 0
 		let sourceIsRGB: Bool
 		if components.count == 1 || hasAPP0 {
@@ -497,7 +506,7 @@ private struct JPEGSegmentParser {
 
 	// MARK: - Scan
 
-	private mutating func readScan() throws -> [JPEGComponent] {
+	private mutating func readScan() throws {
 		guard let frame else { throw JPEGParseError.missingFrameHeader }
 		let end = try segmentEnd(marker: 0xDA)
 		guard index < end else {
@@ -505,10 +514,7 @@ private struct JPEGSegmentParser {
 		}
 
 		let count = Int(try byte())
-		// The scan has to cover the whole frame. Sequential JPEG may split a
-		// frame across several single-component scans, but nothing in practice
-		// emits that, so it is declined rather than decoded untested.
-		guard count == frame.components.count else {
+		guard count > 0, count <= frame.components.count else {
 			throw JPEGParseError.multipleScansNotSupported
 		}
 		guard end == index + count * 2 + 3 else {
@@ -538,8 +544,8 @@ private struct JPEGSegmentParser {
 		}
 		let spectralStart = try byte()
 		let spectralEnd = try byte()
-		let approximation = try byte()
-		guard spectralStart == 0, spectralEnd == 63, approximation == 0 else {
+		_ = try byte()
+		guard spectralStart <= spectralEnd, spectralEnd <= 63 else {
 			throw JPEGParseError.invalidScanParameters
 		}
 		guard index == end else {
@@ -560,63 +566,92 @@ private struct JPEGSegmentParser {
 			dc.append(table)
 			ac.append(acTable)
 		}
-		for component in frame.components
-		where quantTables[component.quantTableIndex] == nil {
+		for componentIndex in order
+		where quantTables[frame.components[componentIndex].quantTableIndex] == nil {
+			let component = frame.components[componentIndex]
 			throw JPEGParseError.undefinedQuantTable(index: component.quantTableIndex)
 		}
+		guard order.allSatisfy({ !scannedComponents.contains($0) }) else {
+			throw JPEGParseError.multipleScansNotSupported
+		}
+		let entropy = scanEntropyBounds(from: index)
+		try decodeScan(
+			frame: frame, order: order, dcTables: dc, acTables: ac,
+			entropyByteCount: entropy.byteCount, scanEnd: entropy.end)
+		scannedComponents.formUnion(order)
+	}
 
-		return try decodeScan(
-			frame: frame, order: order, dcTables: dc, acTables: ac)
+	private func scanEntropyBounds(from start: Int) -> (end: Int, byteCount: Int) {
+		var cursor = start
+		var byteCount = 0
+		while cursor < data.count {
+			guard data[cursor] == 0xFF else {
+				byteCount += 1
+				cursor += 1
+				continue
+			}
+			let markerStart = cursor
+			var code = cursor + 1
+			while code < data.count, data[code] == 0xFF { code += 1 }
+			guard code < data.count else { return (markerStart, byteCount) }
+			switch data[code] {
+			case 0x00:
+				byteCount += 1
+				cursor = code + 1
+			case 0xD0...0xD7:
+				cursor = code + 1
+			default:
+				return (markerStart, byteCount)
+			}
+		}
+		return (data.count, byteCount)
 	}
 
 	private mutating func decodeScan(
 		frame: JPEGFrame, order: [Int], dcTables: [JPEGHuffmanTable],
-		acTables: [JPEGHuffmanTable]
-	) throws -> [JPEGComponent] {
-		let interleaved = frame.components.count > 1
-		var blocksPerLine: [Int] = []
-		var blocksPerColumn: [Int] = []
-		for component in frame.components {
-			let horizontal = component.horizontalSampling
-			let vertical = component.verticalSampling
-			guard interleaved else {
-				// A non-interleaved scan codes exactly the component's own
-				// blocks, with no MCU padding.
-				let width = ceilDiv(frame.width * horizontal, frame.maxHorizontal)
-				let height = ceilDiv(frame.height * vertical, frame.maxVertical)
-				blocksPerLine.append(ceilDiv(width, 8))
-				blocksPerColumn.append(ceilDiv(height, 8))
-				continue
-			}
-			blocksPerLine.append(frame.mcusPerLine * horizontal)
-			blocksPerColumn.append(frame.mcusPerColumn * vertical)
-		}
-
-		var totalBlocks = 0
-		for i in 0..<frame.components.count {
-			totalBlocks += blocksPerLine[i] * blocksPerColumn[i]
+		acTables: [JPEGHuffmanTable], entropyByteCount: Int, scanEnd: Int
+	) throws {
+		let interleaved = order.count > 1
+		let codedBlocks: Int
+		if interleaved {
+			codedBlocks =
+				frame.mcusPerLine * frame.mcusPerColumn
+				* order.reduce(0) { sum, c in
+					let component = frame.components[c]
+					return sum + component.horizontalSampling
+						* component.verticalSampling
+				}
+		} else {
+			let component = frame.components[order[0]]
+			let width = ceilDiv(
+				frame.width * component.horizontalSampling, frame.maxHorizontal)
+			let height = ceilDiv(
+				frame.height * component.verticalSampling, frame.maxVertical)
+			codedBlocks = ceilDiv(width, 8) * ceilDiv(height, 8)
 		}
 		// Every block costs at least a DC code and an end-of-block code, so two
 		// bits. Without this a tiny file claiming huge dimensions would have us
 		// allocate gigabytes before discovering it is truncated.
-		guard (data.count - index) * 4 >= totalBlocks else {
+		guard entropyByteCount * 4 >= codedBlocks else {
 			throw JPEGParseError.truncatedEntropyData
 		}
-		// That rule is the information-theoretic floor, which leaves 256 bytes
-		// of coefficients authorised by two bits of input. The budget is what
-		// actually bounds it.
-		let required = totalBlocks * 64 * MemoryLayout<Int32>.size
-		guard required <= maxCoefficientBytes else {
-			throw JPEGParseError.coefficientBudgetExceeded(
-				required: required, budget: maxCoefficientBytes)
-		}
-
-		var planes: [[Int32]] = []
-		for i in 0..<frame.components.count {
-			planes.append(
+		if planes == nil {
+			let paddedBlocks = frame.components.reduce(0) { sum, component in
+				sum + frame.mcusPerLine * component.horizontalSampling
+					* frame.mcusPerColumn * component.verticalSampling
+			}
+			let required = paddedBlocks * 64 * MemoryLayout<Int32>.size
+			guard required <= maxCoefficientBytes else {
+				throw JPEGParseError.coefficientBudgetExceeded(
+					required: required, budget: maxCoefficientBytes)
+			}
+			planes = frame.components.map { component in
 				[Int32](
 					repeating: 0,
-					count: blocksPerLine[i] * blocksPerColumn[i] * 64))
+					count: frame.mcusPerLine * component.horizontalSampling
+						* frame.mcusPerColumn * component.verticalSampling
+						* 64)
+			}
 		}
 
 		// One MCU's blocks in coding order: each component contributes
@@ -633,12 +668,25 @@ private struct JPEGSegmentParser {
 			}
 		}
 
-		var reader = JPEGBitReader(data: data, index: index)
+		var reader = JPEGBitReader(data: data, index: index, scanEnd: scanEnd)
 		var predictors = [Int32](repeating: 0, count: frame.components.count)
+		let singleWidth: Int
+		if interleaved {
+			singleWidth = frame.mcusPerLine
+		} else {
+			let c = frame.components[order[0]]
+			singleWidth = ceilDiv(
+				ceilDiv(frame.width * c.horizontalSampling, frame.maxHorizontal), 8)
+		}
 		let mcuCount =
 			interleaved
 			? frame.mcusPerLine * frame.mcusPerColumn
-			: blocksPerLine[0] * blocksPerColumn[0]
+			: singleWidth
+				* ceilDiv(
+					ceilDiv(
+						frame.height
+							* frame.components[order[0]]
+							.verticalSampling, frame.maxVertical), 8)
 		var restartsSeen = 0
 
 		for mcu in 0..<mcuCount {
@@ -649,35 +697,27 @@ private struct JPEGSegmentParser {
 				for i in predictors.indices { predictors[i] = 0 }
 			}
 
-			let mcuX = mcu % frame.mcusPerLine
-			let mcuY = mcu / frame.mcusPerLine
+			let mcuX = mcu % singleWidth
+			let mcuY = mcu / singleWidth
 			for slot in slots {
 				let component = frame.components[slot.component]
-				let row = mcuY * component.verticalSampling + slot.y
-				let column = mcuX * component.horizontalSampling + slot.x
-				// A non-interleaved scan's MCU is a single block, walked in the
-				// component's own raster order rather than over the MCU grid.
-				let block =
+				let row =
 					interleaved
-					? row * blocksPerLine[slot.component] + column : mcu
+					? mcuY * component.verticalSampling + slot.y : mcuY
+				let column =
+					interleaved
+					? mcuX * component.horizontalSampling + slot.x : mcuX
+				let block =
+					row * (frame.mcusPerLine * component.horizontalSampling)
+					+ column
 				try decodeBlock(
-					into: &planes[slot.component], offset: block * 64,
+					into: &planes![slot.component], offset: block * 64,
 					dc: dcTables[slot.scan], ac: acTables[slot.scan],
 					predictor: &predictors[slot.component], reader: &reader)
 			}
 		}
 
 		index = try reader.finish()
-		return frame.components.enumerated().map { c, component in
-			JPEGComponent(
-				identifier: component.identifier,
-				horizontalSampling: component.horizontalSampling,
-				verticalSampling: component.verticalSampling,
-				quantTableIndex: component.quantTableIndex,
-				blocksPerLine: blocksPerLine[c],
-				blocksPerColumn: blocksPerColumn[c],
-				coefficients: planes[c])
-		}
 	}
 
 	/// Restart markers are byte-aligned and cycle RST0...RST7. A mismatch means

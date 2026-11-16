@@ -15,10 +15,17 @@
 	@Suite("JPEG transcode decoding")
 	struct JPEGTranscodeDecodeTests {
 		@Test(
-			"serialized sequential scan layouts preserve decoded pixels",
-			.disabled("Pending approved reader implementation"))
+			"serialized sequential scan layouts preserve decoded pixels")
 		func sequentialScanSerializationPreservesPixels() throws {
-			Issue.record("Pending behavioral assertions")
+			for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+				for optimize in [true, false] {
+					let error = try Self.meanError(name, optimize: optimize)
+					#expect(
+						error < 2.0,
+						"\(name), optimize=\(optimize): mean error \(error)"
+					)
+				}
+			}
 		}
 
 		static func transcode(_ name: String) throws -> JPEGTranscode {

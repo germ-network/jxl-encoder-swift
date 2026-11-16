@@ -45,7 +45,15 @@ public struct JPEGTranscode {
 			// as a strong colour cast.
 			componentMap = [0, 0, 0]
 			isGrayscale = true
-			subsampling = ChromaSubsampling(channelMode: [0, 0, 0])
+			let component = image.components[0]
+			guard
+				let sampling = ChromaSubsampling.fromJPEG(
+					horizontalSampling: Array(
+						repeating: component.horizontalSampling, count: 3),
+					verticalSampling: Array(
+						repeating: component.verticalSampling, count: 3))
+			else { throw TranscodeError.unsupportedSubsampling }
+			subsampling = sampling
 		case 3:
 			// libjxl's `JpegOrder` for kYCbCr. JXL orders channels X, Y, B, and
 			// under a YCbCr colour transform that reads as Cb, Y, Cr — so the
