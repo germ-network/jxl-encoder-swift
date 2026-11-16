@@ -10,6 +10,17 @@ import Testing
 /// scan and the MCU layout at once.
 @Suite("JPEGParser")
 struct JPEGParserTests {
+
+	@Test(
+		"APP0, first valid Adobe marker, and ordered component IDs determine color eligibility",
+		.disabled("Awaiting implementation"))
+	func markerColorPrecedence() throws {}
+
+	@Test(
+		"fully tagged ICC metadata declines coefficient recompression",
+		.disabled("Awaiting implementation"))
+	func iccProfileEligibility() throws {}
+
 	enum FixtureError: Error { case notFound(String) }
 
 	static func fixture(_ name: String, _ ext: String = "jpg") throws -> [UInt8] {

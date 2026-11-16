@@ -6,6 +6,12 @@ import Testing
 /// point, and JPEG XL signature detection.
 @Suite("Portable JPEG recompression")
 struct PortableJPEGRecompressionTests {
+
+	@Test(
+		"unsupported JPEG color interpretation returns nil",
+		.disabled("Awaiting implementation"))
+	func unsupportedColorFallsBack() throws {}
+
 	@Test(
 		"DC boundary JPEGs recompress through the public API",
 		arguments: [-1025, -1024, -1023, 1023, 1024]

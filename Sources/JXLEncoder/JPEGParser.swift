@@ -79,6 +79,8 @@ public struct JPEGComponent: Equatable, Sendable {
 }
 
 public struct JPEGImage: Equatable, Sendable {
+	var hasSupportedColorInterpretation = true
+
 	public let width: Int
 	public let height: Int
 	public let components: [JPEGComponent]

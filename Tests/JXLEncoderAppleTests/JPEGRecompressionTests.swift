@@ -18,6 +18,17 @@
 	/// nothing would otherwise look like a pass.
 	@Suite("JPEG recompression through the shim")
 	struct JPEGRecompressionTests {
+
+		@Test(
+			"RGB and profiled JPEG fallback preserves decoded colors",
+			.disabled("Awaiting implementation"))
+		func colorFallbackMatchesDecodedSource() throws {}
+
+		@Test(
+			"concurrent RGB and profiled JPEG fallback preserves decoded colors",
+			.disabled("Awaiting implementation"))
+		func concurrentColorFallbackMatchesDecodedSource() async throws {}
+
 		/// Everything the transcode should handle.
 		static let recompressible = [
 			"hopper_444", "hopper_422", "hopper_420_restart", "hopper_420_odd",
