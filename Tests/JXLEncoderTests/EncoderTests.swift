@@ -92,6 +92,30 @@ struct EncoderTests {
 		#expect(bytes.count > 100)
 	}
 
+	@Test(
+		"pixel entry points propagate invalidDistance for non-finite inputs",
+		.disabled("Pending distance validation implementation"),
+		arguments: [Float.nan, .infinity, -.infinity])
+	func rejectsNonFiniteDistances(distance: Float) async throws {
+		let image = try ImageBuffer(width: 1, height: 1, samples: [0, 0, 0])
+		#expect {
+			try Encoder.encode(image, distance: distance)
+		} throws: { error in
+			guard case EncoderError.invalidDistance(let rejected) = error else {
+				return false
+			}
+			return rejected.isNaN ? distance.isNaN : rejected == distance
+		}
+		await #expect {
+			try await Encoder.encodeConcurrently(image, distance: distance)
+		} throws: { error in
+			guard case EncoderError.invalidDistance(let rejected) = error else {
+				return false
+			}
+			return rejected.isNaN ? distance.isNaN : rejected == distance
+		}
+	}
+
 	@Test("lower distance yields a larger file")
 	func distanceMonotonic() throws {
 		let size = 64
