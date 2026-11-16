@@ -138,10 +138,10 @@ enum HistogramCluster {
 		func mergeCost(_ first: Int, _ second: Int) -> Float {
 			var combined = clusters[first]
 			combined.add(clusters[second])
-			return ANSEncodingHistogram.computeBest(
+			let combinedCost = ANSEncodingHistogram.computeBest(
 				counts: combined.counts, strategy: .fast
 			).cost
-				- costs[first] - costs[second]
+			return combinedCost - (costs[first] + costs[second])
 		}
 		func enqueue(_ first: Int, _ second: Int) {
 			let cost = mergeCost(first, second)

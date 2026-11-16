@@ -42,23 +42,54 @@ struct CoeffOrderContractTests {
 		#expect(counts[0].counts[1] == 3)
 		#expect(counts[1].counts[1] == 0)
 
-		func group(x: Int, width: Int, height: Int, zeroPosition: Int)
+		func group(x: Int, width: Int, zeroPosition: Int, zeroBlocks: Int)
 			-> Encoder.ACGroupCompute
 		{
-			var plane = [Int32](repeating: 1, count: width * height * DCT.blockSize)
-			for block in 0..<(width * height) {
+			var plane = [Int32](repeating: 1, count: width * DCT.blockSize)
+			for block in 0..<zeroBlocks {
 				plane[block * DCT.blockSize + zeroPosition] = 0
 			}
 			return Encoder.ACGroupCompute(
-				groupX: x, groupY: 0, widthInBlocks: width, heightInBlocks: height,
-				coefficients: [plane, plane, plane], rawDC: [], quantField: [])
+				groupX: x, groupY: 0, widthInBlocks: width, heightInBlocks: 1,
+				coefficients: [
+					plane, [Int32](repeating: 1, count: width * DCT.blockSize),
+					[Int32](repeating: 1, count: width * DCT.blockSize),
+				], rawDC: [], quantField: [])
 		}
-		let first = group(x: 0, width: 5, height: 5, zeroPosition: 1)
-		let second = group(x: 1, width: 5, height: 1, zeroPosition: 8)
-		let dim = ImageDim(width: 80, height: 40)
+		let first = group(
+			x: 0, width: 13, zeroPosition: CoeffOrder.natural[1], zeroBlocks: 8)
+		let second = group(
+			x: 1, width: 12, zeroPosition: CoeffOrder.natural[2], zeroBlocks: 8)
+		let dim = ImageDim(width: 200, height: 8)
 		let raster = Encoder.computeCoeffOrder([first, second], dim: dim)
 		let shuffled = Encoder.computeCoeffOrder([second, first], dim: dim)
-		#expect(raster.orders == shuffled.orders)
+		var sampledCounts = [CoeffOrder.ZeroCounts](
+			repeating: CoeffOrder.ZeroCounts(), count: 3)
+		var continuousSampler = CoeffOrder.Sampler()
+		CoeffOrder.accumulateGroup(
+			first.coefficients, widthInBlocks: 13, heightInBlocks: 1,
+			sampler: &continuousSampler, counts: &sampledCounts)
+		CoeffOrder.accumulateGroup(
+			second.coefficients, widthInBlocks: 12, heightInBlocks: 1,
+			sampler: &continuousSampler, counts: &sampledCounts)
+		#expect(sampledCounts[0].counts[CoeffOrder.natural[1]] == 8)
+		#expect(sampledCounts[0].counts[CoeffOrder.natural[2]] == 8)
+		let expected = CoeffOrder.compute(
+			counts: sampledCounts, widthInBlocks: 25, heightInBlocks: 1)
+		#expect(raster.orders == expected.orders)
+		#expect(shuffled.orders == expected.orders)
+		var resetCounts = [CoeffOrder.ZeroCounts](
+			repeating: CoeffOrder.ZeroCounts(), count: 3)
+		for compute in [first, second] {
+			var sampler = CoeffOrder.Sampler()
+			CoeffOrder.accumulateGroup(
+				compute.coefficients, widthInBlocks: compute.widthInBlocks,
+				heightInBlocks: compute.heightInBlocks, sampler: &sampler,
+				counts: &resetCounts)
+		}
+		let reset = CoeffOrder.compute(
+			counts: resetCounts, widthInBlocks: 25, heightInBlocks: 1)
+		#expect(reset.orders != expected.orders)
 		#expect(raster.isCustom)
 	}
 
@@ -209,8 +240,9 @@ struct CoeffOrderContractTests {
 		#expect(result.enabled)
 		let lengths = result.tokens.filter(\.isLength)
 		#expect(lengths.count == 1)
-		#expect(lengths[0].token.context == tokens[128].context)
-		#expect(lengths[0].token.value == 37)
+		guard let length = lengths.first else { return }
+		#expect(length.token.context == tokens[128].context)
+		#expect(length.token.value == 37)
 		#expect(result.tokens[129].token.context == 8)
 		#expect(result.tokens[129].token.value == 0)
 		let short = ContextMapEntropy.runLengthEncode(
@@ -301,6 +333,12 @@ struct CoeffOrderContractTests {
 				210, 36, 142, 194, 192, 247, 92, 199, 182, 76, 67, 215, 84, 69, 150,
 				68, 129, 231, 88, 134, 166, 72, 2, 199, 80, 4, 0,
 			])
+		#expect(!prefix.runLength.enabled)
+		var ordinaryPrefixWriter = BitWriter()
+		EntropyCodeWriter.write(prefix.code, writer: &ordinaryPrefixWriter)
+		EntropyCodeWriter.writeTokens(
+			prefixTokens, code: prefix.code, writer: &ordinaryPrefixWriter)
+		#expect(ordinaryPrefixWriter.bytes == prefixWriter.bytes)
 
 		let runTokens =
 			(0..<128).map { Token(context: UInt32($0 % 8), value: UInt32($0 % 64)) }
@@ -325,5 +363,19 @@ struct CoeffOrderContractTests {
 				155, 159, 2, 96, 28, 203, 188, 31, 99, 75, 131, 99, 163, 156, 195,
 				92, 255, 208, 255, 0, 0, 5,
 			])
+		var ordinaryANSWriter = BitWriter()
+		EntropyCodeWriter.write(ans.code, writer: &ordinaryANSWriter)
+		EntropyCodeWriter.writeTokens(
+			runTokens, code: ans.code, writer: &ordinaryANSWriter)
+		var configuredANSWriter = BitWriter()
+		EntropyCodeWriter.write(ans.code, writer: &configuredANSWriter)
+		EntropyCodeWriter.writeTokens(
+			runTokens.map {
+				ContextMapEntropy.EncodedToken(token: $0, isLength: false)
+			}, code: ans.code,
+			lengthConfiguration: HybridUintConfiguration(
+				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
+			lengthSymbolOffset: 224, writer: &configuredANSWriter)
+		#expect(ordinaryANSWriter.bytes == configuredANSWriter.bytes)
 	}
 }

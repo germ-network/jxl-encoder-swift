@@ -229,10 +229,9 @@ enum CoeffOrder {
 	/// more often nonzero move earlier — ties broken by original scan rank.
 	/// Rank 0 (raster position 0, the LLF slot) always stays fixed: it is
 	/// never transmitted regardless (`TokenizePermutation`'s `skip`), so there
-	/// is nothing to gain from sorting it, and the reference's own mechanism
-	/// for forcing it first relies on an unsigned cast of a negative float
-	/// that is undefined behaviour in C++ — not worth reproducing when fixing
-	/// the slot directly gives the identical transmitted permutation.
+	/// is nothing to gain from sorting it. The source's key for this rank is
+	/// Float(-0.125) + 0.1; conversion to UInt truncates toward zero, yielding
+	/// the same zero key, so fixing the slot directly preserves its order.
 	static func computeOrder(counts: [Int64]) -> ChannelOrder {
 		let invSqrtSize = 1.0 / Float(DCT.blockSize).squareRoot()
 		func key(rank: Int) -> Int64 {
