@@ -22,6 +22,9 @@ func clamp1<T: Comparable>(_ value: T, _ low: T, _ high: T) -> T {
 /// Frame-level quantizer settings derived from the requested distance.
 public struct DistanceParams: Equatable, Sendable {
 	public let distance: Float
+
+	let originalDistance: Float
+	let upsampling: Int
 	public let globalScale: Int
 	public let quantDC: Int
 	public let scale: Float
@@ -56,7 +59,11 @@ public struct DistanceParams: Equatable, Sendable {
 
 		// Below this the average bits-per-pixel exceeds lossless, so the
 		// reference clamps rather than encoding a pointlessly large file.
-		let distance = max(distance, 0.03)
+		let originalDistance = max(distance, 0.03)
+		self.originalDistance = originalDistance
+		let upsampling = originalDistance >= 10 ? 2 : 1
+		self.upsampling = upsampling
+		let distance = upsampling == 2 ? (originalDistance * 0.25) + 0.25 : originalDistance
 		self.distance = distance
 
 		let dcQuant = Self.quantDC(distance: distance)
@@ -80,7 +87,7 @@ public struct DistanceParams: Equatable, Sendable {
 		uniformQuant = UInt8(clamp1(Int(q * inverseScale + 0.5), 1, Self.quantMax))
 
 		var xScale: UInt32 = 3
-		for step in [Float(2.5), 5.5, 9.5] where distance > step {
+		for step in [Float(2.5), 5.5, 9.5] where originalDistance > step {
 			xScale += 1
 		}
 		xQuantMatrixScale = xScale

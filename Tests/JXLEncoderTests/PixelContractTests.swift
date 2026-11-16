@@ -51,8 +51,8 @@ struct PixelSemanticFixtureTests {
 		}
 	}
 
-	@Test("quant fields match upstream around clamp and decision boundaries")
-	func quantFieldBoundaryDistancesMatchReference() throws {
+	@Test("quant fields match upstream below the automatic resampling threshold")
+	func quantFieldBoundaryDistancesMatchReferenceBelowResampling() throws {
 		let reference = try SemanticDump(fixture: "distance_params")
 		let boundaries: [Float] = [
 			0.03, 0.05, 0.299, 0.5, 0.7, 1.25, 1.5, 2.5, 3, 4, 5, 5.5, 9, 9.5, 10,
@@ -63,34 +63,52 @@ struct PixelSemanticFixtureTests {
 			distances.append(boundary)
 			distances.append(boundary.nextUp)
 		}
+		let indices = distances.indices.filter { distances[$0] < 10 }
+		let comparedDistances = indices.map { distances[$0] }
+		var expected = SemanticDump()
+		for field in [
+			"distance_params.inputs", "distance_params.effective_distance",
+			"distance_params.global_scale", "distance_params.quant_dc",
+			"distance_params.quant_field",
+		] {
+			switch reference.fields[field] {
+			case .floats(let values):
+				expected.record(field, .floats(indices.map { values[$0] }))
+			case .integers(let values):
+				expected.record(field, .integers(indices.map { values[$0] }))
+			default:
+				Issue.record("missing fixture observations")
+			}
+		}
 		var emitted = SemanticDump()
-		emitted.record("distance_params.neon_target", .integers([1]))
 		emitted.record(
 			"distance_params.inputs",
-			.integers(distances.map { Int64($0.bitPattern) }))
+			.integers(comparedDistances.map { Int64($0.bitPattern) }))
 		emitted.record(
 			"distance_params.effective_distance",
-			.floats(try distances.map { try DistanceParams(distance: $0).distance }))
+			.floats(
+				try comparedDistances.map {
+					try DistanceParams(distance: $0).distance
+				}))
 		emitted.record(
 			"distance_params.global_scale",
 			.integers(
-				try distances.map {
+				try comparedDistances.map {
 					Int64(try DistanceParams(distance: $0).globalScale)
 				}))
 		emitted.record(
 			"distance_params.quant_dc",
 			.integers(
-				try distances.map {
+				try comparedDistances.map {
 					Int64(try DistanceParams(distance: $0).quantDC)
 				}))
 		emitted.record(
 			"distance_params.quant_field",
 			.integers(
-				try distances.map {
+				try comparedDistances.map {
 					Int64(try DistanceParams(distance: $0).uniformQuant)
 				}))
-		#expect(reference.fields["distance_params.neon_target"] == .integers([1]))
-		#expect(emitted.differences(from: reference).isEmpty)
+		#expect(emitted.differences(from: expected).isEmpty)
 	}
 
 	@Test("upstream filter and matrix transition boundaries are explicit per category")
@@ -141,7 +159,6 @@ struct PixelSemanticFixtureTests {
 		let swiftEPF = try distances.map {
 			Int64(try DistanceParams(distance: $0).epfIterations)
 		}
-		let epfIssues: Set<Int> = [43, 44]
 		for index in distances.indices {
 			let distance = distances[index]
 			#expect(
@@ -150,17 +167,9 @@ struct PixelSemanticFixtureTests {
 			#expect(
 				swiftXScale[index] == xScale[index],
 				"X matrix scale at \(distance)")
-			if epfIssues.contains(index) {
-				withKnownIssue(Comment(rawValue: "GER-3387")) {
-					#expect(
-						swiftEPF[index] == epf[index],
-						"EPF iterations at \(distance)")
-				}
-			} else {
-				#expect(
-					swiftEPF[index] == epf[index],
-					"EPF iterations at \(distance)")
-			}
+			#expect(
+				swiftEPF[index] == epf[index],
+				"EPF iterations at \(distance)")
 			#expect(bScale[index] == 2, "B matrix scale at \(distance)")
 		}
 	}

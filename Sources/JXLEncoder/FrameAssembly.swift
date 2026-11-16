@@ -35,7 +35,8 @@ enum FrameAssembly {
 	}
 
 	static func writeFrameHeader(
-		colorMode: ColorMode, loopFilter: LoopFilter, writer: inout BitWriter
+		colorMode: ColorMode, loopFilter: LoopFilter, upsampling: Int = 1,
+		writer: inout BitWriter
 	) {
 		let epfIterations = loopFilter.epfIterations
 		writer.write(1, 0)  // not all default
@@ -55,7 +56,8 @@ enum FrameAssembly {
 			subsampling.write(to: &writer)
 		}
 
-		writer.write(2, 0)  // no upsampling
+		precondition(upsampling == 1 || upsampling == 2)
+		writer.write(2, upsampling == 2 ? 1 : 0)
 		if case .xyb(let xQuantMatrixScale) = colorMode {
 			writer.write(3, UInt64(xQuantMatrixScale))
 			writer.write(3, 2)  // b_qm_scale

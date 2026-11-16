@@ -30,10 +30,13 @@ struct EncoderTests {
 			PlaneBuffer.copyAndPad(
 				source: interleaved, sourceWidth: width, rect: rect)
 		}
+		let pixelFrame = Encoder.preparePixelFrame(
+			stripeAt: stripeAt, width: linear.width, height: linear.height,
+			params: params)
 		//these fixtures were produced with legacy static entropy tables, so they gate
 		//the unoptimised path
 		try Encoder.encodeFrame(
-			stripeAt: stripeAt, width: linear.width, height: linear.height,
+			pixelFrame: pixelFrame,
 			params: params, optimizeCodes: false, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()

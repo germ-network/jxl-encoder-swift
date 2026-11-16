@@ -247,15 +247,18 @@ struct SemanticFixtureTests {
 			let pixels = input.interleaved
 			let width = input.width
 			let params = try DistanceParams(distance: entry.distance)
+			let pixelFrame = Encoder.preparePixelFrame(
+				stripeAt: {
+					PlaneBuffer.copyAndPad(
+						source: pixels, sourceWidth: width, rect: $0)
+				},
+				width: input.width, height: input.height, params: params)
 			var writer = BitWriter()
 			try ImageHeader.write(
 				width: input.width, height: input.height, transferFunction: .linear,
 				to: &writer)
 			try Encoder.encodeFrame(
-				stripeAt: {
-					PlaneBuffer.copyAndPad(
-						source: pixels, sourceWidth: width, rect: $0)
-				}, width: input.width, height: input.height, params: params,
+				pixelFrame: pixelFrame, params: params,
 				optimizeCodes: true, writer: &writer)
 			writer.zeroPadToByte()
 			let result = try SwiftSemanticEncoding.encode(
@@ -455,15 +458,19 @@ struct SemanticMutationTests {
 		let input = try StageDump(fixture: "multigroup_linear")
 		let pixels = input.interleaved
 		let width = input.width
-		let dim = ImageDim(width: input.width, height: input.height)
 		let params = try DistanceParams(distance: 1)
+		let pixelFrame = Encoder.preparePixelFrame(
+			stripeAt: {
+				PlaneBuffer.copyAndPad(
+					source: pixels, sourceWidth: width, rect: $0)
+			},
+			width: input.width, height: input.height, params: params)
+		let dim = pixelFrame.dim
 		let baseline = try SwiftSemanticEncoding.encode(linear: input, distance: 1)
 		let groups = (0..<dim.groupCount).map {
 			Encoder.computeACGroup(
-				stripeAt: {
-					PlaneBuffer.copyAndPad(
-						source: pixels, sourceWidth: width, rect: $0)
-				}, dim: dim, groupX: $0 % dim.widthInGroups,
+				xybAt: pixelFrame.xybAt, dim: dim,
+				groupX: $0 % dim.widthInGroups,
 				groupY: $0 / dim.widthInGroups, params: params)
 		}
 		var alterations = SwiftSemanticEncoding.Alterations.none
