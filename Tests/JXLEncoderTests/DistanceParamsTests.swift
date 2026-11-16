@@ -308,3 +308,18 @@ extension DistanceParamsTests {
 	}
 
 }
+
+extension DistanceParamsTests {
+	@Test(.disabled("Pending quantizer arithmetic implementation"))
+	func globalScaleUsesSourceOperationOrder() throws {}
+
+	@Test(.disabled("Pending quantizer arithmetic implementation"))
+	func dcQuantizationUsesRoundedReciprocal() throws {}
+
+	@Test(.disabled("Pending quantizer saturation implementation"))
+	func globalScaleStaysPositiveAtDCCapFloorBoundary() throws {}
+
+	@Test(.disabled("Pending finite range implementation"))
+	func positiveFiniteDistancesRemainRepresentable() throws {}
+
+}

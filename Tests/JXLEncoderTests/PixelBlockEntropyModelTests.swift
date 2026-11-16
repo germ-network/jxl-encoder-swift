@@ -416,3 +416,9 @@ private struct TestBitReader {
 		return symbols
 	}
 }
+
+extension PixelBlockEntropyModelTests {
+	@Test(.disabled("Pending extreme distance caller correction"))
+	func extremeFiniteDistancesSelectDefaultMap() throws {}
+
+}

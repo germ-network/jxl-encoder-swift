@@ -191,3 +191,8 @@ struct EncoderTests {
 		#expect(a == b)
 	}
 }
+
+extension EncoderTests {
+	@Test(.disabled("Pending finite range serialization implementation"))
+	func positiveFinitePixelEntryPointsSerialize() async throws {}
+}
