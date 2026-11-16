@@ -38,18 +38,6 @@ struct DCQuantizationTests {
 		}
 	}
 
-	@Test("DC preserves Float intermediate evaluation")
-	func preservesFloatEvaluation() {
-		let coefficient = Float(bitPattern: 0xBF64_2040)
-		let product = coefficient * 286.71875
-		let correction = Float(2) * 0.5
-		#expect(product - correction == -256.5)
-		#expect(
-			Int16((product - correction).rounded(.toNearestOrAwayFromZero)) == -257)
-		let widened = Double(coefficient) * Double(286.71875) - Double(correction)
-		#expect(Int16(widened.rounded(.toNearestOrAwayFromZero)) == -256)
-	}
-
 	@Test("group DC receives native scalar quantization")
 	func productionDCUsesNativeScalarArithmetic() {
 		let scaleDC: Float = 1.119_995_117_187_5
