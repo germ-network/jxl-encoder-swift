@@ -120,6 +120,12 @@ enum HistogramCluster {
 		return (output, symbols)
 	}
 
+	static func clusterBest(_ histograms: [Histogram]) -> (
+		clusters: [Histogram], contextMap: [UInt8]
+	) {
+		fatalError("Pending best histogram refinement")
+	}
+
 	/// Renumbers clusters so the context map's symbols appear in increasing
 	/// order, which is the canonical form the format expects.
 	static func reindex(

@@ -11,6 +11,14 @@
 //
 
 enum EntropyCodeWriter {
+	static func writeTokens(
+		_ tokens: [ContextMapEntropy.EncodedToken], code: EntropyCode,
+		lengthConfiguration: HybridUintConfiguration, lengthSymbolOffset: UInt32,
+		writer: inout BitWriter
+	) {
+		fatalError("Pending configured permutation token serialization")
+	}
+
 	static func writeTokens(_ tokens: [Token], code: EntropyCode, writer: inout BitWriter) {
 		guard let tables = code.ansInfoTables else {
 			for token in tokens {
@@ -141,6 +149,10 @@ struct HybridUintConfiguration: Equatable, Sendable {
 }
 
 enum ContextMapEntropy {
+	static func runLengthEncode(_ tokens: [Token], contextCount: Int) -> RunLengthResult {
+		fatalError("Pending context-aware token run length encoding")
+	}
+
 	struct EncodedToken: Equatable, Sendable {
 		let token: Token
 		let isLength: Bool

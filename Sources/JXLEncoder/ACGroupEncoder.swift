@@ -386,6 +386,13 @@ extension ACGroupEncoder {
 		}
 	}
 
+	static func jpegCoefficientsForOrdering(
+		transcode: JPEGTranscode, blockX0: Int, blockY0: Int,
+		widthInBlocks: Int, heightInBlocks: Int
+	) -> [[Int32]] {
+		fatalError("Pending packed JPEG ordering coefficients")
+	}
+
 	/// Counts zero coefficients per channel over one group's worth of a JPEG
 	/// transcode's already-parsed coefficients, feeding `CoeffOrder`'s
 	/// frame-global statistics. Unlike the pixel path, a JPEG's coefficients

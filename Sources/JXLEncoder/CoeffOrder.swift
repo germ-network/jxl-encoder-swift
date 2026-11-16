@@ -38,6 +38,27 @@ enum CoeffOrder {
 
 	static let permutationContexts = 8
 
+	struct Sampler {
+		private var state: (UInt64, UInt64) = (0x94D0_49BB_1331_11EB, 0xBF58_476D_1CE4_E5B9)
+
+		mutating func next() -> Bool {
+			fatalError("Pending seeded coefficient sampling")
+		}
+	}
+
+	static func accumulateGroup(
+		_ coefficients: [[Int32]], widthInBlocks: Int, heightInBlocks: Int,
+		sampler: inout Sampler, counts: inout [ZeroCounts]
+	) {
+		fatalError("Pending sampled coefficient statistics")
+	}
+
+	static func preparePermutation(_ tokens: [Token]) -> (
+		runLength: ContextMapEntropy.RunLengthResult, code: EntropyCode
+	) {
+		fatalError("Pending default permutation entropy preparation")
+	}
+
 	/// `CoeffOrderContext`: `HybridUintConfig(0, 0, 0).Encode(val).token`,
 	/// clamped to `permutationContexts - 1`. Traced from the general formula
 	/// rather than reimplemented generically, since split_exponent=0 collapses
