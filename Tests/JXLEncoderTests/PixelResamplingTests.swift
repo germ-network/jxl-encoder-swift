@@ -282,4 +282,44 @@ struct PixelResamplingTests {
 			}
 		}
 	}
+
+	@Test
+	func coefficientOrderUsesTheResampledCodedDimensions() throws {
+		let width = 64
+		let height = 64
+		var samples = [UInt8](repeating: 0, count: width * height * 3)
+		for y in 0..<height {
+			for x in 0..<width {
+				for channel in 0..<3 {
+					let value = x * 37 + y * 53 + channel * 71 + x * y * 13
+					samples[(y * width + x) * 3 + channel] = UInt8(value % 256)
+				}
+			}
+		}
+		let image = try ImageBuffer(
+			width: width, height: height, samples: samples)
+		let params = try DistanceParams(distance: 10)
+		let pixelFrame = Encoder.preparePixelFrame(
+			stripeAt: Encoder.linearizingStripeSource(image),
+			width: width, height: height, params: params)
+		let computes = (0..<pixelFrame.dim.groupCount).map { index in
+			Encoder.computeACGroup(
+				xybAt: pixelFrame.xybAt, dim: pixelFrame.dim,
+				groupX: index % pixelFrame.dim.widthInGroups,
+				groupY: index / pixelFrame.dim.widthInGroups, params: params)
+		}
+		let codedOrder = Encoder.computeCoeffOrder(computes, dim: pixelFrame.dim)
+		let originalDim = ImageDim(width: width, height: height)
+		let originalOrder = Encoder.computeCoeffOrder(computes, dim: originalDim)
+
+		#expect(pixelFrame.dim.widthInBlocks == 4)
+		#expect(pixelFrame.dim.heightInBlocks == 4)
+		#expect(!codedOrder.isCustom)
+		#expect(originalOrder.isCustom)
+
+		let decisions = try SwiftSemanticEncoding.encode(image, distance: 10).decisions
+		#expect(
+			decisions.coeffOrder.orders == codedOrder.orders
+				&& decisions.coeffOrder.isCustom == codedOrder.isCustom)
+	}
 }
