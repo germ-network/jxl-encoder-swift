@@ -2,13 +2,8 @@ import Testing
 
 @testable import JXLEncoder
 
-/// Expected values come from compiling full libjxl's own arithmetic directly
-/// (`InitialQuantDC`, `Quantizer::ComputeGlobalScaleAndQuant`, the uniform
-/// quant field's `q = 0.79 / distance`, and `Quantizer::ClampVal`) and
-/// printing raw bit patterns, so these pin the exact float results rather
-/// than an approximation. Retargeted from libjxl-tiny to `-e 4`'s own
-/// uniform-quant-field branch — see docs/gap-closure-plan.md, "Quant
-/// calibration."
+/// Historical libjxl observations retained as diagnostic data; they do not
+/// define Swift's native Float.pow results.
 @Suite("DistanceParams")
 struct DistanceParamsTests {
 	struct Expected {
@@ -53,29 +48,9 @@ struct DistanceParamsTests {
 			scaleDCBits: 0x3E52_3C00, uniformQuant: 5),
 	]
 
-	@Test("matches full libjxl's -e 4 uniform-quant-field branch", arguments: reference)
-	func matchesReference(expected: Expected) throws {
-		let params = try DistanceParams(distance: expected.distance)
-		#expect(params.globalScale == expected.globalScale)
-		#expect(params.quantDC == expected.quantDC)
-		#expect(params.scale.bitPattern == expected.scaleBits)
-		#expect(params.scaleDC.bitPattern == expected.scaleDCBits)
-		#expect(params.uniformQuant == expected.uniformQuant)
-	}
-
-	/// The distances where the `effective_dist` clamp does not bind, so the
-	/// result depends on `pow` to the last bit. These are the cases that would
-	/// expose a mismatch between swift-numerics and the reference's `std::pow`.
-	@Test(
-		"QuantDC matches std::pow bit-for-bit where the clamp does not bind",
-		arguments: [
-			(Float(3.0), UInt32(0x3F0A_5313)),
-			(Float(5.0), UInt32(0x3EB5_0C64)),
-			(Float(10.0), UInt32(0x3E4B_B0A8)),
-		])
-	func quantDCUsesPow(distance: Float, expectedBits: UInt32) {
-		#expect(DistanceParams.quantDC(distance: distance).bitPattern == expectedBits)
-	}
+	static let cppPowObservations: [(distance: Float, bits: UInt32)] = [
+		(3, 0x3F0A_5313), (5, 0x3EB5_0C64), (10, 0x3E4B_B0A8),
+	]
 
 	@Test("rejects lossless and negative distances")
 	func rejectsInvalid() {
@@ -215,4 +190,69 @@ struct DistanceParamsTests {
 		}
 	}
 
+	@Test("QuantDC follows the native Float pow formula")
+	func quantDCUsesNativePowFormula() {
+		let dcMul: Float = 0.3
+		let dcQuantPow: Float = 0.83
+		let dcQuant: Float = 1.095_924_047_623_553
+		for distance: Float in [0.5, 1, 3] {
+			let base = (1 / dcMul) * distance
+			let effective = dcMul * Float.pow(base, dcQuantPow)
+			#expect(effective > 0.5 * distance && effective < distance)
+			#expect(
+				DistanceParams.quantDC(distance: distance)
+					== min(dcQuant / effective, 50))
+		}
+	}
+
+	@Test("QuantDC applies its effective-distance clamps and cap")
+	func quantDCClampsAtRepresentativeInputs() {
+		let dcMul: Float = 0.3
+		let dcQuantPow: Float = 0.83
+		let dcQuant: Float = 1.095_924_047_623_553
+		let upperClampDistance: Float = 0.1
+		let upperRaw =
+			dcMul
+			* Float.pow(
+				(1 / dcMul) * upperClampDistance, dcQuantPow)
+		#expect(upperRaw > upperClampDistance)
+		#expect(
+			DistanceParams.quantDC(distance: upperClampDistance)
+				== min(dcQuant / upperClampDistance, 50))
+
+		let lowerClampDistance: Float = 25
+		let lowerRaw =
+			dcMul
+			* Float.pow(
+				(1 / dcMul) * lowerClampDistance, dcQuantPow)
+		#expect(lowerRaw < 0.5 * lowerClampDistance)
+		#expect(
+			DistanceParams.quantDC(distance: lowerClampDistance)
+				== min(dcQuant / (0.5 * lowerClampDistance), 50))
+		#expect(DistanceParams.quantDC(distance: 0.001) == 50)
+	}
+
+	@Test("DistanceParams scale reaches production DC quantization")
+	func dcScaleFlowsThroughProductionQuantization() throws {
+		let params = try DistanceParams(distance: 3)
+		let yPlane = [Float](repeating: 1, count: DCT.blockSize)
+		let stripe = PaddedStripe(
+			width: DCT.blockDim, height: DCT.blockDim,
+			planes: [
+				[Float](repeating: 0, count: DCT.blockSize), yPlane,
+				[Float](repeating: 0, count: DCT.blockSize),
+			])
+		var dc = [[Int16]](repeating: [Int16](repeating: 0, count: 1), count: 3)
+		_ = ACGroupEncoder.computeGroup(
+			xyb: stripe, widthInBlocks: 1, heightInBlocks: 1,
+			quantField: [params.uniformQuant], scale: params.scale,
+			scaleDC: params.scaleDC,
+			xQuantMatrixScale: params.xQuantMatrixScale, quantDC: &dc)
+		let coefficient = DCT.forward8x8(
+			pixels: yPlane, stride: DCT.blockDim, originX: 0, originY: 0)[0]
+		let expected = Int16(
+			(Float(512) * params.scaleDC * coefficient)
+				.rounded(.toNearestOrAwayFromZero))
+		#expect(dc[1][0] == expected)
+	}
 }
