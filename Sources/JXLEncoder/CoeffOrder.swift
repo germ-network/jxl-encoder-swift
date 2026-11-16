@@ -332,16 +332,11 @@ enum CoeffOrder {
 		return Result(orders: perChannel.map(\.order), isCustom: true)
 	}
 
-	/// Port of `EncodeGlobalACInfo`'s `used_orders` + `EncodeCoeffOrders`
-	/// sequence. The `used_orders` field is `U32Enc(Val(0x5F), Val(0x13),
-	/// Val(0), Bits(kNumOrders))`; with one order bucket the value is only
-	/// ever 0 or 1, both of which the existing `Bits(13)` branch already
-	/// encodes correctly (matches the selector `writeACGlobal` already sends
-	/// for the always-0 case this replaces), so this is a direct value write
-	/// rather than a general U32Enc port.
+	/// Writes the `Bits(13)` value selected by FrameAssembly for custom DCT8
+	/// orders. The default `Val(0)` branch has no payload.
 	public static func write(_ result: Result, writer: inout BitWriter) {
-		writer.write(13, result.isCustom ? 1 : 0)
 		guard result.isCustom else { return }
+		writer.write(13, 1)
 
 		let allTokens = result.orders.flatMap { tokens(forChannelOrder: $0) }
 		let prepared = preparePermutation(allTokens)

@@ -38,19 +38,13 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 		SemanticCorpusEntry(
 			name: "multigroup", input: .linear(file: "multigroup_linear"), distance: 1,
 			knownIssues: [
-				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
-				"coeff_order": ["GER-3386", "GER-3387"],
-				"context_map": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
 		SemanticCorpusEntry(
 			name: "flower_512_d1", input: .srgb8(file: "flower_512"), distance: 1,
 			knownIssues: [
-				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
-				"coeff_order": ["GER-3386", "GER-3387"],
-				"context_map": ["GER-3387"],
 				"image_sample_format": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
@@ -58,8 +52,6 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 			name: "flower_512_d3", input: .srgb8(file: "flower_512"), distance: 3,
 			knownIssues: [
 				"ac_entropy_alphabet": ["GER-3386"],
-				"coeff_order": ["GER-3386", "GER-3387"],
-				"context_map": ["GER-3387"],
 				"image_sample_format": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
@@ -68,7 +60,6 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 			knownIssues: [
 				"ac_entropy": ["GER-3386"],
 				"ac_entropy_alphabet": ["GER-3386"],
-				"coeff_order": ["GER-3386", "GER-3387", "GER-3419"],
 				"context_map": ["GER-3387", "GER-3419"],
 				"image_sample_format": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
@@ -424,7 +415,7 @@ struct SemanticFixtureTests {
 		}
 		let entropyDifferences = SemanticFixtureComparison.differences(
 			actual: actual, reference: reference, category: "ac_entropy")
-		#expect(entropyDifferences.contains { $0.field == "ac_entropy.ans.frequencies" })
+		#expect(entropyDifferences.isEmpty)
 		let frequencyLine = try #require(
 			actual.serialized.split(separator: "\n").first {
 				$0.hasPrefix("ac_entropy.ans.frequencies ")

@@ -143,6 +143,26 @@ struct CoeffOrderContractTests {
 	}
 
 	@Test
+	func usedOrdersSelectorMatchesSourceBranches() throws {
+		var defaultWriter = BitWriter()
+		try FrameAssembly.writeACGlobal(
+			groupCount: 1, code: .staticAC, coeffOrder: .identity,
+			writer: &defaultWriter)
+		#expect(defaultWriter.bytes[0] & 0x0F == 0x05)
+		#expect(defaultWriter.bitsWritten == 4519)
+
+		var customOrder = CoeffOrder.natural
+		customOrder[1...].reverse()
+		let custom = CoeffOrder.Result(
+			orders: [customOrder, customOrder, customOrder], isCustom: true)
+		var customWriter = BitWriter()
+		try FrameAssembly.writeACGlobal(
+			groupCount: 1, code: .staticAC, coeffOrder: custom,
+			writer: &customWriter)
+		#expect(Array(customWriter.bytes.prefix(2)) == [0x0F, 0x00])
+	}
+
+	@Test
 	func permutationClusteringPreservesSourceMergeAndTieRules() throws {
 		for name in [
 			"clusters_best_pair_merge", "clusters_best_merge",
