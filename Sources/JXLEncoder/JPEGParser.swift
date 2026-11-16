@@ -32,9 +32,12 @@ public enum JPEGParseError: Error, Equatable, Sendable {
 	case unsupportedComponentCount(Int)
 	case unsupportedSamplingFactors(horizontal: Int, vertical: Int)
 	case multipleFramesNotSupported
-	/// A scan covering a subset of the frame's components, or a second scan.
-	/// Legal in sequential JPEG, but vanishingly rare and untested.
+	/// A component selected by more than one sequential scan.
 	case multipleScansNotSupported
+	/// A component identifier repeated within a frame or scan header.
+	case duplicateComponentIdentifier(identifier: UInt8)
+	/// More than one restart-interval definition in the input.
+	case duplicateRestartInterval
 	case missingFrameHeader
 	case missingScan
 	/// Zero width, or the zero height that signals a DNL segment.
@@ -43,8 +46,7 @@ public enum JPEGParseError: Error, Equatable, Sendable {
 	/// so the frame header decides the allocation before any entropy data is
 	/// read.
 	case coefficientBudgetExceeded(required: Int, budget: Int)
-	/// Baseline requires a full spectral selection with no successive
-	/// approximation.
+	/// The scan spectral range is reversed or extends past coefficient 63.
 	case invalidScanParameters
 	case undefinedQuantTable(index: Int)
 	case undefinedHuffmanTable(isAC: Bool, index: Int)
@@ -64,6 +66,8 @@ public struct JPEGComponent: Equatable, Sendable {
 	public let identifier: UInt8
 	public let horizontalSampling: Int
 	public let verticalSampling: Int
+	/// Index of this component’s bound values in `JPEGImage.quantTables`.
+	/// May exceed the original JPEG destination range after redefinition.
 	public let quantTableIndex: Int
 	/// Width of `coefficients` in blocks.
 	///
@@ -84,8 +88,9 @@ public struct JPEGImage: Equatable, Sendable {
 	public let width: Int
 	public let height: Int
 	public let components: [JPEGComponent]
-	/// Indexed by table id, natural order. A slot no component references may
-	/// be empty, since ids need not be contiguous.
+	/// Natural-order tables indexed by each component’s `quantTableIndex`.
+	/// Original destination slots remain sparse; additional slots preserve
+	/// distinct values bound to components before a destination is redefined.
 	public let quantTables: [[UInt16]]
 	/// MCUs between restart markers, or 0 when the file defines none.
 	public let restartInterval: Int
@@ -166,12 +171,15 @@ private struct JPEGSegmentParser {
 	let data: [UInt8]
 	let maxCoefficientBytes: Int
 	var index = 0
-	var quantTables = [[UInt16]?](repeating: nil, count: 4)
+	var activeQuantTables = [[UInt16]?](repeating: nil, count: 4)
+	var boundQuantTables = [[UInt16]?](repeating: nil, count: 4)
+	var boundQuantTableIndices: [Int?] = []
 	var dcTables = [JPEGHuffmanTable?](repeating: nil, count: 4)
 	var acTables = [JPEGHuffmanTable?](repeating: nil, count: 4)
 	var restartInterval = 0
+	var hasRestartInterval = false
 	var frame: JPEGFrame?
-	var components: [JPEGComponent]?
+	var planes: [[Int32]]?
 	var hasAPP0 = false
 	var adobeTransform: UInt8?
 	var hasICCProfileTag = false
@@ -184,12 +192,7 @@ private struct JPEGSegmentParser {
 
 		loop: while true {
 			guard let marker = nextMarker() else {
-				// A file that stops right after its last MCU, with no EOI, is
-				// still fully decodable.
-				guard components != nil else {
-					throw JPEGParseError.unexpectedEndOfData
-				}
-				break loop
+				throw JPEGParseError.unexpectedEndOfData
 			}
 			switch marker {
 			case 0xC0, 0xC1:
@@ -211,13 +214,10 @@ private struct JPEGSegmentParser {
 			case 0xDD:
 				try readRestartInterval()
 			case 0xDA:
-				guard components == nil else {
-					throw JPEGParseError.multipleScansNotSupported
-				}
-				components = try readScan()
+				try readScan()
 			case 0xD9:
 				break loop
-			case 0x01, 0xD0...0xD7:
+			case 0xD0...0xD7:
 				continue  // standalone markers, no payload
 			case 0xE0:
 				hasAPP0 = true
@@ -232,8 +232,29 @@ private struct JPEGSegmentParser {
 		}
 
 		guard let frame else { throw JPEGParseError.missingFrameHeader }
-		guard let components else { throw JPEGParseError.missingScan }
-		let highestTable = quantTables.lastIndex(where: { $0 != nil }).map { $0 + 1 } ?? 0
+		guard let planes, boundQuantTableIndices.contains(where: { $0 != nil }) else {
+			throw JPEGParseError.missingScan
+		}
+		for componentIndex in frame.components.indices
+		where boundQuantTableIndices[componentIndex] == nil {
+			try bindQuantTable(for: componentIndex, frame: frame)
+		}
+		let components = frame.components.enumerated().map { c, component in
+			JPEGComponent(
+				identifier: component.identifier,
+				horizontalSampling: component.horizontalSampling,
+				verticalSampling: component.verticalSampling,
+				quantTableIndex: boundQuantTableIndices[c]!,
+				blocksPerLine: frame.mcusPerLine * component.horizontalSampling,
+				blocksPerColumn: frame.mcusPerColumn * component.verticalSampling,
+				coefficients: planes[c])
+		}
+		for tableIndex in activeQuantTables.indices
+		where boundQuantTables[tableIndex] == nil {
+			boundQuantTables[tableIndex] = activeQuantTables[tableIndex]
+		}
+		let highestTable =
+			boundQuantTables.lastIndex(where: { $0 != nil }).map { $0 + 1 } ?? 0
 		let sourceIsRGB: Bool
 		if components.count == 1 || hasAPP0 {
 			sourceIsRGB = false
@@ -246,7 +267,7 @@ private struct JPEGSegmentParser {
 			width: frame.width,
 			height: frame.height,
 			components: components,
-			quantTables: (0..<highestTable).map { quantTables[$0] ?? [] },
+			quantTables: (0..<highestTable).map { boundQuantTables[$0] ?? [] },
 			restartInterval: restartInterval)
 		image.hasSupportedColorInterpretation = !sourceIsRGB && !hasICCProfileTag
 		return image
@@ -265,14 +286,33 @@ private struct JPEGSegmentParser {
 		return Int(high) << 8 | Int(try byte())
 	}
 
-	/// Advances to the next marker, skipping any `FF` fill bytes and any stray
-	/// bytes between segments. Returns nil at the end of the input.
+	/// Advances to a recognized marker, skipping fill and inter-marker bytes.
 	private mutating func nextMarker() -> UInt8? {
-		while index < data.count, data[index] != 0xFF { index += 1 }
-		while index < data.count, data[index] == 0xFF { index += 1 }
-		guard index < data.count else { return nil }
-		defer { index += 1 }
-		return data[index]
+		while index + 1 < data.count {
+			guard data[index] == 0xFF else {
+				index += 1
+				continue
+			}
+			let marker = data[index + 1]
+			guard Self.isMarker(marker) else {
+				index += 1
+				continue
+			}
+			index += 2
+			return marker
+		}
+		index = data.count
+		return nil
+	}
+
+	private static func isMarker(_ marker: UInt8) -> Bool {
+		switch marker {
+		case 0xC0...0xCF, 0xD0...0xD7, 0xD9...0xDB, 0xDD...0xDF,
+			0xE0...0xEF, 0xFE:
+			true
+		default:
+			false
+		}
 	}
 
 	/// Segment length covers itself, so the payload is `length - 2` bytes.
@@ -316,6 +356,9 @@ private struct JPEGSegmentParser {
 	private mutating func readFrameHeader(marker: UInt8) throws {
 		guard frame == nil else { throw JPEGParseError.multipleFramesNotSupported }
 		let end = try segmentEnd(marker: marker)
+		guard end - index >= 6 else {
+			throw JPEGParseError.invalidSegmentLength(marker: marker)
+		}
 
 		let precision = Int(try byte())
 		guard precision == 8 else {
@@ -335,8 +378,13 @@ private struct JPEGSegmentParser {
 		}
 
 		var components: [JPEGFrame.Component] = []
+		var identifiers = Set<UInt8>()
 		for _ in 0..<count {
 			let identifier = try byte()
+			guard identifiers.insert(identifier).inserted else {
+				throw JPEGParseError.duplicateComponentIdentifier(
+					identifier: identifier)
+			}
 			let sampling = try byte()
 			let horizontal = Int(sampling >> 4)
 			let vertical = Int(sampling & 0x0F)
@@ -357,6 +405,15 @@ private struct JPEGSegmentParser {
 
 		let maxHorizontal = components.reduce(1) { max($0, $1.horizontalSampling) }
 		let maxVertical = components.reduce(1) { max($0, $1.verticalSampling) }
+		guard
+			components.allSatisfy({
+				maxHorizontal.isMultiple(of: $0.horizontalSampling)
+					&& maxVertical.isMultiple(of: $0.verticalSampling)
+			})
+		else {
+			throw JPEGParseError.unsupportedSamplingFactors(
+				horizontal: maxHorizontal, vertical: maxVertical)
+		}
 		frame = JPEGFrame(
 			width: width,
 			height: height,
@@ -365,16 +422,24 @@ private struct JPEGSegmentParser {
 			maxVertical: maxVertical,
 			mcusPerLine: ceilDiv(width, 8 * maxHorizontal),
 			mcusPerColumn: ceilDiv(height, 8 * maxVertical))
+		boundQuantTableIndices = [Int?](repeating: nil, count: count)
 	}
 
 	private mutating func readQuantTables() throws {
 		let end = try segmentEnd(marker: 0xDB)
+		guard index < end else {
+			throw JPEGParseError.invalidSegmentLength(marker: 0xDB)
+		}
 		while index < end {
 			let header = try byte()
 			let precision = Int(header >> 4)
 			let table = Int(header & 0x0F)
 			guard table < 4, precision <= 1 else {
 				throw JPEGParseError.invalidQuantTable(index: table)
+			}
+			let tableBytes = 64 * (precision + 1)
+			guard index + tableBytes <= end else {
+				throw JPEGParseError.invalidSegmentLength(marker: 0xDB)
 			}
 			var values = [UInt16](repeating: 0, count: 64)
 			for k in 0..<64 {
@@ -386,7 +451,7 @@ private struct JPEGSegmentParser {
 				}
 				values[JPEGParser.zigzag[k]] = value
 			}
-			quantTables[table] = values
+			activeQuantTables[table] = values
 		}
 		guard index == end else {
 			throw JPEGParseError.invalidSegmentLength(marker: 0xDB)
@@ -439,31 +504,43 @@ private struct JPEGSegmentParser {
 	}
 
 	private mutating func readRestartInterval() throws {
+		guard !hasRestartInterval else {
+			throw JPEGParseError.duplicateRestartInterval
+		}
 		let end = try segmentEnd(marker: 0xDD)
-		restartInterval = try uint16()
-		guard index == end else {
+		guard end - index == 2 else {
 			throw JPEGParseError.invalidSegmentLength(marker: 0xDD)
 		}
+		restartInterval = try uint16()
+		hasRestartInterval = true
 	}
 
 	// MARK: - Scan
 
-	private mutating func readScan() throws -> [JPEGComponent] {
+	private mutating func readScan() throws {
 		guard let frame else { throw JPEGParseError.missingFrameHeader }
 		let end = try segmentEnd(marker: 0xDA)
+		guard index < end else {
+			throw JPEGParseError.invalidSegmentLength(marker: 0xDA)
+		}
 
 		let count = Int(try byte())
-		// The scan has to cover the whole frame. Sequential JPEG may split a
-		// frame across several single-component scans, but nothing in practice
-		// emits that, so it is declined rather than decoded untested.
-		guard count == frame.components.count else {
+		guard count > 0, count <= frame.components.count else {
 			throw JPEGParseError.multipleScansNotSupported
+		}
+		guard end == index + count * 2 + 3 else {
+			throw JPEGParseError.invalidSegmentLength(marker: 0xDA)
 		}
 		var dcSelectors = [Int](repeating: 0, count: count)
 		var acSelectors = [Int](repeating: 0, count: count)
 		var order: [Int] = []
+		var identifiers = Set<UInt8>()
 		for i in 0..<count {
 			let identifier = try byte()
+			guard identifiers.insert(identifier).inserted else {
+				throw JPEGParseError.duplicateComponentIdentifier(
+					identifier: identifier)
+			}
 			guard
 				let component = frame.components.firstIndex(where: {
 					$0.identifier == identifier
@@ -478,8 +555,8 @@ private struct JPEGSegmentParser {
 		}
 		let spectralStart = try byte()
 		let spectralEnd = try byte()
-		let approximation = try byte()
-		guard spectralStart == 0, spectralEnd == 63, approximation == 0 else {
+		_ = try byte()
+		guard spectralStart <= spectralEnd, spectralEnd <= 63 else {
 			throw JPEGParseError.invalidScanParameters
 		}
 		guard index == end else {
@@ -500,63 +577,106 @@ private struct JPEGSegmentParser {
 			dc.append(table)
 			ac.append(acTable)
 		}
-		for component in frame.components
-		where quantTables[component.quantTableIndex] == nil {
-			throw JPEGParseError.undefinedQuantTable(index: component.quantTableIndex)
+		guard order.allSatisfy({ boundQuantTableIndices[$0] == nil }) else {
+			throw JPEGParseError.multipleScansNotSupported
 		}
+		for componentIndex in order {
+			try bindQuantTable(for: componentIndex, frame: frame)
+		}
+		let entropy = scanEntropyBounds(from: index)
+		try decodeScan(
+			frame: frame, order: order, dcTables: dc, acTables: ac,
+			entropyByteCount: entropy.byteCount, scanEnd: entropy.end)
+	}
 
-		return try decodeScan(
-			frame: frame, order: order, dcTables: dc, acTables: ac)
+	private mutating func bindQuantTable(for componentIndex: Int, frame: JPEGFrame) throws {
+		let destination = frame.components[componentIndex].quantTableIndex
+		guard let values = activeQuantTables[destination] else {
+			throw JPEGParseError.undefinedQuantTable(index: destination)
+		}
+		if boundQuantTables[destination] == nil {
+			boundQuantTables[destination] = values
+			boundQuantTableIndices[componentIndex] = destination
+		} else if boundQuantTables[destination] == values {
+			boundQuantTableIndices[componentIndex] = destination
+		} else {
+			let newIndex = boundQuantTables.count
+			boundQuantTables.append(values)
+			boundQuantTableIndices[componentIndex] = newIndex
+		}
+	}
+
+	private func scanEntropyBounds(from start: Int) -> (end: Int, byteCount: Int) {
+		var cursor = start
+		var byteCount = 0
+		while cursor < data.count {
+			guard data[cursor] == 0xFF else {
+				byteCount += 1
+				cursor += 1
+				continue
+			}
+			let markerStart = cursor
+			var code = cursor + 1
+			while code < data.count, data[code] == 0xFF { code += 1 }
+			guard code < data.count else { return (markerStart, byteCount) }
+			switch data[code] {
+			case 0x00:
+				byteCount += 1
+				cursor = code + 1
+			case 0xD0...0xD7:
+				cursor = code + 1
+			default:
+				return (markerStart, byteCount)
+			}
+		}
+		return (data.count, byteCount)
 	}
 
 	private mutating func decodeScan(
 		frame: JPEGFrame, order: [Int], dcTables: [JPEGHuffmanTable],
-		acTables: [JPEGHuffmanTable]
-	) throws -> [JPEGComponent] {
-		let interleaved = frame.components.count > 1
-		var blocksPerLine: [Int] = []
-		var blocksPerColumn: [Int] = []
-		for component in frame.components {
-			let horizontal = component.horizontalSampling
-			let vertical = component.verticalSampling
-			guard interleaved else {
-				// A non-interleaved scan codes exactly the component's own
-				// blocks, with no MCU padding.
-				let width = ceilDiv(frame.width * horizontal, frame.maxHorizontal)
-				let height = ceilDiv(frame.height * vertical, frame.maxVertical)
-				blocksPerLine.append(ceilDiv(width, 8))
-				blocksPerColumn.append(ceilDiv(height, 8))
-				continue
-			}
-			blocksPerLine.append(frame.mcusPerLine * horizontal)
-			blocksPerColumn.append(frame.mcusPerColumn * vertical)
-		}
-
-		var totalBlocks = 0
-		for i in 0..<frame.components.count {
-			totalBlocks += blocksPerLine[i] * blocksPerColumn[i]
+		acTables: [JPEGHuffmanTable], entropyByteCount: Int, scanEnd: Int
+	) throws {
+		let interleaved = order.count > 1
+		let codedBlocks: Int
+		if interleaved {
+			codedBlocks =
+				frame.mcusPerLine * frame.mcusPerColumn
+				* order.reduce(0) { sum, c in
+					let component = frame.components[c]
+					return sum + component.horizontalSampling
+						* component.verticalSampling
+				}
+		} else {
+			let component = frame.components[order[0]]
+			let width = ceilDiv(
+				frame.width * component.horizontalSampling, frame.maxHorizontal)
+			let height = ceilDiv(
+				frame.height * component.verticalSampling, frame.maxVertical)
+			codedBlocks = ceilDiv(width, 8) * ceilDiv(height, 8)
 		}
 		// Every block costs at least a DC code and an end-of-block code, so two
 		// bits. Without this a tiny file claiming huge dimensions would have us
 		// allocate gigabytes before discovering it is truncated.
-		guard (data.count - index) * 4 >= totalBlocks else {
+		guard entropyByteCount * 4 >= codedBlocks else {
 			throw JPEGParseError.truncatedEntropyData
 		}
-		// That rule is the information-theoretic floor, which leaves 256 bytes
-		// of coefficients authorised by two bits of input. The budget is what
-		// actually bounds it.
-		let required = totalBlocks * 64 * MemoryLayout<Int32>.size
-		guard required <= maxCoefficientBytes else {
-			throw JPEGParseError.coefficientBudgetExceeded(
-				required: required, budget: maxCoefficientBytes)
-		}
-
-		var planes: [[Int32]] = []
-		for i in 0..<frame.components.count {
-			planes.append(
+		if planes == nil {
+			let paddedBlocks = frame.components.reduce(0) { sum, component in
+				sum + frame.mcusPerLine * component.horizontalSampling
+					* frame.mcusPerColumn * component.verticalSampling
+			}
+			let required = paddedBlocks * 64 * MemoryLayout<Int32>.size
+			guard required <= maxCoefficientBytes else {
+				throw JPEGParseError.coefficientBudgetExceeded(
+					required: required, budget: maxCoefficientBytes)
+			}
+			planes = frame.components.map { component in
 				[Int32](
 					repeating: 0,
-					count: blocksPerLine[i] * blocksPerColumn[i] * 64))
+					count: frame.mcusPerLine * component.horizontalSampling
+						* frame.mcusPerColumn * component.verticalSampling
+						* 64)
+			}
 		}
 
 		// One MCU's blocks in coding order: each component contributes
@@ -573,12 +693,25 @@ private struct JPEGSegmentParser {
 			}
 		}
 
-		var reader = JPEGBitReader(data: data, index: index)
+		var reader = JPEGBitReader(data: data, index: index, scanEnd: scanEnd)
 		var predictors = [Int32](repeating: 0, count: frame.components.count)
+		let singleWidth: Int
+		if interleaved {
+			singleWidth = frame.mcusPerLine
+		} else {
+			let c = frame.components[order[0]]
+			singleWidth = ceilDiv(
+				ceilDiv(frame.width * c.horizontalSampling, frame.maxHorizontal), 8)
+		}
 		let mcuCount =
 			interleaved
 			? frame.mcusPerLine * frame.mcusPerColumn
-			: blocksPerLine[0] * blocksPerColumn[0]
+			: singleWidth
+				* ceilDiv(
+					ceilDiv(
+						frame.height
+							* frame.components[order[0]]
+							.verticalSampling, frame.maxVertical), 8)
 		var restartsSeen = 0
 
 		for mcu in 0..<mcuCount {
@@ -589,35 +722,27 @@ private struct JPEGSegmentParser {
 				for i in predictors.indices { predictors[i] = 0 }
 			}
 
-			let mcuX = mcu % frame.mcusPerLine
-			let mcuY = mcu / frame.mcusPerLine
+			let mcuX = mcu % singleWidth
+			let mcuY = mcu / singleWidth
 			for slot in slots {
 				let component = frame.components[slot.component]
-				let row = mcuY * component.verticalSampling + slot.y
-				let column = mcuX * component.horizontalSampling + slot.x
-				// A non-interleaved scan's MCU is a single block, walked in the
-				// component's own raster order rather than over the MCU grid.
-				let block =
+				let row =
 					interleaved
-					? row * blocksPerLine[slot.component] + column : mcu
+					? mcuY * component.verticalSampling + slot.y : mcuY
+				let column =
+					interleaved
+					? mcuX * component.horizontalSampling + slot.x : mcuX
+				let block =
+					row * (frame.mcusPerLine * component.horizontalSampling)
+					+ column
 				try decodeBlock(
-					into: &planes[slot.component], offset: block * 64,
+					into: &planes![slot.component], offset: block * 64,
 					dc: dcTables[slot.scan], ac: acTables[slot.scan],
 					predictor: &predictors[slot.component], reader: &reader)
 			}
 		}
 
 		index = try reader.finish()
-		return frame.components.enumerated().map { c, component in
-			JPEGComponent(
-				identifier: component.identifier,
-				horizontalSampling: component.horizontalSampling,
-				verticalSampling: component.verticalSampling,
-				quantTableIndex: component.quantTableIndex,
-				blocksPerLine: blocksPerLine[c],
-				blocksPerColumn: blocksPerColumn[c],
-				coefficients: planes[c])
-		}
 	}
 
 	/// Restart markers are byte-aligned and cycle RST0...RST7. A mismatch means
@@ -626,12 +751,7 @@ private struct JPEGSegmentParser {
 	private func consumeRestartMarker(
 		_ reader: inout JPEGBitReader, expected: Int
 	) throws {
-		var position = reader.index
-		while position + 1 < data.count, data[position] == 0xFF,
-			data[position + 1] == 0xFF
-		{
-			position += 1  // fill byte
-		}
+		let position = reader.index
 		guard position + 1 < data.count, data[position] == 0xFF,
 			data[position + 1] == 0xD0 + UInt8(expected)
 		else {

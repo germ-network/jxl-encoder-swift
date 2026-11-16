@@ -6,6 +6,61 @@
 
 	@Suite("Coefficient order native integration")
 	struct CoeffOrderNativeIntegrationTests {
+		@Test(
+			"serialized scan-derived frames preserve source coefficients",
+			.enabled(if: harness != nil))
+		func readerSerializationPreservesSourceCoefficients() throws {
+			guard let harness = Self.harness else { return }
+			for (name, expected) in [
+				("scan_420_111", "scan_420_111"),
+				("scan_420_111_restart", "scan_420_111_restart"),
+				("scan_422_21", "scan_422_21"),
+				("scan_440_12", "scan_440_12"),
+				("scan_420_111_dqt_redefined", "scan_420_111_dqt_canonical"),
+				("hopper_gray_2x2_odd", "hopper_gray_2x2_odd"),
+			] {
+				let source = try JPEGParserTests.fixture(name)
+				let transcode = try JPEGTranscode(JPEGParser.parse(source))
+				let directory = FileManager.default.temporaryDirectory
+					.appendingPathComponent("jpeg-reader-\(UUID().uuidString)")
+				try FileManager.default.createDirectory(
+					at: directory, withIntermediateDirectories: true)
+				defer { try? FileManager.default.removeItem(at: directory) }
+				let expectedURL = directory.appendingPathComponent("expected.jpg")
+				let codestreamURL = directory.appendingPathComponent("encoded.jxl")
+				try Data(JPEGParserTests.fixture(expected)).write(to: expectedURL)
+				try Data(Encoder.encodeJPEG(transcode)).write(to: codestreamURL)
+				let process = Process()
+				process.executableURL = URL(fileURLWithPath: harness)
+				process.arguments = [
+					"jpeg-witness",
+					expectedURL.path,
+					codestreamURL.path,
+				]
+				let output = Pipe()
+				let errors = Pipe()
+				process.standardOutput = output
+				process.standardError = errors
+				try process.run()
+				let data = output.fileHandleForReading.readDataToEndOfFile()
+				process.waitUntilExit()
+				let errorText = String(
+					decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+					as: UTF8.self)
+				#expect(
+					process.terminationStatus == 0,
+					Comment(rawValue: "\(name): \(errorText)"))
+				guard process.terminationStatus == 0 else { continue }
+				let witness = try SemanticDump(
+					parsing: String(decoding: data, as: UTF8.self))
+				#expect(
+					witness.fields[
+						"jpeg_context.reconstructed_coefficients_exact"]
+						== .integers([1]),
+					Comment(rawValue: name))
+			}
+		}
+
 		static let harness = ProcessInfo.processInfo.environment["JXL_HARNESS_PATH"]
 		static var decoder: String? {
 			guard let harness else { return nil }

@@ -14,6 +14,24 @@
 	/// per-image entropy code, which only the optimised path builds.
 	@Suite("JPEG transcode decoding")
 	struct JPEGTranscodeDecodeTests {
+		@Test(
+			"serialized sequential scan layouts preserve decoded pixels")
+		func sequentialScanSerializationPreservesPixels() throws {
+			for name in [
+				"scan_420_111", "scan_420_111_restart", "scan_422_21",
+				"scan_440_12", "scan_420_111_dqt_redefined",
+				"hopper_gray_2x2_odd",
+			] {
+				for optimize in [true, false] {
+					let error = try Self.meanError(name, optimize: optimize)
+					#expect(
+						error < 2.0,
+						"\(name), optimize=\(optimize): mean error \(error)"
+					)
+				}
+			}
+		}
+
 		static func transcode(_ name: String) throws -> JPEGTranscode {
 			let url = try #require(
 				Bundle.module.url(
@@ -65,7 +83,17 @@
 				optimizeCodes: optimize)
 
 			let ours = try #require(Self.samples(Data(bytes)))
-			let reference = try #require(Self.samples(jpeg))
+			let referenceJPEG: Data
+			if name == "scan_420_111_dqt_redefined" {
+				let canonicalURL = try #require(
+					Bundle.module.url(
+						forResource: "scan_420_111_dqt_canonical",
+						withExtension: "jpg", subdirectory: "Fixtures"))
+				referenceJPEG = try Data(contentsOf: canonicalURL)
+			} else {
+				referenceJPEG = jpeg
+			}
+			let reference = try #require(Self.samples(referenceJPEG))
 			try #require(ours.width == reference.width)
 			try #require(ours.height == reference.height)
 			let total = zip(ours.rgb, reference.rgb).reduce(0.0) {

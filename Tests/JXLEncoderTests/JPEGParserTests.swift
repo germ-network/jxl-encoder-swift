@@ -10,6 +10,386 @@ import Testing
 /// scan and the MCU layout at once.
 @Suite("JPEGParser")
 struct JPEGParserTests {
+	@Test("each selected component binds the quantizer active at its scan")
+	func quantizationTablesBindAtSelectedScan() throws {
+		let data = try Self.fixture("scan_420_111_dqt_redefined")
+		let image = try JPEGParser.parse(data)
+		let reference = try JPEGCoefficientDump(fixture: "scan_420_111_dqt_canonical")
+		for (parsed, expected) in zip(image.components, reference.components) {
+			#expect(parsed.coefficients == expected.coefficients)
+			#expect(
+				image.quantTables[parsed.quantTableIndex]
+					== (try #require(
+						reference.quantTables[expected.quantTableIndex])))
+		}
+		#expect(image.components.map(\.quantTableIndex) == [4, 0, 0])
+
+		var delayed = try Self.fixture("scan_420_111")
+		let frame = try #require(Self.segmentOffset(delayed, marker: 0xC0)) + 2
+		delayed[frame + 8] = 3
+		let scans = Self.markerOffsets(0xDA, in: delayed)
+		delayed.insert(
+			contentsOf: Self.quantTableSegment(destination: 3, value: 11), at: scans[1])
+		let delayedImage = try JPEGParser.parse(delayed)
+		#expect(delayedImage.components[0].quantTableIndex == 3)
+		#expect(delayedImage.quantTables[3] == [UInt16](repeating: 11, count: 64))
+
+		var missing = try Self.fixture("scan_420_111")
+		let missingFrame = try #require(Self.segmentOffset(missing, marker: 0xC0)) + 2
+		missing[missingFrame + 8] = 3
+		let afterScans = Self.quantTableSegment(destination: 3, value: 11)
+		missing = Array(missing.dropLast(2)) + afterScans + Array(missing.suffix(2))
+		#expect(throws: JPEGParseError.undefinedQuantTable(index: 3)) {
+			try JPEGParser.parse(missing)
+		}
+
+		var repeated = try Self.fixture("small_444")
+		let repeatedSOS = try #require(Self.markerOffsets(0xDA, in: repeated).first)
+		let replacements = (5...10).flatMap {
+			Self.quantTableSegment(destination: 0, value: UInt8($0))
+		}
+		repeated.insert(contentsOf: replacements, at: repeatedSOS)
+		let repeatedImage = try JPEGParser.parse(repeated)
+		#expect(repeatedImage.quantTables[0] == [UInt16](repeating: 10, count: 64))
+	}
+
+	@Test("quantizer replacement preserves previously decoded component meaning")
+	func quantizationRedefinitionsPreserveBoundValues() throws {
+		var data = try Self.fixture("scan_420_111")
+		let frame = try #require(Self.segmentOffset(data, marker: 0xC0)) + 2
+		for component in 0..<3 { data[frame + 6 + component * 3 + 2] = 0 }
+		let scans = Self.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: Self.quantTableSegment(destination: 0, value: 7), at: scans[1])
+		let afterFirstReplacement = Self.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: Self.quantTableSegment(destination: 0, value: 9),
+			at: afterFirstReplacement[2])
+		let afterLastScan = Self.quantTableSegment(destination: 0, value: 11)
+		data = Array(data.dropLast(2)) + afterLastScan + Array(data.suffix(2))
+		let image = try JPEGParser.parse(data)
+		#expect(image.components.map(\.quantTableIndex) == [4, 5, 0])
+		#expect(image.quantTables[0] != image.quantTables[4])
+		#expect(image.quantTables[4] == [UInt16](repeating: 7, count: 64))
+		#expect(image.quantTables[5] == [UInt16](repeating: 9, count: 64))
+	}
+
+	@Test("scan-bound quantizers preserve sparse destination compatibility")
+	func quantizationBindingsPreserveSparseDestinations() throws {
+		var data = try Self.fixture("small_444")
+		let frame = try #require(Self.segmentOffset(data, marker: 0xC0)) + 2
+		let dqt = try #require(Self.segmentOffset(data, marker: 0xDB)) + 2
+		data[frame + 8] = 3
+		data[dqt] = (data[dqt] & 0xF0) | 3
+		let image = try JPEGParser.parse(data)
+		#expect(image.components.map(\.quantTableIndex) == [3, 1, 1])
+		#expect(image.quantTables.count == 4)
+		#expect(image.quantTables[0].isEmpty)
+		#expect(!image.quantTables[3].isEmpty)
+	}
+
+	@Test("selected marker parsing reaches a required EOI")
+	func markerDispatchRequiresEOI() throws {
+		let data = try Self.fixture("small_444")
+		let baseline = try JPEGParser.parse(data)
+		#expect(throws: Never.self) { try JPEGParser.parse(data) }
+		let interMarkerData =
+			Array(data.prefix(2))
+			+ [
+				0xFF, 0x00, 0xFF, 0x01, 0xFF, 0xD8, 0xFF, 0xDC, 0, 2,
+				0xFF, 0xF0, 0, 2, 0xFF, 0x02, 0xFF, 0xFF,
+			]
+			+ Array(data.dropFirst(2))
+		let interMarkerImage = try JPEGParser.parse(interMarkerData)
+		#expect(interMarkerImage.components == baseline.components)
+		#expect(interMarkerImage.quantTables == baseline.quantTables)
+		#expect(throws: JPEGParseError.unexpectedEndOfData) {
+			try JPEGParser.parse(Array(data.dropLast(2)) + [0, 0])
+		}
+		#expect(
+			throws: JPEGParseError.unsupportedFrameType(marker: 0xDE)
+		) {
+			try JPEGParser.parse(Self.withMarker(0xDE, payload: [], in: data))
+		}
+	}
+
+	@Test("segment fields stay inside their declared payloads")
+	func segmentReadsRespectDeclaredBounds() throws {
+		let data = try Self.fixture("small_444")
+		for (marker, length): (UInt8, Int) in [(0xC0, 8), (0xDA, 6)] {
+			var malformed = data
+			let offset = try #require(Self.segmentOffset(malformed, marker: marker))
+			malformed[offset] = UInt8(length >> 8)
+			malformed[offset + 1] = UInt8(length & 255)
+			#expect(throws: JPEGParseError.invalidSegmentLength(marker: marker)) {
+				try JPEGParser.parse(malformed)
+			}
+		}
+		let shortSOF: [UInt8] = [0xFF, 0xD8, 0xFF, 0xC0, 0, 2, 0xFF, 0xD9]
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xC0)) {
+			try JPEGParser.parse(shortSOF)
+		}
+		let scanOffset = try #require(Self.segmentOffset(data, marker: 0xDA))
+		let shortSOS =
+			Array(data.prefix(scanOffset - 2)) + [
+				0xFF, 0xDA, 0, 2, 0xFF, 0xD9,
+			]
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDA)) {
+			try JPEGParser.parse(shortSOS)
+		}
+		var malformedDRI = Self.withMarker(0xDD, payload: [0, 1], in: data)
+		let driOffset = try #require(Self.segmentOffset(malformedDRI, marker: 0xDD))
+		malformedDRI[driOffset] = 0
+		malformedDRI[driOffset + 1] = 3
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDD)) {
+			try JPEGParser.parse(malformedDRI)
+		}
+		let emptyDQT = Self.withMarker(0xDB, payload: [], in: data)
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDB)) {
+			try JPEGParser.parse(emptyDQT)
+		}
+		var truncatedDQT = Self.withMarker(0xDB, payload: [0], in: data)
+		let offset = try #require(Self.segmentOffset(truncatedDQT, marker: 0xDB))
+		truncatedDQT[offset] = 0
+		truncatedDQT[offset + 1] = 3
+		#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xDB)) {
+			try JPEGParser.parse(truncatedDQT)
+		}
+	}
+
+	@Test("frame and scan component identifiers are unique")
+	func componentIdentifiersAreUnique() throws {
+		let data = try Self.fixture("small_444")
+		let repeatedFrameID = Self.withFrameComponentIDs([1, 1, 3], in: data)
+		#expect(throws: JPEGParseError.duplicateComponentIdentifier(identifier: 1)) {
+			try JPEGParser.parse(repeatedFrameID)
+		}
+		let repeatedScanID = Self.withScanComponentIDs([1, 1, 3], in: data)
+		#expect(throws: JPEGParseError.duplicateComponentIdentifier(identifier: 1)) {
+			try JPEGParser.parse(repeatedScanID)
+		}
+	}
+
+	@Test("frame sampling ratios are integral")
+	func frameSamplingRatiosAreIntegral() throws {
+		let data = try Self.fixture("small_444")
+		#expect(throws: Never.self) { try JPEGParser.parse(data) }
+		var malformed = data
+		let offset = try #require(Self.segmentOffset(malformed, marker: 0xC0))
+		let payload = offset + 2
+		malformed[payload + 7] = 0x32
+		malformed[payload + 10] = 0x22
+		#expect(
+			throws: JPEGParseError.unsupportedSamplingFactors(
+				horizontal: 3, vertical: 2)
+		) {
+			try JPEGParser.parse(malformed)
+		}
+	}
+
+	@Test("a second restart interval definition is rejected")
+	func duplicateRestartIntervalIsRejected() throws {
+		let data = try Self.fixture("small_444")
+		#expect(throws: Never.self) {
+			try JPEGParser.parse(Self.withMarker(0xDD, payload: [0, 0], in: data))
+		}
+		let duplicated = Self.withMarkers(
+			[(0xDD, [0, 0]), (0xDD, [0, 0])], in: data)
+		#expect(throws: JPEGParseError.duplicateRestartInterval) {
+			try JPEGParser.parse(duplicated)
+		}
+	}
+
+	@Test(
+		"disjoint sequential scan partitions recover exact coefficients")
+	func sequentialScanPartitionsMatchReference() throws {
+		for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+			let reference = try JPEGCoefficientDump(fixture: name)
+			let image = try JPEGParser.parse(Self.fixture(name))
+			#expect(image.width == reference.width)
+			#expect(image.height == reference.height)
+			try #require(image.components.count == reference.components.count)
+			for (parsed, expected) in zip(image.components, reference.components) {
+				#expect(parsed.identifier == expected.identifier)
+				#expect(parsed.blocksPerLine == expected.blocksPerLine)
+				#expect(parsed.blocksPerColumn == expected.blocksPerColumn)
+				#expect(
+					Self.firstDifference(
+						parsed.coefficients, expected.coefficients) == nil,
+					"component \(parsed.identifier) differs from libjpeg")
+			}
+		}
+		let data = try Self.fixture("scan_420_111")
+		let scans = Self.markerOffsets(0xDA, in: data)
+		let huffmanDefinitions = Self.markerOffsets(0xC4, in: data)
+		try #require(scans.count == 3)
+		#expect(huffmanDefinitions.contains { scans[0] < $0 && $0 < scans[1] })
+	}
+
+	@Test("scan order preserves frame component identity")
+	func reorderedScanComponentsPreserveFrameOrder() throws {
+		for name in ["scan_420_111", "scan_422_21", "scan_440_12"] {
+			let image = try JPEGParser.parse(Self.fixture(name))
+			#expect(image.components.map(\.identifier) == [1, 2, 3])
+		}
+	}
+
+	@Test("single-component scans preserve padded storage and zero edges")
+	func singleComponentScansUsePaddedStride() throws {
+		let image = try JPEGParser.parse(Self.fixture("scan_420_111"))
+		let reference = try JPEGCoefficientDump(fixture: "scan_420_111")
+		for (component, expected) in zip(image.components, reference.components) {
+			#expect(
+				component.coefficients.count == component.blocksPerLine
+					* component.blocksPerColumn * 64)
+			#expect(
+				Self.firstDifference(component.coefficients, expected.coefficients)
+					== nil)
+		}
+		let chroma = image.components[1]
+		let codedWidth = (image.width + 15) / 16
+		let codedHeight = (image.height + 15) / 16
+		#expect(chroma.blocksPerLine == codedWidth)
+		#expect(chroma.blocksPerColumn == codedHeight)
+	}
+
+	@Test("unvisited components remain zero-filled when EOI follows one scan")
+	func unvisitedSequentialComponentsRemainZero() throws {
+		let data = try Self.fixture("scan_420_111")
+		let firstScan = try #require(Self.markerOffsets(0xDA, in: data).first)
+		let nextTable = try #require(
+			Self.markerOffsets(0xC4, in: data).first(where: { $0 > firstScan }))
+		var partial = Array(data[..<nextTable]) + [0xFF, 0xD9]
+		partial[Self.frameComponentQuantOffset(partial, component: 2)!] = 0
+		let image = try JPEGParser.parse(partial)
+		#expect(image.components[0].coefficients.allSatisfy { $0 == 0 })
+		#expect(image.components[1].coefficients.allSatisfy { $0 == 0 })
+		#expect(image.components[2].coefficients.contains { $0 != 0 })
+		var lateTable = Array(partial.dropLast(2))
+		lateTable += Self.quantTableSegment(destination: 0, value: 13)
+		lateTable += [0xFF, 0xD9]
+		let finalized = try JPEGParser.parse(lateTable)
+		#expect(finalized.components[0].quantTableIndex == 4)
+		#expect(finalized.components[2].quantTableIndex == 0)
+		#expect(finalized.components[0].coefficients.allSatisfy { $0 == 0 })
+		#expect(finalized.quantTables[0] != finalized.quantTables[4])
+		#expect(finalized.quantTables[4] == [UInt16](repeating: 13, count: 64))
+
+		var missingFinalTable = Array(data[..<nextTable]) + [0xFF, 0xD9]
+		missingFinalTable[
+			Self.frameComponentQuantOffset(missingFinalTable, component: 0)!] = 3
+		#expect(throws: JPEGParseError.undefinedQuantTable(index: 3)) {
+			try JPEGParser.parse(missingFinalTable)
+		}
+	}
+
+	@Test("later scan bytes cannot satisfy an earlier scan's entropy floor")
+	func scanEntropyFloorUsesOnlyCurrentScanBytes() throws {
+		let source = try Self.fixture("scan_420_111")
+		let originalScan = try #require(Self.markerOffsets(0xDA, in: source).first)
+		let invalidDC =
+			[0xFF, 0xC4, 0, 20, 0x03, 1]
+			+ [UInt8](repeating: 0, count: 15) + [0]
+		let data =
+			Array(source[..<originalScan]) + invalidDC + Array(source[originalScan...])
+		let firstScan = try #require(Self.markerOffsets(0xDA, in: data).first)
+		let nextTable = try #require(
+			Self.markerOffsets(0xC4, in: data).first(where: { $0 > firstScan }))
+		let entropyStart = firstScan + 10
+		var truncated = Array(data[..<entropyStart]) + [0x80] + Array(data[nextTable...])
+		truncated[firstScan + 6] = (truncated[firstScan + 6] & 0x0F) | 0x30
+		#expect(throws: JPEGParseError.truncatedEntropyData) {
+			try JPEGParser.parse(truncated)
+		}
+	}
+
+	@Test("sequential scans cannot decode a component twice")
+	func sequentialScansRejectOverlap() throws {
+		var data = try Self.fixture("scan_420_111")
+		let scans = Self.markerOffsets(0xDA, in: data)
+		try #require(scans.count == 3)
+		data[scans[1] + 5] = 3
+		#expect(throws: JPEGParseError.multipleScansNotSupported) {
+			try JPEGParser.parse(data)
+		}
+	}
+
+	@Test(
+		"range-valid sequential scan fields use source normalization")
+	func sequentialScanParametersFollowSource() throws {
+		let data = try Self.fixture("small_444")
+		let baseline = try JPEGParser.parse(data)
+		for parameters: [UInt8] in [[1, 1, 0], [63, 63, 0], [0, 63, 0x31]] {
+			var modified = data
+			let sos = try #require(Self.markerOffsets(0xDA, in: modified).first)
+			let parametersOffset = sos + 5 + 2 * 3
+			modified.replaceSubrange(
+				parametersOffset..<(parametersOffset + 3), with: parameters)
+			#expect(try JPEGParser.parse(modified).components == baseline.components)
+		}
+	}
+
+	static func markerOffsets(_ marker: UInt8, in data: [UInt8]) -> [Int] {
+		guard data.count > 1 else { return [] }
+		return (0..<(data.count - 1)).filter {
+			data[$0] == 0xFF && data[$0 + 1] == marker
+		}
+	}
+
+	@Test(
+		"restart MCU counts and predictor state are local to each scan",
+	)
+	func restartStateIsLocalToEachScan() throws {
+		let data = try Self.fixture("scan_420_111_restart")
+		let reference = try JPEGCoefficientDump(fixture: "scan_420_111_restart")
+		let image = try JPEGParser.parse(data)
+		#expect(image.restartInterval == 1)
+		try #require(image.components.count == reference.components.count)
+		for (parsed, expected) in zip(image.components, reference.components) {
+			#expect(
+				Self.firstDifference(parsed.coefficients, expected.coefficients)
+					== nil,
+				"component \(parsed.identifier) differs from libjpeg")
+		}
+		let scans = Self.markerOffsets(0xDA, in: data)
+		let restarts = Self.restartMarkerOffsets(data)
+		try #require(scans.count == 3)
+		try #require(restarts.count > 8)
+		for scan in scans.indices {
+			let upperBound = scan + 1 < scans.count ? scans[scan + 1] : data.count
+			let current = restarts.filter { $0 > scans[scan] && $0 < upperBound }
+			try #require(!current.isEmpty)
+			#expect(data[current[0] + 1] == 0xD0)
+		}
+
+		var wrongSecondScan = data
+		let secondScanRestart = try #require(
+			restarts.first(where: { $0 > scans[1] && $0 < scans[2] }))
+		wrongSecondScan[secondScanRestart + 1] = 0xD1
+		#expect(throws: JPEGParseError.missingRestartMarker(expected: 0)) {
+			try JPEGParser.parse(wrongSecondScan)
+		}
+
+		let firstRestart = restarts[0]
+		let missing =
+			Array(data[..<firstRestart]) + Array(data[(firstRestart + 2)...])
+		#expect(throws: JPEGParseError.missingRestartMarker(expected: 0)) {
+			try JPEGParser.parse(missing)
+		}
+
+		let extraFill =
+			Array(data[..<firstRestart]) + [0xFF] + Array(data[firstRestart...])
+		#expect(throws: JPEGParseError.missingRestartMarker(expected: 0)) {
+			try JPEGParser.parse(extraFill)
+		}
+	}
+
+	static func restartMarkerOffsets(_ data: [UInt8]) -> [Int] {
+		guard data.count > 1 else { return [] }
+		return (0..<(data.count - 1)).filter {
+			data[$0] == 0xFF && (0xD0...0xD7).contains(data[$0 + 1])
+		}
+	}
 
 	@Test("DHT selectors, limits and duplicate values are validated")
 	func dhtValidationMatchesSource() throws {
@@ -266,6 +646,15 @@ struct JPEGParserTests {
 		withMarkers([(marker, payload)], in: data)
 	}
 
+	static func quantTableSegment(destination: UInt8, value: UInt8) -> [UInt8] {
+		[0xFF, 0xDB, 0, 67, destination]
+			+ [UInt8](repeating: value, count: 64)
+	}
+
+	static func frameComponentQuantOffset(_ data: [UInt8], component: Int) -> Int? {
+		segmentOffset(data, marker: 0xC0).map { $0 + 2 + 6 + component * 3 + 2 }
+	}
+
 	static func withMarkers(_ markers: [(UInt8, [UInt8])], in data: [UInt8]) -> [UInt8] {
 		let inserted = markers.flatMap { marker, payload in
 			let length = payload.count + 2
@@ -304,6 +693,26 @@ struct JPEGParserTests {
 		return result
 	}
 
+	static func withFrameComponentIDs(_ ids: [UInt8], in data: [UInt8]) -> [UInt8] {
+		var result = data
+		guard ids.count == 3, let offset = segmentOffset(result, marker: 0xC0) else {
+			return result
+		}
+		let payload = offset + 2
+		for (index, id) in ids.enumerated() { result[payload + 6 + index * 3] = id }
+		return result
+	}
+
+	static func withScanComponentIDs(_ ids: [UInt8], in data: [UInt8]) -> [UInt8] {
+		var result = data
+		guard ids.count == 3, let offset = segmentOffset(result, marker: 0xDA) else {
+			return result
+		}
+		let payload = offset + 2
+		for (index, id) in ids.enumerated() { result[payload + 1 + index * 2] = id }
+		return result
+	}
+
 	static func withoutMarker(_ marker: UInt8, in data: [UInt8]) -> [UInt8] {
 		guard let lengthOffset = segmentOffset(data, marker: marker) else { return data }
 		let start = lengthOffset - 2
@@ -336,7 +745,9 @@ struct JPEGParserTests {
 		"matches libjpeg's coefficients",
 		arguments: [
 			"small_444", "small_422", "small_440", "small_411", "hopper_420_odd",
-			"hopper_gray_odd",
+			"hopper_gray_odd", "hopper_gray_2x2_odd", "scan_420_111",
+			"scan_420_111_restart", "scan_422_21",
+			"scan_440_12",
 		])
 	func matchesReference(name: String) throws {
 		let reference = try JPEGCoefficientDump(fixture: name)
@@ -413,23 +824,29 @@ struct JPEGParserTests {
 	}
 
 	/// A lone component's sampling factors say nothing about its block grid —
-	/// it is always its own maximum — so a non-interleaved scan codes exactly
-	/// `ceil(width / 8)` blocks per line, not the MCU-padded count.
-	@Test("a single-component scan is not padded to the MCU grid")
+	/// it is always its own maximum, and persistent storage uses the padded MCU grid.
+	@Test("a single-component scan uses padded storage stride")
 	func nonInterleavedBlockGrid() throws {
 		let plain = try JPEGParser.parse(Self.fixture("hopper_gray_odd"))
 		#expect(plain.components[0].blocksPerLine == 13)  // ceil(101 / 8)
 		#expect(plain.components[0].blocksPerColumn == 9)  // ceil(67 / 8)
 
-		var patched = try Self.fixture("hopper_gray_odd")
-		let sampling = try #require(Self.segmentOffset(patched, marker: 0xC0)) + 9
-		patched[sampling] = 0x22
-		let image = try JPEGParser.parse(patched)
+		let image = try JPEGParser.parse(Self.fixture("hopper_gray_2x2_odd"))
 
-		// The MCU grid would be ceil(101 / 16) * 2 = 14 blocks wide.
-		#expect(image.components[0].blocksPerLine == 13)
-		#expect(image.components[0].blocksPerColumn == 9)
-		#expect(image.components[0].coefficients == plain.components[0].coefficients)
+		#expect(image.components[0].blocksPerLine == 14)
+		#expect(image.components[0].blocksPerColumn == 10)
+		for y in 0..<9 {
+			let row = y * 14 * 64
+			#expect(
+				Array(image.components[0].coefficients[row..<(row + 13 * 64)])
+					== Array(
+						plain.components[0].coefficients[
+							(y * 13 * 64)..<((y + 1) * 13 * 64)]))
+			#expect(
+				image.components[0].coefficients[(row + 13 * 64)..<(row + 14 * 64)]
+					.allSatisfy { $0 == 0 })
+		}
+		#expect(image.components[0].coefficients[(9 * 14 * 64)...].allSatisfy { $0 == 0 })
 	}
 
 	/// Destuffing is only covered because the fixtures actually contain `FF 00`.

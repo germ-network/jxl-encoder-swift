@@ -8,6 +8,49 @@ import Testing
 /// as swapped colours or a transposed image rather than as a coding error.
 @Suite("JPEG transcode layout")
 struct JPEGTranscodeTests {
+	@Test("channel quantization views consume immutable component-bound values")
+	func quantizationViewsUseBoundTables() throws {
+		var data = try JPEGParserTests.fixture("scan_420_111")
+		let frame = try #require(JPEGParserTests.segmentOffset(data, marker: 0xC0)) + 2
+		for component in 0..<3 { data[frame + 6 + component * 3 + 2] = 0 }
+		let scans = JPEGParserTests.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: JPEGParserTests.quantTableSegment(destination: 0, value: 7),
+			at: scans[1])
+		let nextScans = JPEGParserTests.markerOffsets(0xDA, in: data)
+		data.insert(
+			contentsOf: JPEGParserTests.quantTableSegment(destination: 0, value: 9),
+			at: nextScans[2])
+		let transcode = try JPEGTranscode(JPEGParser.parse(data))
+		#expect(transcode.component(0).quantTableIndex == 5)
+		#expect(transcode.component(1).quantTableIndex == 4)
+		#expect(transcode.component(2).quantTableIndex == 0)
+		#expect(transcode.quantTable(channel: 0) == [UInt16](repeating: 9, count: 64))
+		#expect(transcode.quantTable(channel: 1) == [UInt16](repeating: 7, count: 64))
+		#expect(transcode.dcQuantization(channel: 0) == Float(255 * 8) / 9)
+	}
+
+	@Test(
+		"grayscale sampling uses source modes and existing fallback")
+	func grayscaleSamplingUsesExistingModes() throws {
+		let gray = try JPEGParserTests.fixture("hopper_gray_odd")
+		let factorOffset =
+			try #require(JPEGParserTests.segmentOffset(gray, marker: 0xC0)) + 2 + 7
+		for factor: UInt8 in [0x11, 0x22] {
+			var modified = gray
+			modified[factorOffset] = factor
+			let transcode = try JPEGTranscode(JPEGParser.parse(modified))
+			#expect(transcode.componentMap == [0, 0, 0])
+			#expect(transcode.subsampling.is444)
+		}
+		var unsupported = gray
+		for factor: UInt8 in [0x33, 0x44] {
+			unsupported[factorOffset] = factor
+			#expect(throws: JPEGTranscode.TranscodeError.unsupportedSubsampling) {
+				try JPEGTranscode(JPEGParser.parse(unsupported))
+			}
+		}
+	}
 
 	@Test(
 		"unsupported color interpretation cannot enter coefficient coding")
@@ -46,6 +89,10 @@ struct JPEGTranscodeTests {
 		let transcode = try Self.transcode("hopper_gray_odd")
 		#expect(transcode.componentMap == [0, 0, 0])
 		#expect(transcode.subsampling.is444)
+		let sampledGray = try Self.transcode("hopper_gray_2x2_odd")
+		#expect(sampledGray.subsampling.is444)
+		#expect(sampledGray.component(1).blocksPerLine == 14)
+		#expect(sampledGray.component(1).blocksPerColumn == 10)
 	}
 
 	/// JXL transposes the DCT relative to JPEG, so both the coefficients and the
