@@ -2,14 +2,14 @@ import Testing
 
 @testable import JXLEncoder
 
-/// The static context tree and the tables that shortcut it have to agree.
+/// The legacy static context tree and its lookup tables have to agree.
 ///
-/// `DCPredictor.gradientContextLut` is a 1024-entry table standing in for a walk
+/// `DCPredictor.gradientContextLut` is a legacy 1024-entry table standing in for a walk
 /// of the tree, and `writePlane` predicts with a gradient unconditionally — both
 /// shortcuts that hold only as long as the tree keeps its present shape. Nothing
 /// checked either against the tree itself, so this decodes the transmitted token
 /// stream back into a tree and walks it.
-@Suite("Context tree walk")
+@Suite("Legacy static-tree and LUT diagnostics")
 struct ContextTreeWalkTests {
 	enum Node {
 		case leaf(predictor: Int)

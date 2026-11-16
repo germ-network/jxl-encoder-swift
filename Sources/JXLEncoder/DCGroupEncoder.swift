@@ -2,13 +2,13 @@
 //  DCGroupEncoder.swift
 //  JXLEncoder
 //
-//  Port of `WriteDCGroup`, `WriteDCTokens` and `WriteACMetadataTokens` from
-//  libjxl-tiny's encoder/enc_frame.cc.
+//  Port of pixel and JPEG DC-group preparation and modular tokenization from
+//  the pinned libjxl modular encoder.
 //
 //  A DC group carries the DC image plus the per-block control fields: the
-//  chroma-from-luma maps, the AC strategy, the quant field and the edge-
-//  preserving-filter sharpness. All of them are gradient-predicted and coded
-//  with the same modular entropy code.
+//  chroma-from-luma maps, the AC strategy, the quant field and EPF sharpness.
+//  DC uses the selected weighted predictor; metadata uses its tree-selected
+//  zero, left or gradient predictor. All streams share the modular entropy code.
 //
 
 /// Per-block state a DC group encodes alongside the DC image.

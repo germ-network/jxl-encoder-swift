@@ -349,16 +349,11 @@ struct PixelSemanticFixtureTests {
 				let dcDifferenceCount = dcDifferences.count
 				let firstDCDifference = dcDifferences.first?.offset
 				#expect(actualChannelDC.count == expectedChannelDC.count)
-				if dcDifferenceCount == 0 {
-					#expect(Array(actualChannelDC) == Array(expectedChannelDC))
-				} else {
-					withKnownIssue(Comment(rawValue: "GER-3387")) {
-						#expect(
-							dcDifferenceCount == 0,
-							"\(name)#dc.c\(channel): \(dcDifferenceCount) differences; first \(firstDCDifference?.description ?? "none")"
-						)
-					}
-				}
+				#expect(
+					dcDifferenceCount == 0,
+					"\(name)#dc.c\(channel): \(dcDifferenceCount) differences; first \(firstDCDifference?.description ?? "none")"
+				)
+				#expect(Array(actualChannelDC) == Array(expectedChannelDC))
 			}
 		}
 	}

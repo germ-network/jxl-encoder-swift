@@ -2,20 +2,13 @@
 //  ContextTree.swift
 //  JXLEncoder
 //
-//  Port of `WriteContextTree` and its static token stream from libjxl-tiny's
-//  encoder/enc_frame.cc.
+//  Builds the selected pinned libjxl modular tree for DC and AC metadata.
+//  The fixed token stream below remains a legacy tiny-tree diagnostic path.
 //
-//  The modular sub-bitstream (DC image and control fields) is decoded through a
-//  context tree. This port emits the reference's fixed tree, with one token
-//  patched to carry the DC group count, and codes it with a freshly built
-//  entropy code — the tree's own token statistics, not the static coefficient
-//  tables.
+//  Generator: lib/jxl/modular/encoding/enc_encoding.cc
+//  Upstream: libjxl@a7a9c787341cf703dede03c2009fa460cae5e5df
+//  Config: e4 Cheetah pixel; JPEG -j 1
 //
-//  Generator: unrecorded
-//  Upstream: libjxl-tiny (unpinned)
-//  Config: OPTIMIZE_CODE=0
-//
-
 enum ContextTree {
 	enum Predictor: UInt32, Sendable {
 		case zero = 0

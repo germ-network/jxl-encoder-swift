@@ -179,7 +179,7 @@ enum SectionOptimizer {
 					writer: &configWriter)
 				let cost =
 					ANSEncodingHistogram.computeBest(
-						counts: counts.counts, strategy: .approximate
+						counts: counts.counts, strategy: .fast
 					).cost
 					+ extraBitCost + Float(configWriter.bitsWritten)
 				if cost < bestCost {

@@ -5,7 +5,7 @@ import Testing
 
 /// Frozen bytes from `Reference/legacy-tiny/tools/gentree.cc`, which calls
 /// libjxl-tiny's own `WriteContextTree` and `WriteEntropyCode`.
-@Suite("Context tree and entropy code")
+@Suite("Legacy tiny-tree byte diagnostics")
 struct ContextTreeTests {
 	static func loadReference(
 		_ name: String = "context_tree"
@@ -27,7 +27,7 @@ struct ContextTreeTests {
 		return result
 	}
 
-	@Test("context tree matches libjxl-tiny", arguments: [1, 2, 3, 7, 16, 100])
+	@Test("legacy tiny context tree bytes", arguments: [1, 2, 3, 7, 16, 100])
 	func contextTree(dcGroupCount: Int) throws {
 		let reference = try Self.loadReference()
 		let expected = try #require(reference["TREE\(dcGroupCount)"])
