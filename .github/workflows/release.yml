@@ -41,7 +41,7 @@ jobs:
 
         with:
           title: Prepare next release
-          createGithubReleases: true
+          createGithubReleases: false
           publish: pnpm release
           version: pnpm version-package
         env:
