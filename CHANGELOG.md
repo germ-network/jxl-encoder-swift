@@ -1,8 +1,22 @@
 # @germ-network/jxl-encoder-swift
 
-## 0.3.1
+## 0.4.0
+
+### Minor Changes
+
+- Expand baseline JPEG ingestion to support disjoint sequential scans, scan-local restart state, and persistent padded coefficient planes.
+
+### Compatibility
+
+- Added `JPEGParseError.duplicateComponentIdentifier` and `.duplicateRestartInterval` cases can require downstream exhaustive switches to be updated.
+- `JPEGComponent.quantTableIndex` indexes the component's bound values in `JPEGImage.quantTables`; it can exceed 3 after table redefinitions and should not be treated as the original JPEG destination identifier.
+- Quantization-table redefinitions bind at each component's scan, following JPEG T.81 active-table semantics. This deliberately differs from the pinned libjxl reader's first-definition binding; see [the source and standard evidence](https://github.com/germ-network/jxl-encoder-swift/blob/v0.4.0/Reference/jpeg-quantization-binding.md).
+- Grayscale coefficient storage uses padded block strides. Grayscale sampling factors 3 and 4 now decline coefficient recompression: `Encoder.recompressJPEG(_:)` returns nil, while the Apple encoder falls back to decoding pixels and applies its pixel-path budget.
+- Newly accepted sequential JPEGs can take coefficient recompression instead of pixel encoding. Encoded output can change across both JPEG and pixel paths.
 
 ### Patch Changes
+
+- Serialize VarDCT Gaborish and EPF fields independently, with pixel and JPEG header verification against the selected effort-4 configuration.
 
 - [#51](https://github.com/germ-network/jxl-encoder-swift/pull/51) [`03b45d5`](https://github.com/germ-network/jxl-encoder-swift/commit/03b45d50f6eba893c24a1e83d84e072b7fd59333) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Bound generated GitHub release notes and make release creation recoverable after tag publication.
 
