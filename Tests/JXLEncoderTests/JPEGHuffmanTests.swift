@@ -4,6 +4,13 @@ import Testing
 
 @Suite("JPEG Huffman decoding")
 struct JPEGHuffmanTests {
+	static let fixtureReferences = Set([
+		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/root_sparse.tsv",
+		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/subtable_9.tsv",
+		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/subtable_16.tsv",
+		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/maximal_ac.tsv",
+	])
+
 	@Test("lookup entries match root, subtable and sentinel captures")
 	func lookupEntriesMatchSource() throws {
 		let cases: [(String, [Int], [UInt8])] = [

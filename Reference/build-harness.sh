@@ -17,7 +17,21 @@ source "$PIN_FILE"
 
 TARGET_DIR="${1:-${LIBJXL_DIR:-$HOME/tmp/automation/libjxl-v0.12.0}}"
 OUT="$HERE/build/harness"
-JPEG_PREFIX="${JPEG_PREFIX:-/opt/homebrew}"
+JPEG_PREFIX="${JPEG_PREFIX:-}"
+if [ -z "$JPEG_PREFIX" ]; then
+	echo "Set JPEG_PREFIX to the pinned libjpeg-turbo 3.2.0 installation." >&2
+	exit 1
+fi
+if [ ! -r "$JPEG_PREFIX/include/jconfig.h" ] ||
+	[ ! -r "$JPEG_PREFIX/lib/libjpeg.dylib" ]; then
+	echo "JPEG_PREFIX is missing jconfig.h or libjpeg.dylib: $JPEG_PREFIX" >&2
+	exit 1
+fi
+JPEG_VERSION="$(awk '$1 == "#define" && $2 == "LIBJPEG_TURBO_VERSION" { print $3; exit }' "$JPEG_PREFIX/include/jconfig.h" | tr -d '"\r')"
+if [ "$JPEG_VERSION" != "$JPEG_TURBO_VERSION" ]; then
+	echo "JPEG_PREFIX must contain libjpeg-turbo $JPEG_TURBO_VERSION; found ${JPEG_VERSION:-unknown}." >&2
+	exit 1
+fi
 
 if [ ! -d "$TARGET_DIR/.git" ]; then
 	echo "Target directory $TARGET_DIR not found; fetching..."
