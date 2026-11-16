@@ -886,3 +886,30 @@ extension Encoder {
 		return (dcCode, acCode)
 	}
 }
+
+extension Encoder {
+	static func computeACGroup(
+		xybAt: @Sendable (Rect) -> PaddedStripe,
+		dim: ImageDim, groupX: Int, groupY: Int, params: DistanceParams
+	) -> ACGroupCompute {
+		fatalError("Unimplemented contract")
+	}
+
+	struct PixelFrameInput: Sendable {
+		let dim: ImageDim
+		let xybAt: @Sendable (Rect) -> PaddedStripe
+	}
+
+	static func preparePixelFrame(
+		stripeAt: @escaping @Sendable (Rect) -> PaddedStripe,
+		width: Int, height: Int, params: DistanceParams
+	) -> PixelFrameInput {
+		fatalError("Unimplemented contract")
+	}
+}
+
+enum PixelDownsampler {
+	static func downsample2(_ xyb: PaddedStripe) -> PaddedStripe {
+		fatalError("Unimplemented contract")
+	}
+}

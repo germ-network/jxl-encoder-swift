@@ -22,6 +22,9 @@ func clamp1<T: Comparable>(_ value: T, _ low: T, _ high: T) -> T {
 /// Frame-level quantizer settings derived from the requested distance.
 public struct DistanceParams: Equatable, Sendable {
 	public let distance: Float
+
+	var originalDistance: Float { fatalError("Unimplemented contract") }
+	var upsampling: Int { fatalError("Unimplemented contract") }
 	public let globalScale: Int
 	public let quantDC: Int
 	public let scale: Float

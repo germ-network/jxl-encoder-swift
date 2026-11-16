@@ -271,3 +271,17 @@ struct DistanceParamsTests {
 		#expect(data.quantDC[1][0] != 0)
 	}
 }
+
+extension DistanceParamsTests {
+	@Test(.disabled("Pending implementation"))
+	func thresholdNeighborsUseEffectiveDistanceAndOriginalMatrices() throws {
+		let below = try DistanceParams(distance: Float(10).nextDown)
+		let at = try DistanceParams(distance: 10)
+		let above = try DistanceParams(distance: Float(10).nextUp)
+		#expect(below.upsampling == 1)
+		#expect(at.upsampling == 2 && above.upsampling == 2)
+		#expect(at.distance == 2.75 && at.originalDistance == 10)
+		#expect(at.xQuantMatrixScale == 6)
+	}
+
+}

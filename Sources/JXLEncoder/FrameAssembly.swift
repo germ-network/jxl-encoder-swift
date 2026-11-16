@@ -35,7 +35,8 @@ enum FrameAssembly {
 	}
 
 	static func writeFrameHeader(
-		colorMode: ColorMode, loopFilter: LoopFilter, writer: inout BitWriter
+		colorMode: ColorMode, loopFilter: LoopFilter, upsampling: Int = 1,
+		writer: inout BitWriter
 	) {
 		let epfIterations = loopFilter.epfIterations
 		writer.write(1, 0)  // not all default
