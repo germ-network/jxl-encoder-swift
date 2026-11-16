@@ -23,9 +23,9 @@ extension Encoder {
 	/// Re-codes a JPEG from its own quantized coefficients, or returns nil if
 	/// this one cannot take that path.
 	///
-	/// A non-JPEG, or a layout the parser declines (progressive,
-	/// arithmetic-coded, CMYK, …), returns nil so the caller can decode and
-	/// re-encode the pixels instead. The output declares no orientation, so a
+	/// A non-JPEG, unsupported layout, RGB interpretation, or tagged ICC profile
+	/// returns nil so the caller can decode and re-encode the pixels instead.
+	/// The output declares no orientation, so a
 	/// caller that must keep a rotated source upright checks
 	/// `JPEGParser.exifOrientation` first.
 	public static func recompressJPEG(

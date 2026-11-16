@@ -80,6 +80,24 @@ PY
 cjpeg -quality 90 -sample 1x1 -outfile "$CORE/small_444.jpg" "$WORK/small.ppm"
 cjpeg -quality 90 -sample 2x1 -outfile "$CORE/small_422.jpg" "$WORK/small.ppm"
 cjpeg -quality 90 -sample 1x2 -outfile "$CORE/small_440.jpg" "$WORK/small.ppm"
+python3 - "$WORK/colors.ppm" <<'PY'
+import sys
+width = height = 192
+colors = [
+    (255, 0, 0), (0, 255, 0), (0, 0, 255), (255, 255, 0),
+    (255, 0, 255), (0, 255, 255), (240, 64, 16), (32, 96, 240),
+    (255, 96, 0), (64, 0, 255), (0, 160, 64), (192, 0, 96),
+    (255, 255, 255), (0, 0, 0), (128, 128, 128), (64, 128, 192),
+]
+pixels = bytearray()
+for y in range(height):
+    for x in range(width):
+        pixels.extend(colors[(y // 48) * 4 + x // 48])
+with open(sys.argv[1], "wb") as output:
+    output.write(b"P6\n192 192\n255\n" + pixels)
+PY
+cjpeg -rgb -quality 90 -outfile "$CORE/rgb_color.jpg" "$WORK/colors.ppm"
+cjpeg -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/display_p3_profile.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 4x1 -outfile "$CORE/small_411.jpg" "$WORK/small.ppm"
 cjpeg -quality 85 -sample 2x2 -restart 3 -outfile "$CORE/hopper_420_odd.jpg" "$WORK/odd.ppm"
 cjpeg -quality 85 -grayscale -outfile "$CORE/hopper_gray_odd.jpg" "$WORK/odd.ppm"
@@ -94,6 +112,9 @@ cjpeg -lossless 1 -outfile "$CORE/reject_lossless.jpg" "$WORK/tiny.ppm"
 for name in small_444 small_422 small_440 small_411 hopper_420_odd hopper_gray_odd; do
 	"$OUT/dump_jpeg_coefficients" "$CORE/$name.jpg" "$CORE/$name.coef"
 done
+
+cp "$CORE/rgb_color.jpg" "$APPLE/rgb_color.jpg"
+cp "$CORE/display_p3_profile.jpg" "$APPLE/display_p3_profile.jpg"
 
 # The cross-check against ImageIO needs the pictures, not the dumps.
 cjpeg -quality 88 -sample 1x1 -outfile "$APPLE/hopper_444.jpg" "$WORK/full.ppm"

@@ -12,14 +12,138 @@ import Testing
 struct JPEGParserTests {
 
 	@Test(
-		"APP0, first valid Adobe marker, and ordered component IDs determine color eligibility",
-		.disabled("Awaiting implementation"))
-	func markerColorPrecedence() throws {}
+		"APP0, first valid Adobe marker, and ordered component IDs determine color eligibility"
+	)
+	func markerColorPrecedence() throws {
+		let base = try Self.fixture("small_444")
+		#expect(
+			try !JPEGParser.parse(Self.fixture("rgb_color"))
+				.hasSupportedColorInterpretation)
+		let noAPP0 = Self.withoutMarker(0xE0, in: base)
+		let rgbIDs = Self.withRGBIDs(noAPP0)
+		#expect(try !JPEGParser.parse(rgbIDs).hasSupportedColorInterpretation)
+		#expect(
+			try JPEGParser.parse(Self.withMarker(0xE0, payload: [0], in: rgbIDs))
+				.hasSupportedColorInterpretation)
+		#expect(
+			try JPEGParser.parse(
+				Self.withMarkers([(0xE0, [0]), (0xEE, Self.adobe(0))], in: rgbIDs)
+			)
+			.hasSupportedColorInterpretation)
+		#expect(
+			try JPEGParser.parse(
+				Self.withMarker(0xEE, payload: Self.adobe(0), in: noAPP0)
+			)
+			.hasSupportedColorInterpretation == false)
+		#expect(
+			try JPEGParser.parse(
+				Self.withMarker(0xEE, payload: Self.adobe(1), in: noAPP0)
+			)
+			.hasSupportedColorInterpretation)
+		let firstWins = Self.withMarkers(
+			[
+				(0xEE, Self.adobe(0)), (0xEE, Self.adobe(1)),
+			], in: noAPP0)
+		#expect(try !JPEGParser.parse(firstWins).hasSupportedColorInterpretation)
+		let invalidThenValid = Self.withMarkers(
+			[
+				(0xEE, Array(Self.adobe(0).prefix(11))), (0xEE, Self.adobe(1)),
+			], in: noAPP0)
+		#expect(try JPEGParser.parse(invalidThenValid).hasSupportedColorInterpretation)
+		#expect(
+			try JPEGParser.parse(Self.withComponentIDs([0x31, 0x32, 0x33], in: noAPP0))
+				.hasSupportedColorInterpretation)
+
+		let afterScan = Self.withMarkerAfterScan(0xE0, payload: [0], in: rgbIDs)
+		#expect(try JPEGParser.parse(afterScan).hasSupportedColorInterpretation)
+		let gray = try Self.fixture("hopper_gray_odd")
+		#expect(
+			try JPEGParser.parse(
+				Self.withMarker(0xEE, payload: Self.adobe(0), in: gray)
+			)
+			.hasSupportedColorInterpretation)
+		#expect(
+			try JPEGParser.parse(rgbIDs).components.map(\.coefficients)
+				== JPEGParser.parse(noAPP0).components.map(\.coefficients))
+	}
 
 	@Test(
-		"fully tagged ICC metadata declines coefficient recompression",
-		.disabled("Awaiting implementation"))
-	func iccProfileEligibility() throws {}
+		"fully tagged ICC metadata declines coefficient recompression")
+	func iccProfileEligibility() throws {
+		let base = try Self.fixture("small_444")
+		#expect(
+			try !JPEGParser.parse(Self.fixture("display_p3_profile"))
+				.hasSupportedColorInterpretation)
+		let tag: [UInt8] = Array("ICC_PROFILE\0".utf8)
+		for tail: [UInt8] in [[], [0, 1], [1, 1, 1, 2], [1, 2, 1, 2]] {
+			let tagged = Self.withMarker(0xE2, payload: tag + tail, in: base)
+			#expect(try !JPEGParser.parse(tagged).hasSupportedColorInterpretation)
+		}
+		for prefix in [
+			Array("ICC_PROFIL".utf8), Array("ICC_PROFILE".utf8),
+			Array("OTHER_PROFILE\0".utf8),
+		] {
+			#expect(
+				try JPEGParser.parse(
+					Self.withMarker(0xE2, payload: prefix, in: base)
+				)
+				.hasSupportedColorInterpretation)
+		}
+	}
+
+	static func adobe(_ transform: UInt8) -> [UInt8] {
+		Array("Adobe".utf8) + [0, 100, 0, 0, 0, 0, transform]
+	}
+
+	static func withMarker(_ marker: UInt8, payload: [UInt8], in data: [UInt8]) -> [UInt8] {
+		withMarkers([(marker, payload)], in: data)
+	}
+
+	static func withMarkers(_ markers: [(UInt8, [UInt8])], in data: [UInt8]) -> [UInt8] {
+		let inserted = markers.flatMap { marker, payload in
+			let length = payload.count + 2
+			return [0xFF, marker, UInt8(length >> 8), UInt8(length & 255)] + payload
+		}
+		return Array(data.prefix(2)) + inserted + Array(data.dropFirst(2))
+	}
+
+	static func withMarkerAfterScan(_ marker: UInt8, payload: [UInt8], in data: [UInt8])
+		-> [UInt8]
+	{
+		let length = payload.count + 2
+		let segment = [0xFF, marker, UInt8(length >> 8), UInt8(length & 255)] + payload
+		return Array(data.dropLast(2)) + segment + Array(data.suffix(2))
+	}
+
+	static func withRGBIDs(_ data: [UInt8]) -> [UInt8] {
+		withComponentIDs([0x52, 0x47, 0x42], in: data)
+	}
+
+	static func withComponentIDs(_ ids: [UInt8], in data: [UInt8]) -> [UInt8] {
+		var result = data
+		guard let lengthOffset = segmentOffset(result, marker: 0xC0) else { return result }
+		let payload = lengthOffset + 2
+		guard ids.count == 3 else { return result }
+		for (index, id) in ids.enumerated() {
+			result[payload + 6 + index * 3] = id
+		}
+		guard let scanLengthOffset = segmentOffset(result, marker: 0xDA) else {
+			return result
+		}
+		let scanPayload = scanLengthOffset + 2
+		for (index, id) in ids.enumerated() {
+			result[scanPayload + 1 + index * 2] = id
+		}
+		return result
+	}
+
+	static func withoutMarker(_ marker: UInt8, in data: [UInt8]) -> [UInt8] {
+		guard let lengthOffset = segmentOffset(data, marker: marker) else { return data }
+		let start = lengthOffset - 2
+		let length = (Int(data[lengthOffset]) << 8) | Int(data[lengthOffset + 1])
+		let end = lengthOffset + length
+		return Array(data[..<start]) + Array(data[end...])
+	}
 
 	enum FixtureError: Error { case notFound(String) }
 
@@ -313,7 +437,8 @@ struct JPEGParserTests {
 			let found = data[index + 1]
 			if found == marker { return index + 2 }
 			if found == 0xDA { return nil }
-			index += 2 + Int(data[index + 2]) << 8 + Int(data[index + 3])
+			let length = (Int(data[index + 2]) << 8) | Int(data[index + 3])
+			index += 2 + length
 		}
 		return nil
 	}

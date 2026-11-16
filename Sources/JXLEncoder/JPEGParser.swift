@@ -172,6 +172,9 @@ private struct JPEGSegmentParser {
 	var restartInterval = 0
 	var frame: JPEGFrame?
 	var components: [JPEGComponent]?
+	var hasAPP0 = false
+	var adobeTransform: UInt8?
+	var hasICCProfileTag = false
 
 	mutating func run() throws -> JPEGImage {
 		guard data.count >= 2, data[0] == 0xFF, data[1] == 0xD8 else {
@@ -216,6 +219,13 @@ private struct JPEGSegmentParser {
 				break loop
 			case 0x01, 0xD0...0xD7:
 				continue  // standalone markers, no payload
+			case 0xE0:
+				hasAPP0 = true
+				try skipSegment(marker: marker)
+			case 0xE2:
+				try readICCProfileTag()
+			case 0xEE:
+				try readAdobeTransform()
 			default:
 				try skipSegment(marker: marker)
 			}
@@ -224,12 +234,22 @@ private struct JPEGSegmentParser {
 		guard let frame else { throw JPEGParseError.missingFrameHeader }
 		guard let components else { throw JPEGParseError.missingScan }
 		let highestTable = quantTables.lastIndex(where: { $0 != nil }).map { $0 + 1 } ?? 0
-		return JPEGImage(
+		let sourceIsRGB: Bool
+		if components.count == 1 || hasAPP0 {
+			sourceIsRGB = false
+		} else if let adobeTransform {
+			sourceIsRGB = adobeTransform == 0
+		} else {
+			sourceIsRGB = components.map(\.identifier) == [0x52, 0x47, 0x42]
+		}
+		var image = JPEGImage(
 			width: frame.width,
 			height: frame.height,
 			components: components,
 			quantTables: (0..<highestTable).map { quantTables[$0] ?? [] },
 			restartInterval: restartInterval)
+		image.hasSupportedColorInterpretation = !sourceIsRGB && !hasICCProfileTag
+		return image
 	}
 
 	// MARK: - Segments
@@ -267,6 +287,30 @@ private struct JPEGSegmentParser {
 
 	private mutating func skipSegment(marker: UInt8) throws {
 		index = try segmentEnd(marker: marker)
+	}
+
+	private mutating func readAdobeTransform() throws {
+		let end = try segmentEnd(marker: 0xEE)
+		let payloadLength = end - index
+		if adobeTransform == nil, payloadLength == 12,
+			data[index..<(index + 5)].elementsEqual([0x41, 0x64, 0x6F, 0x62, 0x65])
+		{
+			adobeTransform = data[index + 11]
+		}
+		index = end
+	}
+
+	private mutating func readICCProfileTag() throws {
+		let end = try segmentEnd(marker: 0xE2)
+		let signature: [UInt8] = [
+			0x49, 0x43, 0x43, 0x5F, 0x50, 0x52, 0x4F, 0x46, 0x49, 0x4C, 0x45, 0,
+		]
+		if end - index >= signature.count,
+			data[index..<(index + signature.count)].elementsEqual(signature)
+		{
+			hasICCProfileTag = true
+		}
+		index = end
 	}
 
 	private mutating func readFrameHeader(marker: UInt8) throws {

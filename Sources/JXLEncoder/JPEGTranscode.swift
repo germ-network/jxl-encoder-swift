@@ -34,6 +34,9 @@ public struct JPEGTranscode {
 	}
 
 	public init(_ image: JPEGImage) throws {
+		guard image.hasSupportedColorInterpretation else {
+			throw TranscodeError.unsupportedColorInterpretation
+		}
 		let count = image.components.count
 		switch count {
 		case 1:
