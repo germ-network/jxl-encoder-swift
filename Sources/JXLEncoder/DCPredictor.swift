@@ -63,8 +63,8 @@ enum DCPredictor {
 			let weightedError = teN + teW
 
 			predictions.0 = w + ne - n
-			predictions.1 = n - ((weightedError + teNE) * 16 >> 5)
-			predictions.2 = w - ((weightedError + teNW) * 10 >> 5)
+			predictions.1 = n - (((weightedError + teNE) * 16) >> 5)
+			predictions.2 = w - (((weightedError + teNW) * 10) >> 5)
 			// The selected WP mode fixes the north-north and north-west coefficients to zero.
 			let weightedP3 = teNW * 7 + teN * 7 + teNE * 7 + (nn - n) * 0 + (nw - w) * 0
 			predictions.3 = n - (weightedP3 >> 5)

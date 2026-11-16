@@ -53,7 +53,16 @@ struct LoopFilterTests {
 		_ = reader.read(20)
 		reader.alignToByte()
 
-		_ = reader.read(14)
+		_ = reader.read(1 + 2 + 1)
+		let flagsSelector = Int(reader.read(2))
+		switch flagsSelector {
+		case 1: _ = reader.read(4)
+		case 2: _ = reader.read(8)
+		case 3:
+			_ = reader.read(12)
+			while reader.read(1) == 1 { _ = reader.read(8) }
+		default: break
+		}
 		if !xybEncoded { _ = reader.read(1 + 6) }
 		_ = reader.read(2)
 		if xybEncoded { _ = reader.read(6) }
@@ -123,7 +132,16 @@ struct LoopFilterTests {
 			var reader = BitReader(bytes: writer.take())
 
 			#expect(reader.read(1) == 0)
-			_ = reader.read(2 + 1 + 2 + 8)
+			_ = reader.read(2 + 1)
+			let flagsSelector = Int(reader.read(2))
+			switch flagsSelector {
+			case 1: _ = reader.read(4)
+			case 2: _ = reader.read(8)
+			case 3:
+				_ = reader.read(12)
+				while reader.read(1) == 1 { _ = reader.read(8) }
+			default: break
+			}
 			if case .ycbcr = mode {
 				_ = reader.read(1 + 6 + 2)
 			} else {

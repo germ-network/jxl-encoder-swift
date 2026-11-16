@@ -247,8 +247,8 @@ public enum Encoder {
 	/// share it exactly and cannot drift.
 	static func assemble(
 		outputs: [ACGroupOutput], dim: ImageDim, params: DistanceParams,
-		sections: inout [SectionWriter]
-	) throws {
+		optimizeCodes: Bool, sections: inout [SectionWriter]
+	) throws -> [DCGroupData] {
 		var dcData: [DCGroupData] = (0..<dim.dcGroupCount).map { i in
 			let rect = dim.pixelRect(
 				ix: i % dim.widthInDCGroups, iy: i / dim.widthInDCGroups,
@@ -303,10 +303,14 @@ public enum Encoder {
 
 		for i in 0..<dim.dcGroupCount {
 			try DCGroupEncoder.preparePixel(
-				rawDC: rawDCByGroup[i], scaleDC: params.scaleDC,
+				rawDC: rawDCByGroup[i], globalScale: params.globalScale,
+				quantDC: params.quantDC,
 				data: &dcData[i])
-			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+			if !optimizeCodes {
+				DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+			}
 		}
+		return dcData
 	}
 
 	static func encodeFrame(
@@ -375,12 +379,35 @@ public enum Encoder {
 					compute, order: coeffOrder.orders, mode: acMode,
 					blockContextMap: blockContextMap))
 		}
-		try assemble(outputs: outputs, dim: dim, params: params, sections: &sections)
+		let dcData = try assemble(
+			outputs: outputs, dim: dim, params: params,
+			optimizeCodes: optimizeCodes, sections: &sections)
+		var modularTree: ContextTree.Prepared?
+		var modularTreeCode: EntropyCode?
 
 		if optimizeCodes {
-			let dcRange = 1..<(1 + dim.dcGroupCount)
-			dcCode = SectionOptimizer.optimize(
-				sections: &sections, range: dcRange, baseCode: dcCode)
+			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
+			let streams = try dcData.enumerated().map {
+				try DCGroupEncoder.tokenStreams(
+					data: $0.element, groupIndex: $0.offset, tree: tree)
+			}
+			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+			dcCode = SectionOptimizer.modularCode(
+				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+				extraDCPrecision: 1)
+			let treeCode = SectionOptimizer.modularCode(
+				tokenStreams: [tree.tokens],
+				contextCount: ContextTree.treeContextCount,
+				extraDCPrecision: 1)
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index], streams: streams[index],
+					code: dcCode, writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			modularTree = tree
+			modularTreeCode = treeCode
 			acCode = SectionOptimizer.optimize(
 				sections: &sections, range: acRange, baseCode: acCode,
 				allowANS: true)
@@ -391,6 +418,9 @@ public enum Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+			modularTree: modularTree.flatMap { tree in
+				modularTreeCode.map { (tree: tree, code: $0) }
+			},
 			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
@@ -516,13 +546,36 @@ extension Encoder {
 		// Frees the frame's coefficients before assembly/optimisation rather
 		// than leaving them reachable for the rest of the encode.
 		computes = []
-		try assemble(outputs: outputs, dim: dim, params: params, sections: &sections)
+		let dcData = try assemble(
+			outputs: outputs, dim: dim, params: params,
+			optimizeCodes: optimizeCodes, sections: &sections)
 
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
+		var modularTree: ContextTree.Prepared?
+		var modularTreeCode: EntropyCode?
 		if optimizeCodes {
-			dcCode = SectionOptimizer.optimize(
-				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
-				baseCode: dcCode)
+			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
+			let streams = try dcData.enumerated().map {
+				try DCGroupEncoder.tokenStreams(
+					data: $0.element, groupIndex: $0.offset, tree: tree)
+			}
+			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+			dcCode = SectionOptimizer.modularCode(
+				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+				extraDCPrecision: 1)
+			let treeCode = SectionOptimizer.modularCode(
+				tokenStreams: [tree.tokens],
+				contextCount: ContextTree.treeContextCount,
+				extraDCPrecision: 1)
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index], streams: streams[index],
+					code: dcCode, writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			modularTree = tree
+			modularTreeCode = treeCode
 			acCode = SectionOptimizer.optimize(
 				sections: &sections, range: acRange, baseCode: acCode,
 				allowANS: true)
@@ -531,6 +584,9 @@ extension Encoder {
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+			modularTree: modularTree.flatMap { tree in
+				modularTreeCode.map { (tree: tree, code: $0) }
+			},
 			blockContextMap: blockContextMap, writer: &dcGlobal)
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
@@ -751,14 +807,38 @@ extension Encoder {
 			}
 		}
 
-		for i in 0..<dim.dcGroupCount {
-			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+		var modularTree: ContextTree.Prepared?
+		var modularTreeCode: EntropyCode?
+		if optimizeCodes {
+			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: true)
+			let streams = try dcData.enumerated().map {
+				try DCGroupEncoder.tokenStreams(
+					data: $0.element, groupIndex: $0.offset, tree: tree)
+			}
+			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+			dcCode = SectionOptimizer.modularCode(
+				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+				extraDCPrecision: 0)
+			let treeCode = SectionOptimizer.modularCode(
+				tokenStreams: [tree.tokens],
+				contextCount: ContextTree.treeContextCount,
+				extraDCPrecision: 0)
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index], streams: streams[index],
+					code: dcCode, writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			modularTree = tree
+			modularTreeCode = treeCode
+		} else {
+			for i in 0..<dim.dcGroupCount {
+				DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
+			}
 		}
 
 		if optimizeCodes {
-			dcCode = SectionOptimizer.optimize(
-				sections: &sections, range: 1..<(1 + dim.dcGroupCount),
-				baseCode: dcCode)
 			acCode = SectionOptimizer.optimize(
 				sections: &sections, range: acRange, baseCode: acCode,
 				allowANS: true)
@@ -768,6 +848,9 @@ extension Encoder {
 		try FrameAssembly.writeDCGlobal(
 			params: try DistanceParams(distance: 1.0),
 			dcGroupCount: dim.dcGroupCount, code: dcCode,
+			modularTree: modularTree.flatMap { tree in
+				modularTreeCode.map { (tree: tree, code: $0) }
+			},
 			dcQuantization: (0..<3).map { transcode.dcQuantization(channel: $0) },
 			globalScale: FrameAssembly.jpegGlobalScale,
 			quantDC: 1,

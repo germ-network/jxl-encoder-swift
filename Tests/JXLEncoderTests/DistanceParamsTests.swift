@@ -199,7 +199,7 @@ struct DistanceParamsTests {
 			let bits = Array(writer.take()).flatMap { byte in
 				(0..<8).map { (byte >> $0) & 1 }
 			}
-			let signaledScale = bits[16..<19].enumerated().reduce(UInt32(0)) {
+			let signaledScale = bits[8..<11].enumerated().reduce(UInt32(0)) {
 				$0 | (UInt32($1.element) << UInt32($1.offset))
 			}
 			#expect(signaledScale == expectedScale)
@@ -264,7 +264,9 @@ struct DistanceParamsTests {
 			quantField: [params.uniformQuant], scale: params.scale,
 			xQuantMatrixScale: params.xQuantMatrixScale, rawDC: &rawDC)
 		var data = DCGroupData(widthInBlocks: 1, heightInBlocks: 1)
-		try DCGroupEncoder.preparePixel(rawDC: rawDC, scaleDC: params.scaleDC, data: &data)
+		try DCGroupEncoder.preparePixel(
+			rawDC: rawDC, globalScale: params.globalScale, quantDC: params.quantDC,
+			data: &data)
 		#expect(data.extraDCPrecision == 1)
 		#expect(data.quantDC[1][0] != 0)
 	}

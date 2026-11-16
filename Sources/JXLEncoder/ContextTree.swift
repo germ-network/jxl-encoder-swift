@@ -223,13 +223,13 @@ enum ContextTree {
 			dcGroupCount: dcGroupCount)
 	}
 
-	static func write(_ prepared: Prepared, writer: inout BitWriter) {
-		let code = HistogramCluster.optimizeEntropyCode(
-			tokens: prepared.tokens, contextCount: treeContextCount)
+	static func write(
+		_ prepared: Prepared, code: EntropyCode, writer: inout BitWriter
+	) {
 		writer.write(1, 1)
 		writer.write(1, 0)
 		EntropyCodeWriter.write(code, writer: &writer)
-		for token in prepared.tokens { writer.write(token: token, code: code) }
+		EntropyCodeWriter.writeTokens(prepared.tokens, code: code, writer: &writer)
 	}
 
 	/// Contexts in the tree's own token stream.

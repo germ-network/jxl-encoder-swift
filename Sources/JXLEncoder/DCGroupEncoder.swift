@@ -74,7 +74,8 @@ public enum DCGroupEncoder {
 	static let dcQuant: [Float] = [1 / 4096, 1 / 512, 1 / 256]
 
 	static func preparePixel(
-		rawDC: [[Float]], scaleDC: Float, data: inout DCGroupData
+		rawDC: [[Float]], globalScale: Int, quantDC: Int,
+		data: inout DCGroupData
 	) throws {
 		let width = data.widthInBlocks
 		let height = data.heightInBlocks
@@ -86,8 +87,12 @@ public enum DCGroupEncoder {
 		data.quantDC = (0..<3).map { _ in [Int32](repeating: 0, count: count) }
 
 		let mul: Float = 2
-		let inverseFactors = inverseDCQuant.map { $0 * scaleDC * mul }
-		let yFactor = (scaleDC * dcQuant[1]) / mul
+		let scale = Float(Double(globalScale) * (1.0 / Double(1 << 16)))
+		let inverseGlobalScale = Float(Double(1 << 16) / Double(globalScale))
+		let dcScale = scale * Float(quantDC)
+		let inverseFactors = inverseDCQuant.map { $0 * dcScale * mul }
+		let inverseQuantDC = inverseGlobalScale / Float(quantDC)
+		let yFactor = (inverseQuantDC * dcQuant[1]) / mul
 		for channel in [1, 0, 2] {
 			var predictor = DCPredictor.WeightedState(width: width)
 			for y in 0..<height {
@@ -391,5 +396,20 @@ public enum DCGroupEncoder {
 		writer.writeRaw(4, 3)  // global tree again, for the control fields
 
 		writeACMetadataTokens(data: data, writer: &writer)
+	}
+
+	static func write(
+		data: DCGroupData, streams: (dc: [Token], metadata: [Token]),
+		code: EntropyCode, writer: inout BitWriter
+	) throws {
+		writer.write(2, UInt64(data.extraDCPrecision))
+		writer.write(4, 3)
+		EntropyCodeWriter.writeTokens(streams.dc, code: code, writer: &writer)
+		let blockCount = data.widthInBlocks * data.heightInBlocks
+		let bitCount =
+			blockCount <= 1 ? 0 : Int.bitWidth - (blockCount - 1).leadingZeroBitCount
+		if bitCount != 0 { writer.write(bitCount, UInt64(blockCount - 1)) }
+		writer.write(4, 3)
+		EntropyCodeWriter.writeTokens(streams.metadata, code: code, writer: &writer)
 	}
 }

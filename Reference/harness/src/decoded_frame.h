@@ -12,6 +12,7 @@
 #include "lib/jxl/dec_cache.h"
 #include "lib/jxl/frame_header.h"
 #include "lib/jxl/image_metadata.h"
+#include "lib/jxl/jpeg/jpeg_data.h"
 
 namespace harness {
 
@@ -53,7 +54,8 @@ struct DecodedFrame {
 // Decodes the bare codestream's first frame. Returns false with a message on
 // stderr if it doesn't decode.
 bool DecodeFirstFrame(const std::vector<uint8_t>& codestream, DecodedFrame* frame,
-                      bool capture_modular_tree = false);
+                      bool capture_modular_tree = false,
+                      jxl::jpeg::JPEGData* jpeg_coefficient_shell = nullptr);
 
 }  // namespace harness
 

@@ -122,7 +122,117 @@ enum SectionOptimizer {
 	static func modularCode(
 		tokenStreams: [[Token]], contextCount: Int, extraDCPrecision: UInt8
 	) -> EntropyCode {
-		fatalError("Selected modular entropy preparation is not implemented")
+		precondition(contextCount > 0)
+		let tokens = tokenStreams.flatMap { $0 }
+		let defaultConfiguration = HybridUintConfiguration(
+			splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+		func histograms(_ configurations: [HybridUintConfiguration]) -> [Histogram] {
+			var result = [Histogram](repeating: Histogram(), count: contextCount)
+			for token in tokens {
+				let symbol = configurations[Int(token.context)].encode(token.value)
+					.symbol
+				precondition(symbol < 256)
+				result[Int(token.context)].add(symbol)
+			}
+			return result
+		}
+
+		let source = histograms(
+			[HybridUintConfiguration](
+				repeating: defaultConfiguration, count: contextCount))
+		let usePrefix = usesPrefixCode(
+			originalHistograms: source, totalTokens: tokens.count)
+		let (initialClusters, symbols) = HistogramCluster.fastCluster(
+			source, maxHistograms: Self.clustersLimit)
+		let initial = HistogramCluster.reindex(symbols: symbols, clusters: initialClusters)
+		let defaultCandidates = [
+			defaultConfiguration,
+			HybridUintConfiguration(splitExponent: 4, msbInToken: 1, lsbInToken: 2),
+			HybridUintConfiguration(splitExponent: 0, msbInToken: 0, lsbInToken: 0),
+			HybridUintConfiguration(splitExponent: 2, msbInToken: 0, lsbInToken: 1),
+		]
+		let candidates = extraDCPrecision == 0 ? [defaultConfiguration] : defaultCandidates
+		let alphaForSignaling = ANSConstants.logAlphaSize
+		var configurations = [HybridUintConfiguration](
+			repeating: defaultConfiguration, count: initial.clusters.count)
+		for histogramIndex in initial.clusters.indices where extraDCPrecision != 0 {
+			var bestCost = Float.greatestFiniteMagnitude
+			for candidate in candidates {
+				var counts = Histogram()
+				var extraBitCost: Float = 0
+				var valid = true
+				for token in tokens
+				where Int(initial.contextMap[Int(token.context)]) == histogramIndex
+				{
+					let encoded = candidate.encode(token.value)
+					guard encoded.symbol < 256 else {
+						valid = false
+						break
+					}
+					counts.add(encoded.symbol)
+					extraBitCost += Float(encoded.bitCount)
+				}
+				guard valid else { continue }
+				var configWriter = BitWriter()
+				PrefixCodeWriter.writeUintConfigs(
+					[candidate], logAlphaSize: alphaForSignaling,
+					writer: &configWriter)
+				let cost =
+					ANSEncodingHistogram.computeBest(
+						counts: counts.counts, strategy: .approximate
+					).cost
+					+ extraBitCost + Float(configWriter.bitsWritten)
+				if cost < bestCost {
+					bestCost = cost
+					configurations[histogramIndex] = candidate
+				}
+			}
+		}
+		let contextConfigurations = initial.contextMap.map { configurations[Int($0)] }
+		let sourceByContext = histograms(contextConfigurations)
+		let finalHistograms = initial.contextMap.indices.reduce(
+			[Histogram](repeating: Histogram(), count: configurations.count)
+		) { current, context in
+			var updated = current
+			updated[Int(initial.contextMap[context])].add(sourceByContext[context])
+			return updated
+		}
+		let result = (clusters: finalHistograms, contextMap: initial.contextMap)
+		var maxSymbol: UInt32 = 0
+		for token in tokens {
+			let histogram = Int(result.contextMap[Int(token.context)])
+			maxSymbol = max(
+				maxSymbol, configurations[histogram].encode(token.value).symbol)
+		}
+		let logAlpha =
+			usePrefix
+			? PrefixCodeWriter.prefixMaxBits
+			: (extraDCPrecision == 0
+				? 7
+				: min(8, max(5, ceilLog2Nonzero(Int(maxSymbol) + 1))))
+		let ansHistograms: [ANSEncodingHistogram]? =
+			usePrefix
+			? nil
+			: result.clusters.map {
+				ANSEncodingHistogram.computeBest(
+					counts: $0.counts, strategy: .approximate)
+			}
+		let prefixCodes = HistogramCluster.buildPrefixCodes(result.clusters)
+		let selectedConfigurations = extraDCPrecision == 0 ? nil : configurations
+		var code: EntropyCode
+		if let ansHistograms {
+			code = EntropyCode(
+				contextMap: result.contextMap, prefixCodes: prefixCodes,
+				ansHistograms: ansHistograms,
+				uintConfigurations: selectedConfigurations,
+				logAlphabetSize: logAlpha)
+		} else {
+			code = EntropyCode(
+				contextMap: result.contextMap, prefixCodes: prefixCodes,
+				uintConfigurations: selectedConfigurations,
+				logAlphabetSize: logAlpha)
+		}
+		return code
 	}
 
 	/// libjxl's cluster limit (`kClustersLimit`, enc_context_map.h). Tiny's

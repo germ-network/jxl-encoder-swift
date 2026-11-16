@@ -154,15 +154,27 @@ enum SwiftJPEGSemanticEncoding {
 		for i in 0..<dim.groupCount {
 			sections[acRange.lowerBound + i].staged = d.acGroups[i]
 		}
-		for i in 0..<dim.dcGroupCount {
-			DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
-			sections[1 + i].flush(code: d.dcCode)
+		let tree = ContextTree.prepare(groups: dcData, jpegTranscode: true)
+		let streams = try dcData.enumerated().map {
+			try DCGroupEncoder.tokenStreams(
+				data: $0.element, groupIndex: $0.offset, tree: tree)
+		}
+		let treeCode = SectionOptimizer.modularCode(
+			tokenStreams: [tree.tokens],
+			contextCount: ContextTree.treeContextCount, extraDCPrecision: 0)
+		for index in dcData.indices {
+			var section = BitWriter()
+			try DCGroupEncoder.write(
+				data: dcData[index], streams: streams[index],
+				code: d.dcCode, writer: &section)
+			sections[1 + index] = SectionWriter(prewritten: section)
 		}
 		for i in acRange { sections[i].flush(code: d.acCode) }
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(
 			params: try DistanceParams(distance: 1), dcGroupCount: dim.dcGroupCount,
 			code: d.dcCode,
+			modularTree: (tree: tree, code: treeCode),
 			dcQuantization: (0..<3).map { t.dcQuantization(channel: $0) },
 			globalScale: FrameAssembly.jpegGlobalScale, quantDC: 1,
 			blockContextMap: d.blockContextMap, writer: &dcGlobal)

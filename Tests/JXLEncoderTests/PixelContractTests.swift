@@ -239,7 +239,8 @@ struct PixelSemanticFixtureTests {
 			let groups = try #require(encoded.decisions.pixelGroups)
 			let swift = try SwiftSemanticEncoding.coefficients(
 				from: groups, dimension: ImageDim(width: width, height: height),
-				scaleDC: try DistanceParams(distance: 1).scaleDC)
+				globalScale: try DistanceParams(distance: 1).globalScale,
+				quantDC: try DistanceParams(distance: 1).quantDC)
 			let dimension = ImageDim(width: width, height: height)
 			let metadata = try SemanticDump(fixture: name + ".stages")
 			let groupValues: [Int64]
@@ -348,11 +349,15 @@ struct PixelSemanticFixtureTests {
 				let dcDifferenceCount = dcDifferences.count
 				let firstDCDifference = dcDifferences.first?.offset
 				#expect(actualChannelDC.count == expectedChannelDC.count)
-				withKnownIssue(Comment(rawValue: "GER-3387")) {
-					#expect(
-						dcDifferenceCount == 0,
-						"\(name)#dc.c\(channel): \(dcDifferenceCount) differences; first \(firstDCDifference?.description ?? "none")"
-					)
+				if dcDifferenceCount == 0 {
+					#expect(Array(actualChannelDC) == Array(expectedChannelDC))
+				} else {
+					withKnownIssue(Comment(rawValue: "GER-3387")) {
+						#expect(
+							dcDifferenceCount == 0,
+							"\(name)#dc.c\(channel): \(dcDifferenceCount) differences; first \(firstDCDifference?.description ?? "none")"
+						)
+					}
 				}
 			}
 		}
@@ -398,7 +403,7 @@ struct PixelSemanticFixtureTests {
 			groups.append(group)
 		}
 		let result = try SwiftSemanticEncoding.coefficients(
-			from: groups, dimension: dimension, scaleDC: 1)
+			from: groups, dimension: dimension, globalScale: 1 << 16, quantDC: 1)
 		for channel in 0..<3 {
 			for group in groups {
 				for block in 0..<(group.widthInBlocks * group.heightInBlocks) {

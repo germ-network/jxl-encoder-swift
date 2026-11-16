@@ -26,7 +26,7 @@ extension SemanticDump {
 		record("image_sample_format.floating_point", .integers([1]))
 		record("image_sample_format.bits_per_sample", .integers([32]))
 		record("image_sample_format.exponent_bits_per_sample", .integers([8]))
-		record("frame_flags.flags", .integers([128]))
+		record("frame_flags.flags", .integers([0]))
 		record("gaborish.enabled", .integers([decisions.loopFilter.gaborish ? 1 : 0]))
 		record("epf.iterations", .integers([Int64(decisions.loopFilter.epfIterations)]))
 		record(

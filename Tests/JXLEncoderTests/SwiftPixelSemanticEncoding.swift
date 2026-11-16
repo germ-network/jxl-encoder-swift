@@ -2,7 +2,8 @@
 
 extension SwiftSemanticEncoding {
 	static func coefficients(
-		from groups: [Encoder.ACGroupCompute], dimension: ImageDim, scaleDC: Float
+		from groups: [Encoder.ACGroupCompute], dimension: ImageDim,
+		globalScale: Int, quantDC: Int
 	) throws -> (ac: [[Int32]], dc: [[Int32]], rawDC: [[Float]]) {
 		let blockCount = dimension.widthInBlocks * dimension.heightInBlocks
 		var ac = (0..<3).map { _ in [Int32](repeating: 0, count: blockCount * 64) }
@@ -46,7 +47,8 @@ extension SwiftSemanticEncoding {
 				var prepared = DCGroupData(
 					widthInBlocks: width, heightInBlocks: height)
 				try DCGroupEncoder.preparePixel(
-					rawDC: groupRawDC, scaleDC: scaleDC, data: &prepared)
+					rawDC: groupRawDC, globalScale: globalScale,
+					quantDC: quantDC, data: &prepared)
 				for channel in 0..<3 {
 					for y in 0..<height {
 						for x in 0..<width {

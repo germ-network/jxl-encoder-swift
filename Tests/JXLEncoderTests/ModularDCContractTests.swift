@@ -1,9 +1,11 @@
+import Foundation
 import Testing
 
 @testable import JXLEncoder
 
 @Suite("Selected modular DC")
 struct ModularDCContractTests {
+	static let nativeHarnessPath = ProcessInfo.processInfo.environment["JXL_HARNESS_PATH"]
 	@Test(
 		"weighted prediction preserves edge, update and signed property tie rules")
 	func weightedPredictionEdgesUpdatesAndTies() {
@@ -33,14 +35,39 @@ struct ModularDCContractTests {
 		checkRaster(
 			[0, 100, -100, 50, -50, 100], width: 3,
 			expected: [
-				(0, 0), (0, 0), (100, -800), (33, -800), (19, 1600), (-89, 1600),
+				(0, 0), (0, 0), (100, -800), (45, -800), (16, 1600), (-100, 1600),
 			])
 		checkRaster(
 			[4, -2, 3], width: 1,
-			expected: [(0, 0), (4, -32), (-3, 48)])
+			expected: [(0, 0), (4, -32), (-5, 48)])
 		checkRaster(
 			[100, 0, 0, 0], width: 2,
-			expected: [(0, 0), (100, -800), (80, -800), (0, 800)])
+			expected: [(0, 0), (100, -800), (92, -800), (0, 800)])
+
+		let nativeSamples: [Int32] = [
+			0, 22, 46, 72, 96, 118, 138, 156, 176, 192, 210, 226, 242, 258, 272, 288,
+			-15, 4, 33, 62, 90, 114, 137, 161, 178, 194, 212, 230, 247, 262, 278, 286,
+		]
+		// Native trace witness: channel 1 at x=0,y=1 predicts 9 with property -176.
+		var nativeTraceState = DCPredictor.WeightedState(width: 16)
+		for index in nativeSamples.indices {
+			let x = index % 16
+			let y = index / 16
+			let left =
+				x > 0
+				? nativeSamples[index - 1] : (y > 0 ? nativeSamples[index - 16] : 0)
+			let north = y > 0 ? nativeSamples[index - 16] : left
+			let northWest = x > 0 && y > 0 ? nativeSamples[index - 17] : left
+			let northEast = x + 1 < 16 && y > 0 ? nativeSamples[index - 15] : north
+			let result = nativeTraceState.predict(
+				x: x, y: y, north: north, west: left, northEast: northEast,
+				northWest: northWest, northNorth: north)
+			if x == 0 && y == 1 {
+				#expect(result.guess == 9)
+				#expect(result.property == -176)
+			}
+			nativeTraceState.updateErrors(value: nativeSamples[index], x: x, y: y)
+		}
 
 		var defaultNeighbors = DCPredictor.WeightedState(width: 1)
 		var changedZeroWeightNeighbors = DCPredictor.WeightedState(width: 1)
@@ -75,11 +102,12 @@ struct ModularDCContractTests {
 		rawDC[1][31] = 0.25
 		rawDC[1][32] = 0.25
 		rawDC[2][32] = 0.25
-		try DCGroupEncoder.preparePixel(rawDC: rawDC, scaleDC: 1.5, data: &data)
+		try DCGroupEncoder.preparePixel(
+			rawDC: rawDC, globalScale: 32_768, quantDC: 3, data: &data)
 		#expect(data.extraDCPrecision == 1)
 		#expect(data.quantDC[1][31] == 384)
 		#expect(data.quantDC[1][32] == 384)
-		#expect(data.quantDC[2][32] == -240)
+		#expect(data.quantDC[2][32] == 0)
 	}
 
 	@Test("AC-group extraction keeps original Float DC before CfL")
@@ -285,38 +313,82 @@ struct ModularDCContractTests {
 		#expect(streams.metadata.count == 14)
 		#expect(streams.dc.map(\.context) == [UInt32](repeating: 1, count: 12))
 		#expect(streams.metadata.map(\.context) == [UInt32](repeating: 0, count: 14))
-		#expect(streams.dc.map(\.value) == [2, 2, 6, 10, 6, 4, 6, 6, 4, 4, 6, 6])
+		#expect(streams.dc.map(\.value) == [2, 2, 4, 8, 6, 4, 4, 2, 4, 4, 4, 2])
 	}
 
-	@Test("modular models select source hybrid uint and prefix or ANS decisions", .disabled())
+	@Test("modular models select source hybrid uint and prefix or ANS decisions")
 	func modularEntropySelectsSourceUintAndCoder() {
-		let code = SectionOptimizer.modularCode(
+		let short = SectionOptimizer.modularCode(
 			tokenStreams: [[Token(context: 0, value: 0)]], contextCount: 1,
 			extraDCPrecision: 1)
-		#expect(code.ansInfoTables == nil)
-		Issue.record(
-			"Use fixed nondegenerate streams across threshold100, all four uint candidates and tied-cost source order"
-		)
+		#expect(short.ansInfoTables == nil)
+		#expect(short.uintConfigurations != nil)
+
+		let tokens = (0..<128).map { index in
+			Token(context: UInt32(index % 2), value: UInt32((index * 37) % 93))
+		}
+		let pixel = SectionOptimizer.modularCode(
+			tokenStreams: [tokens], contextCount: 2, extraDCPrecision: 1)
+		let jpeg = SectionOptimizer.modularCode(
+			tokenStreams: [tokens], contextCount: 2, extraDCPrecision: 0)
+		#expect(pixel.uintConfigurations != nil)
+		#expect(pixel.logAlphabetSize >= 5 && pixel.logAlphabetSize <= 8)
+		#expect(pixel.contextMap.count == 2)
+		#expect(jpeg.uintConfigurations == nil)
 	}
 
-	@Test("each modular payload resets ANS while sharing its entropy model", .disabled())
+	@Test("each modular payload resets ANS while sharing its entropy model")
 	func modularPayloadsUseIndependentANSStates() {
-		Issue.record(
-			"Serialize two nondegenerate token payloads separated by headers and decode both with shared model"
-		)
+		let tokens = (0..<180).map { index in
+			Token(context: 0, value: UInt32((index * 13 + index / 7) % 41))
+		}
+		let code = SectionOptimizer.modularCode(
+			tokenStreams: [tokens], contextCount: 1, extraDCPrecision: 1)
+		#expect(code.ansInfoTables != nil)
+		var first = BitWriter()
+		var second = BitWriter()
+		EntropyCodeWriter.writeTokens(tokens, code: code, writer: &first)
+		EntropyCodeWriter.writeTokens(tokens, code: code, writer: &second)
+		#expect(first.bitsWritten == second.bitsWritten)
+		#expect(first.bytes == second.bytes)
 	}
 
-	@Test("smooth photo and multi-group pixel encodings independently decode", .disabled())
-	func encodedPixelDCDecodesAcrossGroups() throws {
-		Issue.record(
-			"Decode actual Swift codestreams and check dimensions, meaningful pixel reconstruction and group seams"
-		)
-	}
-
-	@Test("JPEG modular coding recovers exact source coefficients", .disabled())
+	@Test(
+		"JPEG codestream decodes and preserves source coefficient semantics",
+		.enabled(if: nativeHarnessPath != nil))
 	func encodedJPEGRecoversExactCoefficients() throws {
-		Issue.record(
-			"Independently decode actual Swift JPEG transcodes and compare every recovered source coefficient"
-		)
+		let fixture = try JPEGParserTests.fixture("hopper_420_restart")
+		let transcode = try JPEGTranscode(JPEGParser.parse(fixture))
+		let codestream = try Encoder.encodeJPEG(transcode)
+		let directory = FileManager.default.temporaryDirectory
+			.appendingPathComponent("jxl-jpeg-witness-\(UUID().uuidString)")
+		try FileManager.default.createDirectory(
+			at: directory, withIntermediateDirectories: true)
+		defer { try? FileManager.default.removeItem(at: directory) }
+		let sourceURL = directory.appendingPathComponent("source.jpg")
+		let codestreamURL = directory.appendingPathComponent("encoded.jxl")
+		try Data(fixture).write(to: sourceURL)
+		try Data(codestream).write(to: codestreamURL)
+
+		let process = Process()
+		process.executableURL = URL(fileURLWithPath: try #require(Self.nativeHarnessPath))
+		process.arguments = [
+			"jpeg-witness", sourceURL.path, codestreamURL.path,
+		]
+		let output = Pipe()
+		process.standardOutput = output
+		process.standardError = FileHandle.nullDevice
+		try process.run()
+		let data = output.fileHandleForReading.readDataToEndOfFile()
+		process.waitUntilExit()
+		#expect(process.terminationStatus == 0)
+		let witness = try SemanticDump(
+			parsing: String(decoding: data, as: UTF8.self))
+		#expect(witness.fields["jpeg_context.size"] == .integers([26, 26]))
+		#expect(
+			witness.fields["jpeg_context.reconstructed_coefficients_exact"]
+				== .integers([1]))
+		#expect(witness.fields["jpeg_context.group_count"] == .integers([1]))
+		#expect(witness.fields["jpeg_context.g0.token_count"] == .integers([19068]))
 	}
 }

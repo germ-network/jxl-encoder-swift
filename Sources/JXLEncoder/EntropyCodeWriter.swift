@@ -12,7 +12,40 @@
 
 enum EntropyCodeWriter {
 	static func writeTokens(_ tokens: [Token], code: EntropyCode, writer: inout BitWriter) {
-		fatalError("Configured modular token writing is not implemented")
+		guard let tables = code.ansInfoTables else {
+			for token in tokens {
+				let histogram = Int(code.contextMap[Int(token.context)])
+				let configuration =
+					code.uintConfigurations?[histogram]
+					?? HybridUintConfiguration(
+						splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+				let encoded = configuration.encode(token.value)
+				let prefix = code.prefixCodes[histogram]
+				let depth =
+					prefix.isDegenerate
+					? 0 : Int(prefix.depths[Int(encoded.symbol)])
+				let bits =
+					prefix.isDegenerate
+					? 0 : UInt64(prefix.bits[Int(encoded.symbol)])
+				writer.write(depth, bits)
+				writer.write(Int(encoded.bitCount), UInt64(encoded.bits))
+			}
+			return
+		}
+		let configurations =
+			code.uintConfigurations
+			?? [HybridUintConfiguration](
+				repeating: HybridUintConfiguration(
+					splitExponent: 4, msbInToken: 2, lsbInToken: 0),
+				count: tables.count)
+		ANSTokenWriter.write(
+			contextMapTokens: tokens.map {
+				ContextMapEntropy.EncodedToken(token: $0, isLength: false)
+			}, contextMap: code.contextMap, infoTables: tables,
+			uintConfigurations: configurations,
+			lengthConfiguration: HybridUintConfiguration(
+				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
+			lengthSymbolOffset: 0, writer: &writer)
 	}
 
 	static func writeContextMap(_ code: EntropyCode, writer: inout BitWriter) {
@@ -43,27 +76,38 @@ enum EntropyCodeWriter {
 
 	static func write(_ code: EntropyCode, writer: inout BitWriter) {
 		writeContextMap(code, writer: &writer)
+		let numHistograms =
+			code.ansHistograms?.count
+			?? code.ansInfoTables?.count ?? code.prefixCodeCount
+		let configurations =
+			code.uintConfigurations
+			?? [HybridUintConfiguration](
+				repeating: HybridUintConfiguration(
+					splitExponent: 4, msbInToken: 2, lsbInToken: 0),
+				count: numHistograms)
 		if let histograms = code.ansHistograms {
 			writer.write(1, 0)  // use_prefix_code = false
-			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+			writer.write(2, UInt64(code.logAlphabetSize - 5))
 			PrefixCodeWriter.writeUintConfigs(
-				count: histograms.count, logAlphaSize: ANSConstants.logAlphaSize,
+				configurations, logAlphaSize: code.logAlphabetSize,
 				writer: &writer)
 			for histogram in histograms {
 				histogram.write(to: &writer)
 			}
 		} else if let ansInfoTables = code.ansInfoTables {
 			writer.write(1, 0)  // use_prefix_code = false
-			writer.write(2, UInt64(ANSConstants.logAlphaSize - 5))
+			writer.write(2, UInt64(code.logAlphabetSize - 5))
 			PrefixCodeWriter.writeUintConfigs(
-				count: ansInfoTables.count, logAlphaSize: ANSConstants.logAlphaSize,
+				configurations, logAlphaSize: code.logAlphabetSize,
 				writer: &writer)
 			for table in ansInfoTables {
 				ANSHistogramWriter.write(counts: table.map(\.freq), writer: &writer)
 			}
 		} else {
 			writer.write(1, 1)  // use_prefix_code
-			PrefixCodeWriter.writePrefixCodes(code.prefixCodes, writer: &writer)
+			PrefixCodeWriter.writePrefixCodes(
+				code.prefixCodes, uintConfigurations: code.uintConfigurations,
+				writer: &writer)
 		}
 	}
 }
