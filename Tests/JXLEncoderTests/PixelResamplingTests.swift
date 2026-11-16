@@ -38,6 +38,16 @@ struct PixelResamplingTests {
 			})
 		#expect(constantResult.planes.map { $0[0] } == [0.5, -0.125, 2])
 
+		// Analytically targets libjxl's positive max initializer; not a native capture.
+		var negative = [Float](repeating: -1, count: 24 * 24)
+		negative[11 * 24 + 11] = -100
+		let negativeResult = PixelDownsampler.downsample2(
+			PaddedStripe(
+				width: 24, height: 24,
+				planes: [negative, negative, negative]))
+		let negativeWitness = negativeResult.planes[0][6 * 12 + 6]
+		#expect(negativeWitness > -0.95 && negativeWitness < -0.85)
+
 		var impulse = [Float](repeating: 0, count: 24 * 24)
 		impulse[12 * 24 + 12] = 1
 		let impulseResult = PixelDownsampler.downsample2(
