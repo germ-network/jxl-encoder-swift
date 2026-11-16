@@ -451,6 +451,32 @@ struct DecisionInventoryTests {
 	}
 
 	@Test(
+		"selected JPEG container decisions retain their inventory identity and scope",
+		.enabled(if: PackageCheckout.isAvailable))
+	func selectedJPEGContainerDecisionsRemainInventoried() throws {
+		let rows = try Self.committed().rows
+		let ih04 = try #require(rows.first { $0.id == "IH-04" })
+		#expect(ih04.swiftSymbol == "ImageHeader.write")
+		#expect(ih04.path == "both")
+		#expect(ih04.classification == "original")
+		#expect(
+			Set(ih04.replacement.split(separator: ",").map(String.init))
+				== ["GER-3388", "GER-3389"])
+
+		for id in ["JR-03", "JR-04"] {
+			let row = try #require(rows.first { $0.id == id })
+			#expect(row.swiftSymbol == "(absent)")
+			#expect(row.path == "jpeg")
+			#expect(row.classification == "original")
+			#expect(row.config.contains("-e 4 -j 1 --container=0"))
+			#expect(row.config.contains("default reconstruction=1"))
+			#expect(
+				Set(row.replacement.split(separator: ",").map(String.init))
+					== ["GER-3388", "GER-3389"])
+		}
+	}
+
+	@Test(
 		"the committed inventory satisfies every rule",
 		.enabled(if: PackageCheckout.isAvailable))
 	func committedInventorySatisfiesRules() throws {
