@@ -12,7 +12,8 @@
 	},
 	"scripts": {
 		"changeset": "changeset",
-		"release": "changeset publish",
+		"release": "changeset publish && bash Scripts/publish-release.sh",
+		"test:release": "node --test Scripts/release-notes.test.mjs Scripts/publish-release.test.mjs",
 		"version-package": "changeset version"
 	}
 }

@@ -20,6 +20,20 @@ permissions:
   contents: read
 
 jobs:
+  release-scripts:
+    name: Test release scripts
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 24
+      - name: Test release scripts
+        run: node --test Scripts/release-notes.test.mjs Scripts/publish-release.test.mjs
+
   # Portability guard: JXLEncoder must build and test with no Foundation and no
   # Apple frameworks, so an Android shim can consume it unchanged. A stray
   # `import Foundation` in the core fails here and nowhere else.
