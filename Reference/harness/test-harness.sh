@@ -58,6 +58,22 @@ for path in output.glob('*.dump'):
 assert len(list(output.glob('*.dump')))==6
 PYCODE
 }
+jpeg_huffman_fixtures_reproduce() {
+  bash "$REFERENCE/make_jpeg_huffman_fixtures.sh" "$SCRATCH/jpeg_huffman"
+  python3 - "$REFERENCE/.." "$SCRATCH/jpeg_huffman" <<'PYCODE'
+import hashlib,sys
+from pathlib import Path
+root=Path(sys.argv[1]); output=Path(sys.argv[2])
+rows={r[0]:r for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#') for r in [line.split('\t')]}
+expected={'root_sparse','subtable_9','subtable_16','maximal_ac'}
+assert {p.stem for p in output.glob('*.tsv')}==expected
+for name in expected:
+ path=f'Tests/JXLEncoderTests/Fixtures/jpeg_huffman/{name}.tsv'
+ actual=(output/(name+'.tsv')).read_bytes()
+ assert hashlib.sha256(actual).hexdigest()==rows[path][2], path
+ assert actual==(root/path).read_bytes(), path
+PYCODE
+}
 semantic_fixtures_reproduce() {
   # e4's uniform field cannot distinguish row-major from transposed output.
   "$HARNESS" selftest --quant-field "$SCRATCH/quant.sem"
@@ -344,7 +360,7 @@ for args in (
     assert result.returncode!=0, args
 PYCODE
 }
-for check in version_reports_pin_and_neon pin_check_clean_after_build capture_flag_is_scoped semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_ac_metadata_and_tree_entropy_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
+for check in version_reports_pin_and_neon pin_check_clean_after_build capture_flag_is_scoped semantic_writer_matches_golden stage_dump_roundtrip stages_reproduce_committed_fixtures jpeg_huffman_fixtures_reproduce semantic_fixtures_reproduce actual_entropy_prefix_streams actual_entropy_jpeg_reference stage2_fixtures_reproduce dump_rejects_non_codestream entropy_rejects_unsafe_histogram_config entropy_context_map_decisions_match_fixtures entropy_tree_decisions_match_fixtures entropy_modular_decisions_match_fixtures entropy_modular_rejects_unsafe_inputs entropy_ac_tokens_match_fixtures entropy_ac_metadata_and_tree_entropy_match_fixtures entropy_primitives_match_fixtures independent_entropy_streams_match_swift_bytes; do
   "$check"
   echo "PASS $check"
 done

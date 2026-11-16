@@ -17,6 +17,7 @@ source "$PIN_FILE"
 
 TARGET_DIR="${1:-${LIBJXL_DIR:-$HOME/tmp/automation/libjxl-v0.12.0}}"
 OUT="$HERE/build/harness"
+JPEG_PREFIX="${JPEG_PREFIX:-/opt/homebrew}"
 
 if [ ! -d "$TARGET_DIR/.git" ]; then
 	echo "Target directory $TARGET_DIR not found; fetching..."
@@ -31,6 +32,8 @@ echo "Building jxl-harness against $TARGET_DIR..."
 # shellcheck disable=SC2086
 cmake -S "$HERE/harness" -B "$OUT" $CMAKE_FLAGS_RELEASE \
 	-DLIBJXL_DIR="$TARGET_DIR" -DLIBJXL_COMMIT="$LIBJXL_COMMIT" \
+	-DJPEG_INCLUDE_DIR="$JPEG_PREFIX/include" \
+	-DJPEG_LIBRARY_RELEASE="$JPEG_PREFIX/lib/libjpeg.dylib" \
 	-DCMAKE_EXPORT_COMPILE_COMMANDS=ON >/dev/null
 # GNU Make 3.81 splits the spaced Xcode developer path in recursive calls.
 env -u DEVELOPER_DIR cmake --build "$OUT" --target jxl-harness cjxl -j"$NCPU" >/dev/null
