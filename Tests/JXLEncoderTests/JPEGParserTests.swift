@@ -274,6 +274,13 @@ struct JPEGParserTests {
 		#expect(finalized.components[0].coefficients.allSatisfy { $0 == 0 })
 		#expect(finalized.quantTables[0] != finalized.quantTables[4])
 		#expect(finalized.quantTables[4] == [UInt16](repeating: 13, count: 64))
+
+		var missingFinalTable = Array(data[..<nextTable]) + [0xFF, 0xD9]
+		missingFinalTable[
+			Self.frameComponentQuantOffset(missingFinalTable, component: 0)!] = 3
+		#expect(throws: JPEGParseError.undefinedQuantTable(index: 3)) {
+			try JPEGParser.parse(missingFinalTable)
+		}
 	}
 
 	@Test("later scan bytes cannot satisfy an earlier scan's entropy floor")
