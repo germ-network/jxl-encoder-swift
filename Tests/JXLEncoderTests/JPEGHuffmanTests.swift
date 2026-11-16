@@ -8,6 +8,7 @@ struct JPEGHuffmanTests {
 		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/root_sparse.tsv",
 		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/subtable_9.tsv",
 		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/subtable_16.tsv",
+		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/mixed_subtables.tsv",
 		"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/maximal_ac.tsv",
 	])
 
@@ -17,6 +18,11 @@ struct JPEGHuffmanTests {
 			("root_sparse", [0, 2], [7, 9]),
 			("subtable_9", [0, 0, 0, 0, 0, 0, 0, 1, 1], [7, 9]),
 			("subtable_16", [1] + Array(repeating: 0, count: 14) + [1], [7, 9]),
+			(
+				"mixed_subtables",
+				[0, 0, 0, 0, 0, 0, 0, 0, 3] + Array(repeating: 0, count: 6) + [1],
+				[7, 9, 11, 13]
+			),
 			(
 				"maximal_ac",
 				Array(repeating: 0, count: 7) + [255, 1]
@@ -48,6 +54,19 @@ struct JPEGHuffmanTests {
 			#expect(
 				table.entries == expected,
 				"\(name) differs from pinned lookup capture")
+			if name == "mixed_subtables" {
+				#expect(
+					table.entries[0]
+						== JPEGHuffmanTable.Entry(bits: 9, value: 256))
+				#expect(
+					table.entries[1]
+						== JPEGHuffmanTable.Entry(bits: 16, value: 257))
+				#expect(
+					Array(table.entries[258..<386])
+						== Array(
+							repeating: JPEGHuffmanTable.Entry(
+								bits: 1, value: 11), count: 128))
+			}
 		}
 	}
 

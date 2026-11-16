@@ -65,7 +65,7 @@ import hashlib,sys
 from pathlib import Path
 root=Path(sys.argv[1]); output=Path(sys.argv[2])
 rows={r[0]:r for line in (root/'Reference/provenance.tsv').read_text().splitlines() if not line.startswith('#') for r in [line.split('\t')]}
-expected={'root_sparse','subtable_9','subtable_16','maximal_ac'}
+expected={'root_sparse','subtable_9','subtable_16','mixed_subtables','maximal_ac'}
 assert {p.stem for p in output.glob('*.tsv')}==expected
 for name in expected:
  path=f'Tests/JXLEncoderTests/Fixtures/jpeg_huffman/{name}.tsv'

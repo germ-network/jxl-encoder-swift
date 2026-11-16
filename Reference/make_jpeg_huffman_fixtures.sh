@@ -12,6 +12,7 @@ run_capture() {
 run_capture root_sparse '0,2,0,0,0,0,0,0,0,0,0,0,0,0,0,0' '7,9'
 run_capture subtable_9 '0,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0' '7,9'
 run_capture subtable_16 '1,0,0,0,0,0,0,0,0,0,0,0,0,0,0,1' '7,9'
+run_capture mixed_subtables '0,0,0,0,0,0,0,0,3,0,0,0,0,0,0,1' '7,9,11,13'
 python3 -c 'print(",".join(map(str, range(256))))' > "$OUT/maximal_ac.symbols"
 run_capture maximal_ac '0,0,0,0,0,0,0,255,1,0,0,0,0,0,0,0' "$(cat "$OUT/maximal_ac.symbols")"
 rm "$OUT/maximal_ac.symbols"
