@@ -16,7 +16,37 @@ enum EntropyCodeWriter {
 		lengthConfiguration: HybridUintConfiguration, lengthSymbolOffset: UInt32,
 		writer: inout BitWriter
 	) {
-		fatalError("Pending configured permutation token serialization")
+		if let tables = code.ansInfoTables {
+			ANSTokenWriter.write(
+				contextMapTokens: tokens, contextMap: code.contextMap,
+				infoTables: tables,
+				uintConfigurations: code.uintConfigurations
+					?? [HybridUintConfiguration](
+						repeating: HybridUintConfiguration(
+							splitExponent: 4, msbInToken: 2,
+							lsbInToken: 0), count: tables.count),
+				lengthConfiguration: lengthConfiguration,
+				lengthSymbolOffset: lengthSymbolOffset, writer: &writer)
+			return
+		}
+		for encoded in tokens {
+			let token = encoded.token
+			let histogram = Int(code.contextMap[Int(token.context)])
+			let configuration =
+				encoded.isLength
+				? lengthConfiguration
+				: code.uintConfigurations?[histogram]
+					?? HybridUintConfiguration(
+						splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+			let result = configuration.encode(token.value)
+			let symbol = Int(
+				result.symbol + (encoded.isLength ? lengthSymbolOffset : 0))
+			let prefix = code.prefixCodes[histogram]
+			let depth = prefix.isDegenerate ? 0 : Int(prefix.depths[symbol])
+			let bits = prefix.isDegenerate ? 0 : UInt64(prefix.bits[symbol])
+			writer.write(depth, bits)
+			writer.write(Int(result.bitCount), UInt64(result.bits))
+		}
 	}
 
 	static func writeTokens(_ tokens: [Token], code: EntropyCode, writer: inout BitWriter) {
@@ -150,7 +180,82 @@ struct HybridUintConfiguration: Equatable, Sendable {
 
 enum ContextMapEntropy {
 	static func runLengthEncode(_ tokens: [Token], contextCount: Int) -> RunLengthResult {
-		fatalError("Pending context-aware token run length encoding")
+		precondition(
+			contextCount > 0 && tokens.allSatisfy { Int($0.context) < contextCount })
+		let dataConfiguration = HybridUintConfiguration(
+			splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+		var histograms = [Histogram](repeating: Histogram(), count: contextCount)
+		for token in tokens {
+			histograms[Int(token.context)].add(
+				dataConfiguration.encode(token.value).symbol)
+		}
+		let symbolCosts = histograms.map { histogram -> [Float] in
+			let inverseTotal = 1.0 / (Float(histogram.totalCount) + 1e-8)
+			return histogram.counts.map { count in
+				if count > 0 && Int(count) != histogram.totalCount {
+					return -FastMath.log2(Float(count) * inverseTotal)
+				}
+				return count == 0 ? 12 : 0
+			}
+		}
+		var cumulative = [Float](repeating: 0, count: tokens.count + 1)
+		for index in tokens.indices {
+			let encoded = dataConfiguration.encode(tokens[index].value)
+			cumulative[index + 1] =
+				symbolCosts[Int(tokens[index].context)][Int(encoded.symbol)]
+				+ Float(encoded.bitCount) + cumulative[index]
+		}
+		var transformed: [EncodedToken] = []
+		transformed.reserveCapacity(tokens.count)
+		var bitDecrease: Float = 0
+		var index = 0
+		while index < tokens.count {
+			var repeatCount = 0
+			if index > 0 {
+				while index + repeatCount < tokens.count,
+					tokens[index + repeatCount].value == tokens[index - 1].value
+				{
+					repeatCount += 1
+				}
+			}
+			if repeatCount == 0 {
+				transformed.append(
+					EncodedToken(token: tokens[index], isLength: false))
+				index += 1
+				continue
+			}
+			let repeatedCost = cumulative[index + repeatCount] - cumulative[index]
+			let encodedLength = repeatCount - 3
+			let lengthCost =
+				repeatCount >= 3
+				? Float(ceilLog2Nonzero(encodedLength + 1) + 1) : 0
+			if repeatCount < 3 || repeatedCost <= lengthCost {
+				for token in tokens[index..<(index + repeatCount)] {
+					transformed.append(
+						EncodedToken(token: token, isLength: false))
+				}
+				index += repeatCount
+				continue
+			}
+			transformed.append(
+				EncodedToken(
+					token: Token(
+						context: tokens[index].context,
+						value: UInt32(encodedLength)),
+					isLength: true))
+			transformed.append(
+				EncodedToken(
+					token: Token(context: UInt32(contextCount), value: 0),
+					isLength: false))
+			bitDecrease += repeatedCost - lengthCost
+			index += repeatCount
+		}
+		guard Double(bitDecrease) > Double(tokens.count) * 0.2 + 16 else {
+			return RunLengthResult(
+				enabled: false,
+				tokens: tokens.map { EncodedToken(token: $0, isLength: false) })
+		}
+		return RunLengthResult(enabled: true, tokens: transformed)
 	}
 
 	struct EncodedToken: Equatable, Sendable {
