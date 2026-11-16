@@ -1,3 +1,4 @@
+import Foundation
 import Testing
 
 @testable import JXLEncoder
@@ -38,8 +39,11 @@ struct JPEGHuffmanTests {
 							repeating: 0, count: 16 - prefixCounts.count
 						),
 					values: symbols))
-			let capture = try PackageCheckout.read(
-				"Tests/JXLEncoderTests/Fixtures/jpeg_huffman/\(name).tsv")
+			let captureURL = try #require(
+				Bundle.module.url(
+					forResource: name, withExtension: "tsv",
+					subdirectory: "Fixtures/jpeg_huffman"))
+			let capture = try String(contentsOf: captureURL, encoding: .utf8)
 			let expected = try capture.split(whereSeparator: \.isNewline).map {
 				line -> JPEGHuffmanTable.Entry in
 				let fields = line.split(separator: "\t")
