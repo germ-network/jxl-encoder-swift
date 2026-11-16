@@ -176,28 +176,116 @@ struct ModularDCContractTests {
 
 	@Test(
 		"fixed trees use family totals, metadata selection and strict split equality",
-		.disabled())
+	)
 	func fixedTreesUseFamilyTotalsAndSelectedMetadata() throws {
-		let groups = [DCGroupData(widthInBlocks: 1, heightInBlocks: 1)]
+		func predictor(_ node: ContextTree.Node) -> ContextTree.Predictor {
+			guard case .leaf(let predictor, _) = node else {
+				Issue.record("expected selected tree leaf")
+				return .zero
+			}
+			return predictor
+		}
+		let groups = [DCGroupData(widthInBlocks: 8, heightInBlocks: 8)]
 		let pixelTree = ContextTree.prepare(groups: groups, jpegTranscode: false)
 		let jpegTree = ContextTree.prepare(groups: groups, jpegTranscode: true)
-		#expect(pixelTree.contextCount > 0)
-		#expect(jpegTree.contextCount > 0)
-		Issue.record(
-			"Assert source-pruned nodes at family power-of-two and metadata1024 boundaries, leaf IDs and token roundtrip"
-		)
+		#expect(pixelTree.nodes.count == 3)
+		#expect(
+			pixelTree.nodes[0]
+				== .split(
+					property: 1, threshold: 2, greater: 1, notGreater: 2))
+		#expect(pixelTree.nodes[1] == .leaf(predictor: .left, context: 0))
+		#expect(pixelTree.nodes[2] == .leaf(predictor: .weighted, context: 1))
+		#expect(pixelTree.tokens.map(\.context) == [1, 0, 1, 2, 3, 4, 5, 1, 2, 3, 4, 5])
+		#expect(pixelTree.tokens.map(\.value) == [2, 4, 0, 1, 0, 0, 0, 0, 6, 0, 0, 0])
+		#expect(pixelTree.contextCount == 2)
+		#expect(
+			pixelTree.leaf(
+				streamID: 2, channel: 0, row: 0, north: 0, west: 0,
+				weightedProperty: 0) == .leaf(predictor: .weighted, context: 1))
+		#expect(
+			pixelTree.leaf(
+				streamID: 3, channel: 0, row: 0, north: 0, west: 0,
+				weightedProperty: 0) == .leaf(predictor: .left, context: 0))
+		let merged = ContextTree.prepare(
+			groups: [groups[0], groups[0]], jpegTranscode: false)
+		#expect(
+			merged.nodes[0]
+				== .split(
+					property: 1, threshold: 4, greater: 1, notGreater: 2))
+		#expect(
+			predictor(
+				merged.leaf(
+					streamID: 4, channel: 0, row: 0, north: 0, west: 0,
+					weightedProperty: 0)) == .weighted)
+		#expect(
+			predictor(
+				merged.leaf(
+					streamID: 5, channel: 0, row: 0, north: 0, west: 0,
+					weightedProperty: 0)) == .left)
+		#expect(
+			predictor(
+				jpegTree.leaf(
+					streamID: 3, channel: 0, row: 0, north: 0, west: 0,
+					weightedProperty: 0)) == .zero)
+
+		let rich = DCGroupData(widthInBlocks: 19, heightInBlocks: 19)
+		let richTree = ContextTree.prepare(groups: [rich], jpegTranscode: false)
+		#expect(
+			richTree.nodes[1]
+				== .split(
+					property: 0, threshold: 1, greater: 3, notGreater: 4))
+		#expect(
+			predictor(
+				richTree.leaf(
+					streamID: 3, channel: 0, row: 0, north: 0, west: 0,
+					weightedProperty: 0)) == .gradient)
+		#expect(
+			predictor(
+				richTree.leaf(
+					streamID: 3, channel: 0, row: 0, north: 0, west: 0,
+					weightedProperty: 0))
+				== predictor(
+					richTree.leaf(
+						streamID: 3, channel: 1, row: 0, north: 0, west: 0,
+						weightedProperty: 0)))
+		#expect(
+			predictor(
+				richTree.leaf(
+					streamID: 3, channel: 2, row: 0, north: 0, west: 0,
+					weightedProperty: 0)) == .zero)
+		#expect(
+			predictor(
+				richTree.leaf(
+					streamID: 3, channel: 2, row: 1, north: 0, west: 0,
+					weightedProperty: 0)) == .left)
+		let richStreams = try DCGroupEncoder.tokenStreams(
+			data: rich, groupIndex: 0, tree: richTree)
+		let metadataContexts = richStreams.metadata.map(\.context)
+		let mapsEnd = 18
+		let strategyEnd = mapsEnd + 19 * 19
+		let quantEnd = strategyEnd + 19 * 19
+		#expect(Set(metadataContexts[0..<9]).count == 1)
+		#expect(Set(metadataContexts[9..<18]).count == 1)
+		#expect(Set(metadataContexts[18..<strategyEnd]).count == 1)
+		#expect(Set(metadataContexts[strategyEnd..<quantEnd]).count == 1)
+		#expect(metadataContexts[18] != metadataContexts[strategyEnd])
+		#expect(Set(metadataContexts[quantEnd...]).count == 2)
 	}
 
-	@Test("DC and metadata tokens use the serialized tree's leaf contexts", .disabled())
+	@Test("DC and metadata tokens use the serialized tree's leaf contexts")
 	func treeSerializationAndTokenContextsAgree() throws {
-		let data = DCGroupData(widthInBlocks: 2, heightInBlocks: 2)
+		var data = DCGroupData(widthInBlocks: 2, heightInBlocks: 2)
+		data.quantDC[1] = [1, 2, 4, 8]
+		data.quantDC[0] = [3, 5, 7, 9]
+		data.quantDC[2] = [2, 4, 6, 8]
+		data.rawQuantField = [1, 2, 3, 4]
 		let tree = ContextTree.prepare(groups: [data], jpegTranscode: false)
 		let streams = try DCGroupEncoder.tokenStreams(data: data, groupIndex: 0, tree: tree)
 		#expect(streams.dc.count == 12)
 		#expect(streams.metadata.count == 14)
-		Issue.record(
-			"Replace shape smoke with fixed values/contexts, metadata row transitions and stream-id split cases"
-		)
+		#expect(streams.dc.map(\.context) == [UInt32](repeating: 1, count: 12))
+		#expect(streams.metadata.map(\.context) == [UInt32](repeating: 0, count: 14))
+		#expect(streams.dc.map(\.value) == [2, 2, 6, 10, 6, 4, 6, 6, 4, 4, 6, 6])
 	}
 
 	@Test("modular models select source hybrid uint and prefix or ANS decisions", .disabled())

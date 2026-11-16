@@ -161,7 +161,110 @@ public enum DCGroupEncoder {
 	static func tokenStreams(
 		data: DCGroupData, groupIndex: Int, tree: ContextTree.Prepared
 	) throws -> (dc: [Token], metadata: [Token]) {
-		fatalError("Modular DC tokenization is not implemented")
+		var dcTokens: [Token] = []
+		for (channel, storageChannel) in ACTokenizer.channelOrder.enumerated() {
+			let values = data.quantDC[storageChannel]
+			let width = data.planeWidths[storageChannel]
+			let height = data.planeHeights[storageChannel]
+			var predictor = DCPredictor.WeightedState(width: width)
+			for y in 0..<height {
+				for x in 0..<width {
+					let index = y * width + x
+					let left: Int32 =
+						x > 0
+						? values[index - 1]
+						: (y > 0 ? values[index - width] : 0)
+					let north = y > 0 ? values[index - width] : left
+					let northWest =
+						x > 0 && y > 0 ? values[index - width - 1] : left
+					let northEast =
+						x + 1 < width && y > 0
+						? values[index - width + 1] : north
+					let northNorth = y > 1 ? values[index - 2 * width] : north
+					let prediction = predictor.predict(
+						x: x, y: y, north: north, west: left,
+						northEast: northEast, northWest: northWest,
+						northNorth: northNorth)
+					let leaf = tree.leaf(
+						streamID: groupIndex + 1, channel: channel, row: y,
+						north: north, west: left,
+						weightedProperty: prediction.property)
+					guard case .leaf(let mode, let context) = leaf,
+						mode == .weighted,
+						let guess = Int32(exactly: prediction.guess)
+					else { throw EncoderError.unsupportedDCRange }
+					let (residual, overflow) = values[index]
+						.subtractingReportingOverflow(guess)
+					guard !overflow else {
+						throw EncoderError.unsupportedDCRange
+					}
+					dcTokens.append(
+						Token(context: context, value: packSigned(residual))
+					)
+					predictor.updateErrors(value: values[index], x: x, y: y)
+				}
+			}
+		}
+
+		var metadataTokens: [Token] = []
+		let metadataStreamID = 1 + 2 * tree.dcGroupCount + groupIndex
+		func appendPlane(
+			values: (Int, Int) -> Int32, width: Int, height: Int, channel: Int
+		) throws {
+			for y in 0..<height {
+				for x in 0..<width {
+					let current = values(x, y)
+					let left =
+						x > 0
+						? values(x - 1, y) : (y > 0 ? values(x, y - 1) : 0)
+					let north = y > 0 ? values(x, y - 1) : left
+					let northWest = x > 0 && y > 0 ? values(x - 1, y - 1) : left
+					let leaf = tree.leaf(
+						streamID: metadataStreamID, channel: channel,
+						row: y,
+						north: north, west: left, weightedProperty: 0)
+					guard case .leaf(let predictor, let context) = leaf else {
+						throw EncoderError.unsupportedDCRange
+					}
+					let guess: Int32
+					switch predictor {
+					case .zero: guess = 0
+					case .left: guess = left
+					case .gradient:
+						guess = DCPredictor.clampedGradient(
+							top: north, left: left, topLeft: northWest)
+					case .weighted: throw EncoderError.unsupportedDCRange
+					}
+					let (residual, overflow) =
+						current.subtractingReportingOverflow(guess)
+					guard !overflow else {
+						throw EncoderError.unsupportedDCRange
+					}
+					metadataTokens.append(
+						Token(context: context, value: packSigned(residual))
+					)
+				}
+			}
+		}
+
+		for channel in 0..<2 {
+			let map = channel == 0 ? data.ytoxMap : data.ytobMap
+			try appendPlane(
+				values: { x, y in Int32(map[y * data.cmapWidth + x]) },
+				width: data.cmapWidth, height: data.cmapHeight, channel: channel)
+		}
+		let blocks = data.widthInBlocks * data.heightInBlocks
+		try appendPlane(
+			values: { x, y in
+				y == 0
+					? Int32(ACTokenizer.dct8StrategyCode)
+					: Int32(data.rawQuantField[x]) - 1
+			},
+			width: blocks, height: 2, channel: 2)
+		try appendPlane(
+			values: { x, y in Int32(data.epfSharpness) },
+			width: data.widthInBlocks, height: data.heightInBlocks, channel: 3)
+		return (dcTokens, metadataTokens)
 	}
 
 	/// Gradient-predicts one plane and emits the residuals.
