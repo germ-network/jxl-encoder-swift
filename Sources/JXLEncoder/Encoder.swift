@@ -223,8 +223,16 @@ public enum Encoder {
 		_ computes: [ACGroupCompute], dim: ImageDim
 	) -> CoeffOrder.Result {
 		var counts = [CoeffOrder.ZeroCounts](repeating: CoeffOrder.ZeroCounts(), count: 3)
-		for compute in computes {
-			for c in 0..<3 { counts[c].addAll(compute.coefficients[c]) }
+		var sampler = CoeffOrder.Sampler()
+		for compute in computes.sorted(by: {
+			$0.groupY == $1.groupY
+				? $0.groupX < $1.groupX
+				: $0.groupY < $1.groupY
+		}) {
+			CoeffOrder.accumulateGroup(
+				compute.coefficients, widthInBlocks: compute.widthInBlocks,
+				heightInBlocks: compute.heightInBlocks,
+				sampler: &sampler, counts: &counts)
 		}
 		return CoeffOrder.compute(
 			counts: counts, widthInBlocks: dim.widthInBlocks,
@@ -711,6 +719,7 @@ extension Encoder {
 		if optimizeCodes {
 			var counts = [CoeffOrder.ZeroCounts](
 				repeating: CoeffOrder.ZeroCounts(), count: 3)
+			var sampler = CoeffOrder.Sampler()
 			for gy in 0..<dim.heightInGroups {
 				for gx in 0..<dim.widthInGroups {
 					let rect = dim.pixelRect(
@@ -718,13 +727,17 @@ extension Encoder {
 					let groupDim = ImageDim(
 						width: rect.width, height: rect.height,
 						blockAlignment: alignment)
-					ACGroupEncoder.countZerosJPEG(
-						transcode: transcode,
-						blockX0: gx * Geometry.groupDimInBlocks,
-						blockY0: gy * Geometry.groupDimInBlocks,
-						widthInBlocks: groupDim.widthInBlocks,
+					let coefficients =
+						ACGroupEncoder.jpegCoefficientsForOrdering(
+							transcode: transcode,
+							blockX0: gx * Geometry.groupDimInBlocks,
+							blockY0: gy * Geometry.groupDimInBlocks,
+							widthInBlocks: groupDim.widthInBlocks,
+							heightInBlocks: groupDim.heightInBlocks)
+					CoeffOrder.accumulateGroup(
+						coefficients, widthInBlocks: groupDim.widthInBlocks,
 						heightInBlocks: groupDim.heightInBlocks,
-						into: &counts)
+						sampler: &sampler, counts: &counts)
 				}
 			}
 			coeffOrder = CoeffOrder.compute(

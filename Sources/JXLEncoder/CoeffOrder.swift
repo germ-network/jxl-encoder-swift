@@ -16,11 +16,8 @@
 //  for an 8x8, single-covered-block transform is, position for position,
 //  `ACTokenizer.coeffOrder`.
 //
-//  One deliberate simplification: the reference samples only half the
-//  frame's blocks at this speed tier, via a seeded PRNG, purely as a speed
-//  optimisation. This port counts every block — no PRNG state to carry,
-//  strictly better statistics, and the counting pass is cheap next to the
-//  DCT/quantize work it rides alongside.
+//  Statistics use the source's frame-wide sample stream, so ordering follows
+//  the same groups and coefficient cursor as the encoder's coded data.
 //
 
 enum CoeffOrder {
@@ -38,6 +35,167 @@ enum CoeffOrder {
 
 	static let permutationContexts = 8
 
+	struct Sampler {
+		private var state: (UInt64, UInt64) = (0x94D0_49BB_1331_11EB, 0xBF58_476D_1CE4_E5B9)
+
+		mutating func next() -> Bool {
+			let first = state.0
+			let second = state.1
+			let sample = first &+ second
+			var next = first
+			state.0 = second
+			next ^= next &<< 23
+			next ^= second ^ (next >> 18) ^ (second >> 5)
+			state.1 = next
+			return (sample >> 32) <= 0x7FFF_FFFF
+		}
+	}
+
+	static func accumulateGroup(
+		_ coefficients: [[Int32]], widthInBlocks: Int, heightInBlocks: Int,
+		sampler: inout Sampler, counts: inout [ZeroCounts]
+	) {
+		precondition(coefficients.count == 3 && counts.count == 3)
+		precondition(widthInBlocks >= 0 && heightInBlocks >= 0)
+		var coefficientOffset = 0
+		for _ in 0..<(widthInBlocks * heightInBlocks) where sampler.next() {
+			for channel in 0..<3 {
+				precondition(
+					coefficientOffset + DCT.blockSize
+						<= coefficients[channel].count)
+				counts[channel].add(
+					coefficients[channel][
+						coefficientOffset..<(coefficientOffset
+							+ DCT.blockSize)])
+			}
+			coefficientOffset += DCT.blockSize
+		}
+	}
+
+	static func preparePermutation(_ tokens: [Token]) -> (
+		runLength: ContextMapEntropy.RunLengthResult, code: EntropyCode
+	) {
+		let runLength = ContextMapEntropy.runLengthEncode(
+			tokens, contextCount: permutationContexts)
+		let contextCount = permutationContexts + (runLength.enabled ? 1 : 0)
+		let dataConfiguration = HybridUintConfiguration(
+			splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+		let lengthConfiguration = HybridUintConfiguration(
+			splitExponent: 0, msbInToken: 0, lsbInToken: 0)
+		let lengthSymbolOffset: UInt32 = 224
+		var sourceHistograms = [Histogram](repeating: Histogram(), count: contextCount)
+		for encoded in runLength.tokens {
+			let configuration =
+				encoded.isLength ? lengthConfiguration : dataConfiguration
+			let symbol = configuration.encode(encoded.token.value).symbol
+			sourceHistograms[Int(encoded.token.context)].add(
+				symbol + (encoded.isLength ? lengthSymbolOffset : 0))
+		}
+		var entropyHistograms = sourceHistograms
+		for index in entropyHistograms.indices {
+			entropyHistograms[index].computeBitCost()
+		}
+		let (clusters, contextMap) = HistogramCluster.clusterBest(sourceHistograms)
+		let usesPrefixCode = ContextMapEntropy.shouldUsePrefixCode(
+			tokenCount: runLength.tokens.count, histograms: entropyHistograms)
+		let candidateParameters: [(Int, Int, Int)] = [
+			(4, 2, 0), (4, 1, 0), (4, 2, 1), (4, 2, 2), (4, 1, 2),
+			(5, 2, 0), (5, 1, 0), (5, 2, 1), (5, 2, 2), (5, 1, 2),
+			(3, 2, 0), (3, 1, 0), (3, 2, 1), (3, 1, 2),
+			(4, 1, 3), (5, 1, 4), (5, 2, 3), (6, 1, 5), (6, 2, 4), (6, 0, 0),
+			(0, 0, 0), (2, 0, 1), (7, 0, 0), (8, 0, 0), (9, 0, 0),
+			(10, 0, 0), (11, 0, 0), (12, 0, 0),
+		]
+		let candidates = candidateParameters.map {
+			HybridUintConfiguration(
+				splitExponent: $0.0, msbInToken: $0.1, lsbInToken: $0.2)
+		}
+		var selectedConfigurations: [HybridUintConfiguration] = []
+		var selectedHistograms: [Histogram] = []
+		for clusterIndex in clusters.indices {
+			let values = runLength.tokens.filter {
+				!$0.isLength
+					&& Int(contextMap[Int($0.token.context)]) == clusterIndex
+			}
+			var bestCost = Float.greatestFiniteMagnitude
+			var bestConfiguration = candidates[0]
+			var bestHistogram = Histogram()
+			for configuration in candidates {
+				var histogram = Histogram()
+				var extraBits = 0
+				var maximumSymbol: UInt32 = 0
+				for encoded in values {
+					let result = configuration.encode(encoded.token.value)
+					maximumSymbol = max(
+						maximumSymbol,
+						result.symbol
+							| ((1 << configuration.lsbInToken) - 1))
+					extraBits += Int(result.bitCount)
+					histogram.add(result.symbol)
+				}
+				guard maximumSymbol < (runLength.enabled ? lengthSymbolOffset : 256)
+				else {
+					continue
+				}
+				let cost =
+					ANSEncodingHistogram.computeBest(
+						counts: histogram.counts, strategy: .fast
+					).cost
+					+ Float(extraBits)
+					+ Float(ceilLog2Nonzero(configuration.splitExponent + 1))
+					+ Float(
+						ceilLog2Nonzero(
+							configuration.splitExponent
+								- configuration.msbInToken + 1))
+				if cost < bestCost {
+					bestCost = cost
+					bestConfiguration = configuration
+					bestHistogram = histogram
+				}
+			}
+			selectedConfigurations.append(bestConfiguration)
+			selectedHistograms.append(bestHistogram)
+		}
+		for encoded in runLength.tokens where encoded.isLength {
+			let clusterIndex = Int(contextMap[Int(encoded.token.context)])
+			selectedHistograms[clusterIndex].add(
+				lengthConfiguration.encode(encoded.token.value).symbol
+					+ lengthSymbolOffset)
+		}
+		var maximumSymbol: UInt32 = 0
+		for histogram in selectedHistograms {
+			if let last = histogram.counts.lastIndex(where: { $0 != 0 }) {
+				maximumSymbol = max(maximumSymbol, UInt32(last))
+			}
+		}
+		var logAlphabetSize = 5
+		while maximumSymbol >= (UInt32(1) << logAlphabetSize) { logAlphabetSize += 1 }
+		if usesPrefixCode {
+			logAlphabetSize = PrefixCodeWriter.prefixMaxBits
+		} else {
+			precondition(logAlphabetSize <= 8)
+		}
+		let prefixCodes = HistogramCluster.buildPrefixCodes(selectedHistograms)
+		let code: EntropyCode
+		if usesPrefixCode {
+			code = EntropyCode(
+				contextMap: contextMap, prefixCodes: prefixCodes,
+				uintConfigurations: selectedConfigurations,
+				logAlphabetSize: logAlphabetSize)
+		} else {
+			let ansHistograms = selectedHistograms.map {
+				ANSEncodingHistogram.computeBest(
+					counts: $0.counts, strategy: .precise)
+			}
+			code = EntropyCode(
+				contextMap: contextMap, prefixCodes: prefixCodes,
+				ansHistograms: ansHistograms,
+				uintConfigurations: selectedConfigurations,
+				logAlphabetSize: logAlphabetSize)
+		}
+		return (runLength, code)
+	}
+
 	/// `CoeffOrderContext`: `HybridUintConfig(0, 0, 0).Encode(val).token`,
 	/// clamped to `permutationContexts - 1`. Traced from the general formula
 	/// rather than reimplemented generically, since split_exponent=0 collapses
@@ -47,7 +205,7 @@ enum CoeffOrder {
 	}
 
 	/// Per-channel accumulator: how often each raster position held a zero
-	/// coefficient, across every block in the frame.
+	/// coefficient in sampled blocks.
 	public struct ZeroCounts: Sendable {
 		var counts = [Int64](repeating: 0, count: DCT.blockSize)
 
@@ -60,21 +218,6 @@ enum CoeffOrder {
 			}
 		}
 
-		/// Adds every block in a flat, block-major coefficient array (as
-		/// `ACGroupEncoder.computeGroup` returns per channel).
-		public mutating func addAll(_ flat: [Int32]) {
-			var start = 0
-			while start < flat.count {
-				add(flat[start..<start + DCT.blockSize])
-				start += DCT.blockSize
-			}
-		}
-
-		/// Combines another group's (or channel's) counts into this one, so
-		/// counting can run per-group and reduce afterwards.
-		mutating func merge(_ other: ZeroCounts) {
-			for k in 0..<DCT.blockSize { counts[k] += other.counts[k] }
-		}
 	}
 
 	struct ChannelOrder {
@@ -86,14 +229,13 @@ enum CoeffOrder {
 	/// more often nonzero move earlier — ties broken by original scan rank.
 	/// Rank 0 (raster position 0, the LLF slot) always stays fixed: it is
 	/// never transmitted regardless (`TokenizePermutation`'s `skip`), so there
-	/// is nothing to gain from sorting it, and the reference's own mechanism
-	/// for forcing it first relies on an unsigned cast of a negative float
-	/// that is undefined behaviour in C++ — not worth reproducing when fixing
-	/// the slot directly gives the identical transmitted permutation.
+	/// is nothing to gain from sorting it. The source's key for this rank is
+	/// Float(-0.125) + 0.1; conversion to UInt truncates toward zero, yielding
+	/// the same zero key, so fixing the slot directly preserves its order.
 	static func computeOrder(counts: [Int64]) -> ChannelOrder {
-		let invSqrtSize = 1.0 / Double(DCT.blockSize).squareRoot()
+		let invSqrtSize = 1.0 / Float(DCT.blockSize).squareRoot()
 		func key(rank: Int) -> Int64 {
-			Int64(Double(counts[natural[rank]]) * invSqrtSize + 0.1)
+			Int64(Float(counts[natural[rank]]) * invSqrtSize + 0.1)
 		}
 		let sortedRanks = (1..<DCT.blockSize).sorted { a, b in
 			let ka = key(rank: a)
@@ -189,24 +331,27 @@ enum CoeffOrder {
 		return Result(orders: perChannel.map(\.order), isCustom: true)
 	}
 
-	/// Port of `EncodeGlobalACInfo`'s `used_orders` + `EncodeCoeffOrders`
-	/// sequence. The `used_orders` field is `U32Enc(Val(0x5F), Val(0x13),
-	/// Val(0), Bits(kNumOrders))`; with one order bucket the value is only
-	/// ever 0 or 1, both of which the existing `Bits(13)` branch already
-	/// encodes correctly (matches the selector `writeACGlobal` already sends
-	/// for the always-0 case this replaces), so this is a direct value write
-	/// rather than a general U32Enc port.
+	/// Writes the `Bits(13)` value selected by FrameAssembly for custom DCT8
+	/// orders. The default `Val(0)` branch has no payload.
 	public static func write(_ result: Result, writer: inout BitWriter) {
-		writer.write(13, result.isCustom ? 1 : 0)
 		guard result.isCustom else { return }
+		writer.write(13, 1)
 
 		let allTokens = result.orders.flatMap { tokens(forChannelOrder: $0) }
-		let code = HistogramCluster.optimizeEntropyCode(
-			tokens: allTokens, contextCount: permutationContexts)
-		writer.write(1, 0)  // no lz77
-		EntropyCodeWriter.write(code, writer: &writer)
-		for token in allTokens {
-			writer.write(token: token, code: code)
+		let prepared = preparePermutation(allTokens)
+		let lengthConfiguration = HybridUintConfiguration(
+			splitExponent: 0, msbInToken: 0, lsbInToken: 0)
+		writer.write(1, prepared.runLength.enabled ? 1 : 0)
+		if prepared.runLength.enabled {
+			writer.write(2, 0)
+			writer.write(2, 0)
+			PrefixCodeWriter.writeUintConfigs(
+				[lengthConfiguration], logAlphaSize: 8, writer: &writer)
 		}
+		EntropyCodeWriter.write(prepared.code, writer: &writer)
+		EntropyCodeWriter.writeTokens(
+			prepared.runLength.tokens, code: prepared.code,
+			lengthConfiguration: lengthConfiguration,
+			lengthSymbolOffset: 224, writer: &writer)
 	}
 }

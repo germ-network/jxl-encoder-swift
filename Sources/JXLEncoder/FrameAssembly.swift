@@ -231,7 +231,7 @@ enum FrameAssembly {
 		}
 		let histogramBits = ceilLog2(groupCount)
 		if histogramBits != 0 { writer.write(histogramBits, 0) }
-		writer.write(2, 3)  // used_orders selector: the Bits(13) branch
+		writer.write(2, coeffOrder.isCustom ? 3 : 2)  // kOrderEnc: Bits(13) or Val(0)
 		CoeffOrder.write(coeffOrder, writer: &writer)
 		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(code, writer: &writer)

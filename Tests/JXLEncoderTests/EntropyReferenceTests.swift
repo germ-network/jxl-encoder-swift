@@ -1274,7 +1274,7 @@ struct EntropyReferenceTests {
 	}
 
 	@Test
-	func coefficientSortKeysExposeRoundingBoundaryDivergence() throws {
+	func coefficientSortKeysMatchReferenceAtRoundingBoundary() throws {
 		let fixture = try EntropyReferenceFixture.load("coefficient_sort_boundary")
 		let counts = try integers(fixture.input, "input.coefficient_order.counts")
 		let actual = SwiftEntropySemanticEncoding.coefficientOrder(counts: counts)
@@ -1282,9 +1282,7 @@ struct EntropyReferenceTests {
 		let sourceOrder = try integers(
 			fixture.expected,
 			"entropy.coefficient_order.reference_order")
-		#expect(sourceOrder.suffix(2) == [1, 8])
-		#expect(swiftOrder.suffix(2) == [8, 1])
-		#expect(swiftOrder.dropLast(2) == sourceOrder.dropLast(2))
+		#expect(swiftOrder == sourceOrder)
 		#expect(
 			fixture.expected.fields["entropy.coefficient_order.sampled_counts"]
 				== .integers([4_194_312, 4_194_311]))

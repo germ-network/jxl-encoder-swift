@@ -120,6 +120,84 @@ enum HistogramCluster {
 		return (output, symbols)
 	}
 
+	static func clusterBest(_ histograms: [Histogram]) -> (
+		clusters: [Histogram], contextMap: [UInt8]
+	) {
+		guard histograms.count > 1 else {
+			return (histograms, [UInt8](repeating: 0, count: histograms.count))
+		}
+		var (clusters, symbols) = fastCluster(
+			histograms, maxHistograms: histograms.count)
+		var costs = clusters.map {
+			ANSEncodingHistogram.computeBest(counts: $0.counts, strategy: .fast).cost
+		}
+		var versions = [UInt32](repeating: 1, count: clusters.count)
+		var renumbering = Array(clusters.indices)
+		var nextVersion: UInt32 = 2
+		var pairs: [(cost: Float, first: Int, second: Int, version: UInt32)] = []
+		func mergeCost(_ first: Int, _ second: Int) -> Float {
+			var combined = clusters[first]
+			combined.add(clusters[second])
+			let combinedCost = ANSEncodingHistogram.computeBest(
+				counts: combined.counts, strategy: .fast
+			).cost
+			return combinedCost - (costs[first] + costs[second])
+		}
+		func enqueue(_ first: Int, _ second: Int) {
+			let cost = mergeCost(first, second)
+			guard cost < 0 else { return }
+			pairs.append(
+				(
+					cost, min(first, second), max(first, second),
+					max(versions[first], versions[second])
+				))
+		}
+		for first in clusters.indices {
+			for second in clusters.indices where second > first {
+				enqueue(first, second)
+			}
+		}
+		while !pairs.isEmpty {
+			pairs.sort {
+				if $0.cost != $1.cost { return $0.cost < $1.cost }
+				if $0.first != $1.first { return $0.first < $1.first }
+				if $0.second != $1.second { return $0.second < $1.second }
+				return $0.version < $1.version
+			}
+			let pair = pairs.removeFirst()
+			let first = pair.first
+			let second = pair.second
+			guard versions[first] != 0, versions[second] != 0,
+				pair.version == max(versions[first], versions[second])
+			else { continue }
+			clusters[first].add(clusters[second])
+			costs[first] =
+				ANSEncodingHistogram.computeBest(
+					counts: clusters[first].counts, strategy: .fast
+				).cost
+			for index in renumbering.indices where renumbering[index] == second {
+				renumbering[index] = first
+			}
+			versions[second] = 0
+			versions[first] = nextVersion
+			nextVersion += 1
+			for other in clusters.indices where other != first && versions[other] != 0 {
+				enqueue(first, other)
+			}
+		}
+		var reverse = [Int](repeating: -1, count: clusters.count)
+		var alive: [Histogram] = []
+		for index in clusters.indices where versions[index] != 0 {
+			reverse[index] = alive.count
+			alive.append(clusters[index])
+		}
+		for index in renumbering.indices {
+			renumbering[index] = reverse[renumbering[index]]
+		}
+		symbols = symbols.map { UInt32(renumbering[Int($0)]) }
+		return reindex(symbols: symbols, clusters: alive)
+	}
+
 	/// Renumbers clusters so the context map's symbols appear in increasing
 	/// order, which is the canonical form the format expects.
 	static func reindex(
