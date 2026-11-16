@@ -49,7 +49,9 @@ public struct DistanceParams: Equatable, Sendable {
 	static let quantMax: Int = 255
 
 	public init(distance: Float) throws {
-		guard distance >= 0 else { throw EncoderError.invalidDistance(distance) }
+		guard distance.isFinite && distance >= 0 else {
+			throw EncoderError.invalidDistance(distance)
+		}
 		guard distance > 0 else { throw EncoderError.losslessNotSupported }
 
 		// Below this the average bits-per-pixel exceeds lossless, so the

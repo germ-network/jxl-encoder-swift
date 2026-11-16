@@ -57,8 +57,25 @@ struct DistanceParamsTests {
 		#expect(throws: EncoderError.losslessNotSupported) {
 			try DistanceParams(distance: 0)
 		}
+		#expect(throws: EncoderError.losslessNotSupported) {
+			try DistanceParams(distance: -0.0)
+		}
 		#expect(throws: EncoderError.invalidDistance(-1)) {
 			try DistanceParams(distance: -1)
+		}
+	}
+
+	@Test(
+		"non-finite distances throw invalidDistance",
+		arguments: [Float.nan, .infinity, -.infinity])
+	func rejectsNonFiniteDistances(distance: Float) {
+		#expect {
+			try DistanceParams(distance: distance)
+		} throws: { error in
+			guard case EncoderError.invalidDistance(let rejected) = error else {
+				return false
+			}
+			return rejected.isNaN ? distance.isNaN : rejected == distance
 		}
 	}
 
