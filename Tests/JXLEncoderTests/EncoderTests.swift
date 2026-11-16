@@ -193,6 +193,40 @@ struct EncoderTests {
 }
 
 extension EncoderTests {
-	@Test(.disabled("Pending finite range serialization implementation"))
-	func positiveFinitePixelEntryPointsSerialize() async throws {}
+	@Test
+	func positiveFinitePixelEntryPointsSerialize() async throws {
+		let width = 9
+		let height = 7
+		var rgb = [UInt8](repeating: 0, count: width * height * 3)
+		var grayRGB = rgb
+		for pixel in 0..<(width * height) {
+			let value = UInt8((pixel * 37) % 256)
+			grayRGB.replaceSubrange(
+				pixel * 3..<(pixel + 1) * 3, with: [value, value, value])
+			for channel in 0..<3 {
+				rgb[pixel * 3 + channel] = UInt8((pixel * (channel * 11 + 7)) % 256)
+			}
+		}
+		let images = [
+			try ImageBuffer(width: width, height: height, samples: rgb),
+			try ImageBuffer(width: width, height: height, samples: grayRGB),
+		]
+		let boundary = Float(bitPattern: 0x4760_70FC)
+		for distance in [
+			Float(0.03), 26, boundary, Float(1 << 55), .greatestFiniteMagnitude,
+		] {
+			let params = try DistanceParams(distance: distance)
+			#expect(params.globalScale >= 1 && params.globalScale <= 1 << 15)
+			#expect(params.quantDC >= 1 && params.quantDC <= 1 << 16)
+			#expect(params.uniformQuant > 0 && params.uniformQuant <= 255)
+			for image in images {
+				let serial = try Encoder.encode(image, distance: distance)
+				let concurrent = try await Encoder.encodeConcurrently(
+					image, distance: distance)
+				#expect(serial.starts(with: [0xFF, 0x0A]))
+				#expect(serial.count > 20)
+				#expect(concurrent == serial)
+			}
+		}
+	}
 }

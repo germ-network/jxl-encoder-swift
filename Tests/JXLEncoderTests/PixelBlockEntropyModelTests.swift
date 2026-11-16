@@ -418,7 +418,36 @@ private struct TestBitReader {
 }
 
 extension PixelBlockEntropyModelTests {
-	@Test(.disabled("Pending extreme distance caller correction"))
-	func extremeFiniteDistancesSelectDefaultMap() throws {}
+	@Test
+	func extremeFiniteDistancesSelectDefaultMap() throws {
+		let expected = PixelBlockEntropyModel.compute(
+			quantCounts: counts(total: 1023, quant: 1),
+			params: try DistanceParams(distance: 1)
+		).contextMap
+		for distance in [
+			Float(1 << 55).nextDown, Float(1 << 55), Float(1 << 55).nextUp,
+			Float.greatestFiniteMagnitude,
+		] {
+			let result = PixelBlockEntropyModel.compute(
+				quantCounts: counts(total: 1023, quant: 1),
+				params: try DistanceParams(distance: distance))
+			#expect(result.thresholds.isEmpty)
+			#expect(result.qfThresholds.isEmpty)
+			#expect(result.contextMap == expected)
+			#expect(result.contextMap.count == 39)
+			#expect(result.numContexts == 15)
+		}
+
+		let overflowingCuts = PixelBlockEntropyModel.compute(
+			quantCounts: counts(total: Int.max, quant: 1),
+			params: try DistanceParams(distance: Float(1 << 48)))
+		#expect(overflowingCuts.contextMap.count == 78)
+		#expect(overflowingCuts.numContexts >= 3 && overflowingCuts.numContexts <= 15)
+
+		let overflowingSplitSize = PixelBlockEntropyModel.compute(
+			quantCounts: counts(total: Int.max, quant: 1),
+			params: try DistanceParams(distance: Float(1 << 52)))
+		#expect(overflowingSplitSize.contextMap.count == 39)
+	}
 
 }
