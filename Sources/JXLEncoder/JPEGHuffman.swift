@@ -6,119 +6,161 @@
 //  ISO/IEC 10918-1 Annex F.
 //
 
-/// Canonical Huffman decoder built from a DHT segment's per-length code counts
-/// and value list.
+/// Two-level lookup built from a DHT segment's per-length code counts.
 struct JPEGHuffmanTable {
-	/// First code of each length, indexed 1...16.
-	private let minCode: [Int32]
-	/// Last code of each length, `-1` when the length carries no codes. Held as
-	/// signed so an unused length can never match a code.
-	private let maxCode: [Int32]
-	private let valueOffset: [Int]
-	private let values: [UInt8]
+	static let lutSize = 1024
+	private static let rootBits = 8
 
-	/// Codes of 8 bits or fewer, keyed by the next 8 bits of the stream, so the
-	/// common case skips the per-length walk. A zero length means the prefix
-	/// belongs to a longer code.
-	private let fastLength: [UInt8]
-	private let fastValue: [UInt8]
+	struct Entry: Equatable {
+		var bits: UInt8
+		var value: UInt16
+	}
 
-	/// Fails on an over-subscribed table — one whose codes cannot fit the code
-	/// space — or on a value count that disagrees with the length counts.
+	private(set) var entries: [Entry]
+
 	init?(counts: [Int], values: [UInt8]) {
-		guard counts.count == 16, values.count == counts.reduce(0, +) else {
+		guard counts.count == 16, counts.allSatisfy({ (0...255).contains($0) }),
+			values.count == counts.reduce(0, +), values.count <= 256
+		else {
 			return nil
 		}
 
-		var minCode = [Int32](repeating: 0, count: 17)
-		var maxCode = [Int32](repeating: -1, count: 17)
-		var valueOffset = [Int](repeating: 0, count: 17)
-		var fastLength = [UInt8](repeating: 0, count: 256)
-		var fastValue = [UInt8](repeating: 0, count: 256)
-
-		var code: Int32 = 0
-		var valueIndex = 0
+		var counts = counts
+		var maxDepth = 1
+		var space = 1 << 16
+		var total = 0
 		for length in 1...16 {
 			let count = counts[length - 1]
-			minCode[length] = code
-			valueOffset[length] = valueIndex
-			if count > 0 {
-				maxCode[length] = code + Int32(count) - 1
-				if length <= 8 {
-					let fill = 1 << (8 - length)
-					for i in 0..<count {
-						let prefix = Int(code + Int32(i)) << (8 - length)
-						let value = values[valueIndex + i]
-						for j in 0..<fill {
-							fastLength[prefix + j] = UInt8(length)
-							fastValue[prefix + j] = value
-						}
-					}
-				}
+			if count > 0 { maxDepth = length }
+			total += count
+			space -= count * (1 << (16 - length))
+		}
+		counts[maxDepth - 1] += 1
+		space -= 1 << (16 - maxDepth)
+		guard space >= 0 else { return nil }
+
+		var symbols = values.map(UInt16.init)
+		symbols.append(256)
+		var table = [Entry](repeating: Entry(bits: 0, value: 65535), count: Self.lutSize)
+		if total + 1 == 1 {
+			for key in 0..<(1 << Self.rootBits) {
+				table[key] = Entry(bits: 0, value: symbols[0])
 			}
-			code += Int32(count)
-			valueIndex += count
-			guard code <= 1 << length else { return nil }
-			code <<= 1
+			entries = table
+			return
 		}
 
-		self.minCode = minCode
-		self.maxCode = maxCode
-		self.valueOffset = valueOffset
-		self.values = values
-		self.fastLength = fastLength
-		self.fastValue = fastValue
+		var remaining = [0] + counts
+		var key = 0
+		var symbolIndex = 0
+		for length in 1...Self.rootBits {
+			while remaining[length] > 0 {
+				let entry = Entry(bits: UInt8(length), value: symbols[symbolIndex])
+				symbolIndex += 1
+				let repetitions = 1 << (Self.rootBits - length)
+				for index in key..<(key + repetitions) { table[index] = entry }
+				key += repetitions
+				remaining[length] -= 1
+			}
+		}
+
+		var tableBase = 1 << Self.rootBits
+		var tableBits = Self.rootBits
+		var tableSize = 0
+		var low = 0
+		for length in (Self.rootBits + 1)...16 {
+			while remaining[length] > 0 {
+				if low >= tableSize {
+					tableBase += tableSize
+					tableBits = Self.nextTableBitSize(remaining, length: length)
+					tableSize = 1 << tableBits
+					low = 0
+					table[key] = Entry(
+						bits: UInt8(tableBits + Self.rootBits),
+						value: UInt16(tableBase - key))
+					key += 1
+				}
+				let leafBits = length - Self.rootBits
+				let entry = Entry(
+					bits: UInt8(leafBits), value: symbols[symbolIndex])
+				symbolIndex += 1
+				let repetitions = 1 << (tableBits - leafBits)
+				for index in low..<(low + repetitions) {
+					table[tableBase + index] = entry
+				}
+				low += repetitions
+				remaining[length] -= 1
+			}
+		}
+		entries = table
 	}
 
 	func decode(_ reader: inout JPEGBitReader) throws -> UInt8 {
-		let prefix = Int(reader.peek(8))
-		let length = fastLength[prefix]
-		if length != 0 {
-			reader.skip(Int(length))
-			return fastValue[prefix]
+		let rootIndex = Int(reader.peek(Self.rootBits))
+		var entry = entries[rootIndex]
+		guard entry.value != 65535 else { throw JPEGParseError.invalidHuffmanCode }
+		if entry.bits > Self.rootBits {
+			let subtableBits = Int(entry.bits) - Self.rootBits
+			let subtableOffset = rootIndex + Int(entry.value)
+			reader.skip(Self.rootBits)
+			entry = entries[subtableOffset + Int(reader.peek(subtableBits))]
 		}
+		guard entry.value < 256 else { throw JPEGParseError.invalidHuffmanCode }
+		reader.skip(Int(entry.bits))
+		return UInt8(entry.value)
+	}
 
-		var code = Int32(prefix)
-		reader.skip(8)
-		for length in 9...16 {
-			code = (code << 1) | Int32(reader.read(1))
-			if code <= maxCode[length] {
-				return values[valueOffset[length] + Int(code - minCode[length])]
-			}
+	private static func nextTableBitSize(_ counts: [Int], length: Int) -> Int {
+		var remaining = 1 << (length - rootBits)
+		var length = length
+		while length < 16 {
+			remaining -= counts[length]
+			if remaining <= 0 { break }
+			length += 1
+			remaining <<= 1
 		}
-		throw JPEGParseError.invalidHuffmanCode
+		return length - rootBits
 	}
 }
 
 /// Bit-level reader over entropy-coded data.
-///
-/// Entropy data carries `FF 00` wherever the compressed bits produce a literal
-/// `FF`; any other `FF xx` is the marker that ends the segment. Once the reader
-/// reaches a marker — or the end of the input — it hands out zero bits and
-/// counts them, so a caller decoding past the end sees `paddedBytes` grow
-/// instead of reading whatever follows the marker.
 struct JPEGBitReader {
 	private let data: [UInt8]
-	/// Next unread byte. After `reachedMarker` this is the marker's `FF`.
 	private(set) var index: Int
 	private var buffer: UInt32 = 0
 	private var bitCount = 0
-	private(set) var paddedBytes = 0
-	private(set) var reachedMarker = false
+	private var markerBoundary: Int
 
 	init(data: [UInt8], index: Int) {
 		self.data = data
 		self.index = index
+		markerBoundary = max(data.count - 2, 0)
 	}
 
 	/// Resumes at `index` after a restart marker: the bit buffer does not carry
-	/// across the marker, and neither does the padding budget.
+	/// across the marker.
 	mutating func restart(at index: Int) {
 		self.index = index
 		buffer = 0
 		bitCount = 0
-		paddedBytes = 0
-		reachedMarker = false
+		markerBoundary = max(data.count - 2, 0)
+	}
+
+	mutating func finish() throws -> Int {
+		var unusedBytes = bitCount >> 3
+		while unusedBytes > 0 {
+			index -= 1
+			if index < markerBoundary, index > 0,
+				data[index] == 0, data[index - 1] == 0xFF
+			{
+				index -= 1
+			}
+			unusedBytes -= 1
+		}
+		guard index <= markerBoundary else {
+			throw JPEGParseError.truncatedEntropyData
+		}
+		return index
 	}
 
 	/// `n` must be at most 16, which keeps `bitCount` under 32 bits.
@@ -146,21 +188,18 @@ struct JPEGBitReader {
 	}
 
 	private mutating func nextByte() -> UInt8 {
-		guard !reachedMarker, index < data.count else {
-			paddedBytes += 1
+		guard index < markerBoundary, index < data.count else {
+			index += 1
 			return 0
 		}
 		let byte = data[index]
-		guard byte == 0xFF else {
+		index += 1
+		guard byte == 0xFF else { return byte }
+		if index < data.count, data[index] == 0x00 {
 			index += 1
-			return byte
-		}
-		if index + 1 < data.count, data[index + 1] == 0x00 {
-			index += 2
 			return 0xFF
 		}
-		reachedMarker = true
-		paddedBytes += 1
-		return 0
+		markerBoundary = index - 1
+		return 0xFF
 	}
 }

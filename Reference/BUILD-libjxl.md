@@ -127,7 +127,9 @@ Any version mismatch causes `make_jpeg_fixtures.sh` to abort.
 
 ## Internal reference harness
 
-Run `Reference/build-harness.sh`, then `Reference/harness/test-harness.sh`.
+Set `JPEG_PREFIX` to the pinned libjpeg-turbo 3.2.0 installation, then run
+`Reference/build-harness.sh` and `Reference/harness/test-harness.sh`. The build
+checks `include/jconfig.h` and links `lib/libjpeg.dylib` from that prefix.
 The build adds the pinned checkout as a CMake subproject, links its internal
 libraries, and writes all build output to `Reference/build/harness/`. It never
 patches or writes into the checkout; pin-check runs before and after building.

@@ -95,6 +95,9 @@ struct DecisionInventoryFixtureTests {
 				.union(JPEGSemanticCase.knownIssueReferences)
 			if knownIssues.contains(key) { return .knownIssue }
 		} else {
+			if JPEGHuffmanTests.fixtureReferences.contains(reference.path) {
+				return .verifies
+			}
 			guard
 				let comparison = StageFixtureCase.all.first(where: {
 					$0.referencePath == reference.path
