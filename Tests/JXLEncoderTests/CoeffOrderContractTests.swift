@@ -42,12 +42,14 @@ struct CoeffOrderContractTests {
 		#expect(counts[0].counts[1] == 3)
 		#expect(counts[1].counts[1] == 0)
 
-		func group(x: Int, width: Int, zeroPosition: Int, zeroBlocks: Int)
+		func group(x: Int, width: Int, zeros: [(position: Int, blocks: Int)])
 			-> Encoder.ACGroupCompute
 		{
 			var plane = [Int32](repeating: 1, count: width * DCT.blockSize)
-			for block in 0..<zeroBlocks {
-				plane[block * DCT.blockSize + zeroPosition] = 0
+			for (position, blocks) in zeros {
+				for block in 0..<blocks {
+					plane[block * DCT.blockSize + position] = 0
+				}
 			}
 			return Encoder.ACGroupCompute(
 				groupX: x, groupY: 0, widthInBlocks: width, heightInBlocks: 1,
@@ -57,25 +59,30 @@ struct CoeffOrderContractTests {
 				], rawDC: [], quantField: [])
 		}
 		let first = group(
-			x: 0, width: 13, zeroPosition: CoeffOrder.natural[1], zeroBlocks: 8)
+			x: 0, width: 32,
+			zeros: [
+				(position: CoeffOrder.natural[1], blocks: 8),
+				(position: CoeffOrder.natural[2], blocks: 1),
+			])
 		let second = group(
-			x: 1, width: 12, zeroPosition: CoeffOrder.natural[2], zeroBlocks: 8)
-		let dim = ImageDim(width: 200, height: 8)
+			x: 1, width: 12,
+			zeros: [(position: CoeffOrder.natural[2], blocks: 7)])
+		let dim = ImageDim(width: 352, height: 8)
 		let raster = Encoder.computeCoeffOrder([first, second], dim: dim)
 		let shuffled = Encoder.computeCoeffOrder([second, first], dim: dim)
 		var sampledCounts = [CoeffOrder.ZeroCounts](
 			repeating: CoeffOrder.ZeroCounts(), count: 3)
 		var continuousSampler = CoeffOrder.Sampler()
 		CoeffOrder.accumulateGroup(
-			first.coefficients, widthInBlocks: 13, heightInBlocks: 1,
+			first.coefficients, widthInBlocks: 32, heightInBlocks: 1,
 			sampler: &continuousSampler, counts: &sampledCounts)
 		CoeffOrder.accumulateGroup(
 			second.coefficients, widthInBlocks: 12, heightInBlocks: 1,
 			sampler: &continuousSampler, counts: &sampledCounts)
 		#expect(sampledCounts[0].counts[CoeffOrder.natural[1]] == 8)
-		#expect(sampledCounts[0].counts[CoeffOrder.natural[2]] == 8)
+		#expect(sampledCounts[0].counts[CoeffOrder.natural[2]] == 5)
 		let expected = CoeffOrder.compute(
-			counts: sampledCounts, widthInBlocks: 25, heightInBlocks: 1)
+			counts: sampledCounts, widthInBlocks: 44, heightInBlocks: 1)
 		#expect(raster.orders == expected.orders)
 		#expect(shuffled.orders == expected.orders)
 		var resetCounts = [CoeffOrder.ZeroCounts](
@@ -88,7 +95,9 @@ struct CoeffOrderContractTests {
 				counts: &resetCounts)
 		}
 		let reset = CoeffOrder.compute(
-			counts: resetCounts, widthInBlocks: 25, heightInBlocks: 1)
+			counts: resetCounts, widthInBlocks: 44, heightInBlocks: 1)
+		#expect(resetCounts[0].counts[CoeffOrder.natural[1]] == 8)
+		#expect(resetCounts[0].counts[CoeffOrder.natural[2]] == 8)
 		#expect(reset.orders != expected.orders)
 		#expect(raster.isCustom)
 	}
