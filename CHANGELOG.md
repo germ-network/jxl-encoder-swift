@@ -1,5 +1,61 @@
 # @germ-network/jxl-encoder-swift
 
+## 0.4.0
+
+### Minor Changes
+
+- Expand baseline JPEG ingestion to support disjoint sequential scans, scan-local restart state, and persistent padded coefficient planes.
+
+### Compatibility
+
+- Added `JPEGParseError.duplicateComponentIdentifier` and `.duplicateRestartInterval` cases can require downstream exhaustive switches to be updated.
+- `JPEGComponent.quantTableIndex` indexes the component's bound values in `JPEGImage.quantTables`; it can exceed 3 after table redefinitions and should not be treated as the original JPEG destination identifier.
+- Quantization-table redefinitions bind at each component's scan, following JPEG T.81 active-table semantics. This deliberately differs from the pinned libjxl reader's first-definition binding; see [the source and standard evidence](https://github.com/germ-network/jxl-encoder-swift/blob/v0.4.0/Reference/jpeg-quantization-binding.md).
+- Grayscale coefficient storage uses padded block strides. Grayscale sampling factors 3 and 4 now decline coefficient recompression: `Encoder.recompressJPEG(_:)` returns nil, while the Apple encoder falls back to decoding pixels and applies its pixel-path budget.
+- Newly accepted sequential JPEGs can take coefficient recompression instead of pixel encoding. Encoded output can change across both JPEG and pixel paths.
+
+### Patch Changes
+
+- Serialize VarDCT Gaborish and EPF fields independently, with pixel and JPEG header verification against the selected effort-4 configuration.
+
+- [#51](https://github.com/germ-network/jxl-encoder-swift/pull/51) [`03b45d5`](https://github.com/germ-network/jxl-encoder-swift/commit/03b45d50f6eba893c24a1e83d84e072b7fd59333) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Bound generated GitHub release notes and make release creation recoverable after tag publication.
+
+- [#45](https://github.com/germ-network/jxl-encoder-swift/pull/45) [`ba09a4b`](https://github.com/germ-network/jxl-encoder-swift/commit/ba09a4b12a8baf3de5f2529f0f8ce7fb4bef25f8) Thanks [@germ-mark](https://github.com/germ-mark)! - Match pinned libjxl e4 coefficient-order sampling and permutation entropy coding.
+
+- [#41](https://github.com/germ-network/jxl-encoder-swift/pull/41) [`f00b64d`](https://github.com/germ-network/jxl-encoder-swift/commit/f00b64d62409dd12014a5fefd56807634e6ea434) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Fall back to pixel encoding when a JPEG's RGB or ICC color interpretation cannot be preserved by coefficient recompression.
+
+- [#46](https://github.com/germ-network/jxl-encoder-swift/pull/46) [`d98298a`](https://github.com/germ-network/jxl-encoder-swift/commit/d98298a471718f22742f2a2731b23f5d8b79ab68) Thanks [@germ-mark](https://github.com/germ-mark)! - Automatically resample high-distance pixel encodes on a globally prepared XYB grid.
+
+- [#27](https://github.com/germ-network/jxl-encoder-swift/pull/27) [`34b5b9e`](https://github.com/germ-network/jxl-encoder-swift/commit/34b5b9ed11e2c6550f0620f34fafef6727b1072e) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Preserve unsigned DC histogram bucket mapping when recompressing baseline JPEGs.
+
+- [#28](https://github.com/germ-network/jxl-encoder-swift/pull/28) [`ef52773`](https://github.com/germ-network/jxl-encoder-swift/commit/ef527730ea5d15e690a71030ff596d11d4c731e1) Thanks [@germ-mark](https://github.com/germ-mark)! - Use the first JXL channel's transposed quantization table for JPEG block context thresholds.
+
+- [#33](https://github.com/germ-network/jxl-encoder-swift/pull/33) [`675c6df`](https://github.com/germ-network/jxl-encoder-swift/commit/675c6df23f30928ef2690aa8d5abc2d1e34de6eb) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Use libjxl's context-map entropy policy for all production context maps.
+
+- [#40](https://github.com/germ-network/jxl-encoder-swift/pull/40) [`659ea26`](https://github.com/germ-network/jxl-encoder-swift/commit/659ea268367958e31cbe3685bdbb98f4a84bd78c) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Reject non-finite distances before quantizer arithmetic.
+
+- [#48](https://github.com/germ-network/jxl-encoder-swift/pull/48) [`94f1b26`](https://github.com/germ-network/jxl-encoder-swift/commit/94f1b266c70b8c5836f62985f68175d241ffbadc) Thanks [@germ-mark](https://github.com/germ-mark)! - Preserve source quantizer arithmetic order and safe serialization across all positive finite distances.
+
+- [#44](https://github.com/germ-network/jxl-encoder-swift/pull/44) [`780ed8b`](https://github.com/germ-network/jxl-encoder-swift/commit/780ed8bb4d9336b5ea3ad8ed9475fb8671787592) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Build JPEG Huffman lookup tables from source and enforce exact entropy boundaries.
+
+- [#37](https://github.com/germ-network/jxl-encoder-swift/pull/37) [`99938ad`](https://github.com/germ-network/jxl-encoder-swift/commit/99938ad61f4d5b0dc6f77f5a89815a9059b626d2) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Use native scalar Float arithmetic for pixel DC quantization.
+
+- [#39](https://github.com/germ-network/jxl-encoder-swift/pull/39) [`e1dca6f`](https://github.com/germ-network/jxl-encoder-swift/commit/e1dca6f022e63332f895c8c10f4c08195de18fd6) Thanks [@germ-mark](https://github.com/germ-mark)! - Preserve InitialQuantDC's reciprocal-times-distance formula while measuring QuantDC with native Swift Float.pow.
+
+- [#30](https://github.com/germ-network/jxl-encoder-swift/pull/30) [`118af57`](https://github.com/germ-network/jxl-encoder-swift/commit/118af57cb1fa6c2dfb48ef1b69c5ddaa3702a592) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Translate e4 X matrix-scale selection and channel-specific DCT8 AC dead zones to match libjxl.
+
+- [#33](https://github.com/germ-network/jxl-encoder-swift/pull/33) [`f3e1fe7`](https://github.com/germ-network/jxl-encoder-swift/commit/f3e1fe796db578492c6a97ba72f7a509231f6789) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Preserve source-selected EPF sharpness in serialized DC metadata for JPEG and pixel encodes.
+
+- [#43](https://github.com/germ-network/jxl-encoder-swift/pull/43) [`cad0117`](https://github.com/germ-network/jxl-encoder-swift/commit/cad0117a836a88ce9dc05d622ab888edeee84a85) Thanks [@germ-mark](https://github.com/germ-mark)! - Translate selected libjxl effort-4 modular DC preparation, folded chroma-from-luma, prediction, context trees, and per-stream entropy coding.
+
+- [#52](https://github.com/germ-network/jxl-encoder-swift/pull/52) [`acba207`](https://github.com/germ-network/jxl-encoder-swift/commit/acba207bfc364fe3278b656f7fa0549fe81de6f2) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Decode disjoint sequential JPEG scans into padded persistent coefficient planes, bind DQT redefinitions at each scan, apply scan-local restart and entropy state, and preserve grayscale sampling fallback.
+
+  Newly accepted multi-scan inputs can produce different JPEG XL output; resolved `quantTableIndex` values can exceed 3, and added public `JPEGParseError` cases can require downstream exhaustive switches to be updated.
+
+- [#30](https://github.com/germ-network/jxl-encoder-swift/pull/30) [`7aee1ae`](https://github.com/germ-network/jxl-encoder-swift/commit/7aee1ae1ae399d593b855e23a32a46911286c3a1) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Match pinned libjxl e4 clustering costs and original-context coder selection.
+
+- [#33](https://github.com/germ-network/jxl-encoder-swift/pull/33) [`502e162`](https://github.com/germ-network/jxl-encoder-swift/commit/502e16263773edda8ada5479013fcf8ecefd2f18) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Model pixel block contexts from each frame's quant fields and use them for optimized AC tokenization and frame metadata.
+
 ## 0.3.0
 
 ### Minor Changes
