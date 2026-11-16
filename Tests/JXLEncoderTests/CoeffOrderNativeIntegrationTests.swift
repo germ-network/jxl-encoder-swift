@@ -6,6 +6,13 @@
 
 	@Suite("Coefficient order native integration")
 	struct CoeffOrderNativeIntegrationTests {
+		@Test(
+			"serialized scan-derived frames preserve source coefficients",
+			.disabled("Pending approved reader implementation"))
+		func readerSerializationPreservesSourceCoefficients() throws {
+			Issue.record("Pending behavioral assertions")
+		}
+
 		static let harness = ProcessInfo.processInfo.environment["JXL_HARNESS_PATH"]
 		static var decoder: String? {
 			guard let harness else { return nil }

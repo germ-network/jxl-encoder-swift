@@ -14,6 +14,13 @@
 	/// per-image entropy code, which only the optimised path builds.
 	@Suite("JPEG transcode decoding")
 	struct JPEGTranscodeDecodeTests {
+		@Test(
+			"serialized sequential scan layouts preserve decoded pixels",
+			.disabled("Pending approved reader implementation"))
+		func sequentialScanSerializationPreservesPixels() throws {
+			Issue.record("Pending behavioral assertions")
+		}
+
 		static func transcode(_ name: String) throws -> JPEGTranscode {
 			let url = try #require(
 				Bundle.module.url(

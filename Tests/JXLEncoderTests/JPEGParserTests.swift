@@ -10,6 +10,103 @@ import Testing
 /// scan and the MCU layout at once.
 @Suite("JPEGParser")
 struct JPEGParserTests {
+	@Test(
+		"each selected component binds the quantizer active at its scan",
+		.disabled("Pending approved reader implementation"))
+	func quantizationTablesBindAtSelectedScan() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"quantizer replacement preserves previously decoded component meaning",
+		.disabled("Pending approved reader implementation"))
+	func quantizationRedefinitionsPreserveBoundValues() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"scan-bound quantizers preserve sparse destination compatibility",
+		.disabled("Pending approved reader implementation"))
+	func quantizationBindingsPreserveSparseDestinations() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"selected marker parsing reaches a required EOI",
+		.disabled("Pending approved reader implementation"))
+	func markerDispatchRequiresEOI() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"segment fields stay inside their declared payloads",
+		.disabled("Pending approved reader implementation"))
+	func segmentReadsRespectDeclaredBounds() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"frame and scan component identifiers are unique",
+		.disabled("Pending approved reader implementation"))
+	func componentIdentifiersAreUnique() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"frame sampling ratios are integral",
+		.disabled("Pending approved reader implementation"))
+	func frameSamplingRatiosAreIntegral() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"a second restart interval definition is rejected",
+		.disabled("Pending approved reader implementation"))
+	func duplicateRestartIntervalIsRejected() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"disjoint sequential scan partitions recover exact coefficients",
+		.disabled("Pending approved reader implementation"))
+	func sequentialScanPartitionsMatchReference() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"scan order preserves frame component identity",
+		.disabled("Pending approved reader implementation"))
+	func reorderedScanComponentsPreserveFrameOrder() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"single-component scans preserve padded storage and zero edges",
+		.disabled("Pending approved reader implementation"))
+	func singleComponentScansUsePaddedStride() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"sequential scans cannot decode a component twice",
+		.disabled("Pending approved reader implementation"))
+	func sequentialScansRejectOverlap() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"range-valid sequential scan fields use source normalization",
+		.disabled("Pending approved reader implementation"))
+	func sequentialScanParametersFollowSource() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"restart MCU counts and predictor state are local to each scan",
+		.disabled("Pending approved reader implementation"))
+	func restartStateIsLocalToEachScan() throws {
+		Issue.record("Pending behavioral assertions")
+	}
 
 	@Test("DHT selectors, limits and duplicate values are validated")
 	func dhtValidationMatchesSource() throws {

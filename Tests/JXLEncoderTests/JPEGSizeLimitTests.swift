@@ -11,6 +11,20 @@ import Testing
 /// coefficient arrays to a backing store rather than refusing them.
 @Suite("JPEG size limits")
 struct JPEGSizeLimitTests {
+	@Test(
+		"entropy feasibility counts coded scan blocks",
+		.disabled("Pending approved reader implementation"))
+	func entropyFloorCountsOnlyCodedScanBlocks() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"coefficient budget covers persistent padded planes",
+		.disabled("Pending approved reader implementation"))
+	func coefficientBudgetCoversPersistentPaddedPlanes() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
 	/// A structurally valid baseline JPEG claiming `width` × `height`, followed
 	/// by `entropyBytes` of filler. Everything before the scan is real, so the
 	/// parser reaches the frame header the same way it would on a genuine file.

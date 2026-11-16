@@ -8,6 +8,19 @@ import Testing
 /// as swapped colours or a transposed image rather than as a coding error.
 @Suite("JPEG transcode layout")
 struct JPEGTranscodeTests {
+	@Test(
+		"channel quantization views consume immutable component-bound values",
+		.disabled("Pending approved reader implementation"))
+	func quantizationViewsUseBoundTables() throws {
+		Issue.record("Pending behavioral assertions")
+	}
+
+	@Test(
+		"grayscale sampling uses source modes and existing fallback",
+		.disabled("Pending approved reader implementation"))
+	func grayscaleSamplingUsesExistingModes() throws {
+		Issue.record("Pending behavioral assertions")
+	}
 
 	@Test(
 		"unsupported color interpretation cannot enter coefficient coding")

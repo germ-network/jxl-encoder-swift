@@ -32,9 +32,12 @@ public enum JPEGParseError: Error, Equatable, Sendable {
 	case unsupportedComponentCount(Int)
 	case unsupportedSamplingFactors(horizontal: Int, vertical: Int)
 	case multipleFramesNotSupported
-	/// A scan covering a subset of the frame's components, or a second scan.
-	/// Legal in sequential JPEG, but vanishingly rare and untested.
+	/// A component selected by more than one sequential scan.
 	case multipleScansNotSupported
+	/// A component identifier repeated within a frame or scan header.
+	case duplicateComponentIdentifier(identifier: UInt8)
+	/// More than one restart-interval definition in the input.
+	case duplicateRestartInterval
 	case missingFrameHeader
 	case missingScan
 	/// Zero width, or the zero height that signals a DNL segment.
@@ -64,6 +67,8 @@ public struct JPEGComponent: Equatable, Sendable {
 	public let identifier: UInt8
 	public let horizontalSampling: Int
 	public let verticalSampling: Int
+	/// Index of this component’s bound values in `JPEGImage.quantTables`.
+	/// May exceed the original JPEG destination range after redefinition.
 	public let quantTableIndex: Int
 	/// Width of `coefficients` in blocks.
 	///
@@ -84,8 +89,9 @@ public struct JPEGImage: Equatable, Sendable {
 	public let width: Int
 	public let height: Int
 	public let components: [JPEGComponent]
-	/// Indexed by table id, natural order. A slot no component references may
-	/// be empty, since ids need not be contiguous.
+	/// Natural-order tables indexed by each component’s `quantTableIndex`.
+	/// Original destination slots remain sparse; additional slots preserve
+	/// distinct values bound to components before a destination is redefined.
 	public let quantTables: [[UInt16]]
 	/// MCUs between restart markers, or 0 when the file defines none.
 	public let restartInterval: Int
