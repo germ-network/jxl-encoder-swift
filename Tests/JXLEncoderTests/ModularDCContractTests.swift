@@ -5,18 +5,53 @@ import Testing
 @Suite("Selected modular DC")
 struct ModularDCContractTests {
 	@Test(
-		"weighted prediction preserves edge, update and signed property tie rules",
-		.disabled())
+		"weighted prediction preserves edge, update and signed property tie rules")
 	func weightedPredictionEdgesUpdatesAndTies() {
-		var state = DCPredictor.WeightedState(width: 1)
-		let first = state.predict(
-			x: 0, y: 0, north: 0, west: 0, northEast: 0, northWest: 0, northNorth: 0)
-		#expect(first.guess == 0)
-		#expect(first.property == 0)
-		state.updateErrors(value: 1, x: 0, y: 0)
-		Issue.record(
-			"Add fixed asymmetric raster, signed tie and fresh channel/group state cases"
-		)
+		func checkRaster(_ values: [Int32], width: Int, expected: [(Int64, Int64)]) {
+			var state = DCPredictor.WeightedState(width: width)
+			for index in values.indices {
+				let x = index % width
+				let y = index / width
+				let left =
+					x > 0
+					? values[index - 1] : (y > 0 ? values[index - width] : 0)
+				let north = y > 0 ? values[index - width] : left
+				let northWest = x > 0 && y > 0 ? values[index - width - 1] : left
+				let northEast =
+					x + 1 < width && y > 0 ? values[index - width + 1] : north
+				let northNorth = y > 1 ? values[index - 2 * width] : north
+				let result = state.predict(
+					x: x, y: y, north: north, west: left,
+					northEast: northEast, northWest: northWest,
+					northNorth: northNorth)
+				#expect(result.guess == expected[index].0)
+				#expect(result.property == expected[index].1)
+				state.updateErrors(value: values[index], x: x, y: y)
+			}
+		}
+
+		checkRaster(
+			[0, 100, -100, 50, -50, 100], width: 3,
+			expected: [
+				(0, 0), (0, 0), (100, -800), (33, -800), (19, 1600), (-89, 1600),
+			])
+		checkRaster(
+			[4, -2, 3], width: 1,
+			expected: [(0, 0), (4, -32), (-3, 48)])
+		checkRaster(
+			[100, 0, 0, 0], width: 2,
+			expected: [(0, 0), (100, -800), (80, -800), (0, 800)])
+
+		var defaultNeighbors = DCPredictor.WeightedState(width: 1)
+		var changedZeroWeightNeighbors = DCPredictor.WeightedState(width: 1)
+		let baseline = defaultNeighbors.predict(
+			x: 0, y: 0, north: 2, west: 3, northEast: 4,
+			northWest: 5, northNorth: 6)
+		let changed = changedZeroWeightNeighbors.predict(
+			x: 0, y: 0, north: 2, west: 3, northEast: 4,
+			northWest: -50, northNorth: 60)
+		#expect(changed.guess == baseline.guess)
+		#expect(changed.property == baseline.property)
 	}
 
 	@Test("nonlinear DC uses strict deadzone and even residual transitions", .disabled())
