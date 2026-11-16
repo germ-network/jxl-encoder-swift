@@ -124,23 +124,51 @@ struct JPEGHuffmanTests {
 		#expect(reader16.read(1) == 0)
 	}
 
-	@Test(
-		"lookahead is returned while consumed marker or EOF bits are rejected",
-		.disabled("Pending implementation"))
+	@Test("lookahead is returned while consumed marker or EOF bits are rejected")
 	func consumedBoundaryIsEnforced() throws {
 		var reader = JPEGBitReader(data: [0x40, 0xFF, 0xD9], index: 0)
 		_ = reader.peek(16)
+		_ = reader.peek(8)
 		reader.skip(1)
 		#expect(try reader.finish() == 1)
+
+		var consumedMarker = JPEGBitReader(data: [0x40, 0xFF, 0xD9], index: 0)
+		_ = consumedMarker.peek(16)
+		consumedMarker.skip(9)
+		#expect(throws: JPEGParseError.truncatedEntropyData) {
+			try consumedMarker.finish()
+		}
+
+		var consumedEnd = JPEGBitReader(data: [0x40, 0xFF], index: 0)
+		_ = consumedEnd.peek(16)
+		consumedEnd.skip(9)
+		#expect(throws: JPEGParseError.truncatedEntropyData) { try consumedEnd.finish() }
+
+		let amplitudeTable = try #require(
+			JPEGHuffmanTable(
+				counts: Array(repeating: 0, count: 7) + [1]
+					+ Array(repeating: 0, count: 8),
+				values: [1]))
+		var amplitudeReader = JPEGBitReader(data: [0, 0xFF, 0xD9], index: 0)
+		#expect(try amplitudeTable.decode(&amplitudeReader) == 1)
+		_ = amplitudeReader.read(1)
+		#expect(throws: JPEGParseError.truncatedEntropyData) {
+			try amplitudeReader.finish()
+		}
 	}
 
-	@Test(
-		"stuffed bytes and restart reset preserve the next entropy stream",
-		.disabled("Pending implementation"))
+	@Test("stuffed bytes and restart reset preserve the next entropy stream")
 	func stuffingAndRestartPreserveBits() throws {
 		var reader = JPEGBitReader(data: [0xFF, 0, 0xFF, 0xD0, 0x40, 0xFF, 0xD9], index: 0)
-		#expect(reader.read(8) == 0xFF)
+		_ = reader.peek(16)
+		reader.skip(8)
 		#expect(try reader.finish() == 2)
+
+		var stuffedLookahead = JPEGBitReader(
+			data: [0x40, 0xFF, 0, 0xFF, 0xD9], index: 0)
+		_ = stuffedLookahead.peek(16)
+		#expect(try stuffedLookahead.finish() == 0)
+
 		reader.restart(at: 4)
 		#expect(reader.read(1) == 0)
 		#expect(try reader.finish() == 5)

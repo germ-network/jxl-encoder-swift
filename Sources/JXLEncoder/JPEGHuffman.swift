@@ -124,38 +124,43 @@ struct JPEGHuffmanTable {
 }
 
 /// Bit-level reader over entropy-coded data.
-///
-/// Entropy data carries `FF 00` wherever the compressed bits produce a literal
-/// `FF`; any other `FF xx` is the marker that ends the segment. Once the reader
-/// reaches a marker — or the end of the input — it hands out zero bits and
-/// counts them, so a caller decoding past the end sees `paddedBytes` grow
-/// instead of reading whatever follows the marker.
 struct JPEGBitReader {
 	private let data: [UInt8]
-	/// Next unread byte. After `reachedMarker` this is the marker's `FF`.
 	private(set) var index: Int
 	private var buffer: UInt32 = 0
 	private var bitCount = 0
-	private(set) var paddedBytes = 0
-	private(set) var reachedMarker = false
+	private var markerBoundary: Int
 
 	init(data: [UInt8], index: Int) {
 		self.data = data
 		self.index = index
+		markerBoundary = max(data.count - 2, 0)
 	}
 
 	/// Resumes at `index` after a restart marker: the bit buffer does not carry
-	/// across the marker, and neither does the padding budget.
+	/// across the marker.
 	mutating func restart(at index: Int) {
 		self.index = index
 		buffer = 0
 		bitCount = 0
-		paddedBytes = 0
-		reachedMarker = false
+		markerBoundary = max(data.count - 2, 0)
 	}
 
 	mutating func finish() throws -> Int {
-		fatalError("Unimplemented consumed-bit boundary contract")
+		var unusedBytes = bitCount >> 3
+		while unusedBytes > 0 {
+			index -= 1
+			if index < markerBoundary, index > 0,
+				data[index] == 0, data[index - 1] == 0xFF
+			{
+				index -= 1
+			}
+			unusedBytes -= 1
+		}
+		guard index <= markerBoundary else {
+			throw JPEGParseError.truncatedEntropyData
+		}
+		return index
 	}
 
 	/// `n` must be at most 16, which keeps `bitCount` under 32 bits.
@@ -183,21 +188,18 @@ struct JPEGBitReader {
 	}
 
 	private mutating func nextByte() -> UInt8 {
-		guard !reachedMarker, index < data.count else {
-			paddedBytes += 1
+		guard index < markerBoundary, index < data.count else {
+			index += 1
 			return 0
 		}
 		let byte = data[index]
-		guard byte == 0xFF else {
+		index += 1
+		guard byte == 0xFF else { return byte }
+		if index < data.count, data[index] == 0x00 {
 			index += 1
-			return byte
-		}
-		if index + 1 < data.count, data[index + 1] == 0x00 {
-			index += 2
 			return 0xFF
 		}
-		reachedMarker = true
-		paddedBytes += 1
-		return 0
+		markerBoundary = index - 1
+		return 0xFF
 	}
 }

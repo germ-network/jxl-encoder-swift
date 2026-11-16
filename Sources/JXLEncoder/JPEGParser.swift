@@ -413,16 +413,20 @@ private struct JPEGSegmentParser {
 				counts[i] = Int(try byte())
 				total += counts[i]
 			}
+			guard total <= (isAC ? 256 : 12) else {
+				throw JPEGParseError.invalidHuffmanTable(isAC: isAC, index: table)
+			}
 			guard index + total <= end else {
 				throw JPEGParseError.invalidSegmentLength(marker: 0xC4)
 			}
 			var values = [UInt8](repeating: 0, count: total)
 			for i in 0..<total { values[i] = try byte() }
 
-			// A DC symbol is a magnitude category — a bit count — so it cannot
-			// exceed 15. Anything larger means this is not a DC table.
-			if !isAC, values.contains(where: { $0 > 15 }) {
+			if !isAC, values.contains(where: { $0 > 11 }) {
 				throw JPEGParseError.invalidHuffmanTable(isAC: false, index: table)
+			}
+			guard Set(values).count == values.count else {
+				throw JPEGParseError.invalidHuffmanTable(isAC: isAC, index: table)
 			}
 			guard let built = JPEGHuffmanTable(counts: counts, values: values) else {
 				throw JPEGParseError.invalidHuffmanTable(isAC: isAC, index: table)
@@ -579,6 +583,7 @@ private struct JPEGSegmentParser {
 
 		for mcu in 0..<mcuCount {
 			if restartInterval > 0, mcu > 0, mcu % restartInterval == 0 {
+				_ = try reader.finish()
 				try consumeRestartMarker(&reader, expected: restartsSeen % 8)
 				restartsSeen += 1
 				for i in predictors.indices { predictors[i] = 0 }
@@ -600,13 +605,9 @@ private struct JPEGSegmentParser {
 					dc: dcTables[slot.scan], ac: acTables[slot.scan],
 					predictor: &predictors[slot.component], reader: &reader)
 			}
-
-			guard reader.paddedBytes <= paddingBudget else {
-				throw JPEGParseError.truncatedEntropyData
-			}
 		}
 
-		index = reader.index
+		index = try reader.finish()
 		return frame.components.enumerated().map { c, component in
 			JPEGComponent(
 				identifier: component.identifier,
@@ -644,11 +645,6 @@ private struct JPEGSegmentParser {
 /// frame is bounded by ±1024 times the DCT scale, so this only fires on
 /// malformed data, where it stops the predictor accumulating without bound.
 private let dcLimit: Int32 = 1 << 20
-
-/// The bit reader zero-pads once it reaches a marker or the end of the input.
-/// A few padded bytes are the normal lookahead while finishing the last MCU;
-/// more than that means the entropy data ran out early.
-private let paddingBudget = 8
 
 private func decodeBlock(
 	into plane: inout [Int32], offset: Int,
