@@ -76,10 +76,15 @@ struct JPEGParserTests {
 	@Test("every DHT read stays inside its exact declared segment")
 	func dhtBoundsAreExact() throws {
 		let base = try Self.fixture("small_444")
-		for (payload, length) in [
-			([UInt8(0)], 3), ([UInt8(0)] + [UInt8](repeating: 0, count: 16), 10),
-			([UInt8(0)] + [1] + [UInt8](repeating: 0, count: 15) + [0], 19),
-		] {
+		let selector: [UInt8] = [0]
+		let shortCounts = selector + [UInt8](repeating: 0, count: 16)
+		let missingValueCounts = [UInt8(0), 1] + [UInt8](repeating: 0, count: 15)
+		let cases: [([UInt8], Int)] = [
+			(selector, 3),
+			(shortCounts, 10),
+			(missingValueCounts + [0], 19),
+		]
+		for (payload, length) in cases {
 			let malformed = Self.withDHT(payload, declaredLength: length, in: base)
 			#expect(throws: JPEGParseError.invalidSegmentLength(marker: 0xC4)) {
 				try JPEGParser.parse(malformed)
