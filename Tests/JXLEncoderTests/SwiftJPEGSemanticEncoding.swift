@@ -16,18 +16,23 @@ enum SwiftJPEGSemanticEncoding {
 			blockAlignment: alignment)
 		let blockContextMap = JPEGBlockContextMap.compute(transcode)
 		var counts = [CoeffOrder.ZeroCounts](repeating: .init(), count: 3)
+		var sampler = CoeffOrder.Sampler()
 		for gy in 0..<dim.heightInGroups {
 			for gx in 0..<dim.widthInGroups {
 				let rect = dim.pixelRect(ix: gx, iy: gy, dim: Geometry.groupDim)
 				let groupDim = ImageDim(
 					width: rect.width, height: rect.height,
 					blockAlignment: alignment)
-				ACGroupEncoder.countZerosJPEG(
+				let coefficients = ACGroupEncoder.jpegCoefficientsForOrdering(
 					transcode: transcode,
 					blockX0: gx * Geometry.groupDimInBlocks,
 					blockY0: gy * Geometry.groupDimInBlocks,
 					widthInBlocks: groupDim.widthInBlocks,
-					heightInBlocks: groupDim.heightInBlocks, into: &counts)
+					heightInBlocks: groupDim.heightInBlocks)
+				CoeffOrder.accumulateGroup(
+					coefficients, widthInBlocks: groupDim.widthInBlocks,
+					heightInBlocks: groupDim.heightInBlocks,
+					sampler: &sampler, counts: &counts)
 			}
 		}
 		let coeffOrder = CoeffOrder.compute(

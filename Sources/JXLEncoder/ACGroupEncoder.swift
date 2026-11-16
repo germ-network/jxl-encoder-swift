@@ -390,33 +390,21 @@ extension ACGroupEncoder {
 		transcode: JPEGTranscode, blockX0: Int, blockY0: Int,
 		widthInBlocks: Int, heightInBlocks: Int
 	) -> [[Int32]] {
-		fatalError("Pending packed JPEG ordering coefficients")
-	}
-
-	/// Counts zero coefficients per channel over one group's worth of a JPEG
-	/// transcode's already-parsed coefficients, feeding `CoeffOrder`'s
-	/// frame-global statistics. Unlike the pixel path, a JPEG's coefficients
-	/// are already fully materialized (`transcode.block`), so no separate
-	/// compute pass is needed here — this mirrors `encodeJPEG`'s block
-	/// selection (grayscale skip, MCU-padding bounds) read-only, ahead of the
-	/// real per-group loop that tokenizes.
-	static func countZerosJPEG(
-		transcode: JPEGTranscode,
-		blockX0: Int,
-		blockY0: Int,
-		widthInBlocks: Int,
-		heightInBlocks: Int,
-		into counts: inout [CoeffOrder.ZeroCounts]
-	) {
+		precondition(widthInBlocks >= 0 && heightInBlocks >= 0)
+		let groupSize = widthInBlocks * heightInBlocks * DCT.blockSize
+		var result = (0..<3).map { _ in [Int32]() }
+		for channel in 0..<3 { result[channel].reserveCapacity(groupSize) }
 		let subsampling = transcode.subsampling
 		for by in 0..<heightInBlocks {
 			for bx in 0..<widthInBlocks {
 				for channel in 0..<3 {
+					guard !transcode.isGrayscale || channel == 1 else {
+						continue
+					}
 					guard
 						subsampling.codesBlock(
 							channel: channel, blockX: blockX0 + bx,
-							blockY: blockY0 + by),
-						!(transcode.isGrayscale && channel != 1)
+							blockY: blockY0 + by)
 					else { continue }
 
 					let sourceX = subsampling.subsampledX(
@@ -424,17 +412,25 @@ extension ACGroupEncoder {
 					let sourceY = subsampling.subsampledY(
 						channel: channel, blockY: blockY0 + by)
 					let component = transcode.component(channel)
-					guard
-						sourceX < component.blocksPerLine,
+					if sourceX < component.blocksPerLine,
 						sourceY < component.blocksPerColumn
-					else { continue }
-
-					counts[channel].add(
-						transcode.block(
-							channel: channel, x: sourceX, y: sourceY)[
-								...])
+					{
+						result[channel].append(
+							contentsOf: transcode.block(
+								channel: channel, x: sourceX,
+								y: sourceY))
+					} else {
+						result[channel].append(
+							contentsOf: repeatElement(
+								0, count: DCT.blockSize))
+					}
 				}
 			}
 		}
+		for channel in 0..<3 {
+			result[channel] += repeatElement(
+				0, count: max(0, groupSize - result[channel].count))
+		}
+		return result
 	}
 }

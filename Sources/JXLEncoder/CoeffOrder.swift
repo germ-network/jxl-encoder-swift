@@ -16,11 +16,8 @@
 //  for an 8x8, single-covered-block transform is, position for position,
 //  `ACTokenizer.coeffOrder`.
 //
-//  One deliberate simplification: the reference samples only half the
-//  frame's blocks at this speed tier, via a seeded PRNG, purely as a speed
-//  optimisation. This port counts every block — no PRNG state to carry,
-//  strictly better statistics, and the counting pass is cheap next to the
-//  DCT/quantize work it rides alongside.
+//  Statistics use the source's frame-wide sample stream, so ordering follows
+//  the same groups and coefficient cursor as the encoder's coded data.
 //
 
 enum CoeffOrder {
@@ -42,7 +39,15 @@ enum CoeffOrder {
 		private var state: (UInt64, UInt64) = (0x94D0_49BB_1331_11EB, 0xBF58_476D_1CE4_E5B9)
 
 		mutating func next() -> Bool {
-			fatalError("Pending seeded coefficient sampling")
+			let first = state.0
+			let second = state.1
+			let sample = first &+ second
+			var next = first
+			state.0 = second
+			next ^= next &<< 23
+			next ^= second ^ (next >> 18) ^ (second >> 5)
+			state.1 = next
+			return (sample >> 32) <= 0x7FFF_FFFF
 		}
 	}
 
@@ -50,7 +55,21 @@ enum CoeffOrder {
 		_ coefficients: [[Int32]], widthInBlocks: Int, heightInBlocks: Int,
 		sampler: inout Sampler, counts: inout [ZeroCounts]
 	) {
-		fatalError("Pending sampled coefficient statistics")
+		precondition(coefficients.count == 3 && counts.count == 3)
+		precondition(widthInBlocks >= 0 && heightInBlocks >= 0)
+		var coefficientOffset = 0
+		for _ in 0..<(widthInBlocks * heightInBlocks) where sampler.next() {
+			for channel in 0..<3 {
+				precondition(
+					coefficientOffset + DCT.blockSize
+						<= coefficients[channel].count)
+				counts[channel].add(
+					coefficients[channel][
+						coefficientOffset..<(coefficientOffset
+							+ DCT.blockSize)])
+			}
+			coefficientOffset += DCT.blockSize
+		}
 	}
 
 	static func preparePermutation(_ tokens: [Token]) -> (
@@ -68,7 +87,7 @@ enum CoeffOrder {
 	}
 
 	/// Per-channel accumulator: how often each raster position held a zero
-	/// coefficient, across every block in the frame.
+	/// coefficient in sampled blocks.
 	public struct ZeroCounts: Sendable {
 		var counts = [Int64](repeating: 0, count: DCT.blockSize)
 
@@ -81,21 +100,6 @@ enum CoeffOrder {
 			}
 		}
 
-		/// Adds every block in a flat, block-major coefficient array (as
-		/// `ACGroupEncoder.computeGroup` returns per channel).
-		public mutating func addAll(_ flat: [Int32]) {
-			var start = 0
-			while start < flat.count {
-				add(flat[start..<start + DCT.blockSize])
-				start += DCT.blockSize
-			}
-		}
-
-		/// Combines another group's (or channel's) counts into this one, so
-		/// counting can run per-group and reduce afterwards.
-		mutating func merge(_ other: ZeroCounts) {
-			for k in 0..<DCT.blockSize { counts[k] += other.counts[k] }
-		}
 	}
 
 	struct ChannelOrder {
@@ -112,9 +116,9 @@ enum CoeffOrder {
 	/// that is undefined behaviour in C++ — not worth reproducing when fixing
 	/// the slot directly gives the identical transmitted permutation.
 	static func computeOrder(counts: [Int64]) -> ChannelOrder {
-		let invSqrtSize = 1.0 / Double(DCT.blockSize).squareRoot()
+		let invSqrtSize = 1.0 / Float(DCT.blockSize).squareRoot()
 		func key(rank: Int) -> Int64 {
-			Int64(Double(counts[natural[rank]]) * invSqrtSize + 0.1)
+			Int64(Float(counts[natural[rank]]) * invSqrtSize + 0.1)
 		}
 		let sortedRanks = (1..<DCT.blockSize).sorted { a, b in
 			let ka = key(rank: a)
