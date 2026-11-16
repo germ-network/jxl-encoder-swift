@@ -308,3 +308,70 @@ extension DistanceParamsTests {
 	}
 
 }
+
+extension DistanceParamsTests {
+	@Test
+	func globalScaleUsesSourceOperationOrder() throws {
+		let cases: [(distance: UInt32, q: UInt32, scale: UInt32, globalScale: Int)] = [
+			(0x402D_A9DE, 0x3E95_0FFF, 0x456E_7FFE, 3815),
+			(0x4027_640A, 0x3E9A_A5FF, 0x4577_6FFE, 3958),
+		]
+		for witness in cases {
+			let distance = Float(bitPattern: witness.distance)
+			let params = try DistanceParams(distance: distance)
+			let q = Float(0.79 / Double(distance))
+			let scaled = Float(1 << 16) * (q - 0) / 5
+			#expect(q.bitPattern == witness.q)
+			#expect(scaled.bitPattern == witness.scale)
+			#expect(params.globalScale == witness.globalScale)
+			#expect(Int(scaled) == witness.globalScale)
+		}
+	}
+
+	@Test
+	func dcQuantizationUsesRoundedReciprocal() throws {
+		let params = try DistanceParams(distance: Float(bitPattern: 0x462A_FD83))
+		let qdc = DistanceParams.quantDC(distance: params.distance)
+		let quantizedWithReciprocal = Int(qdc * params.inverseScale + 0.5)
+		let quantizedWithDivision = Int(qdc / params.scale + 0.5)
+		#expect(params.globalScale == 3)
+		#expect(params.quantDC == 18)
+		#expect(quantizedWithReciprocal == 18)
+		#expect(quantizedWithDivision == 17)
+	}
+
+	@Test
+	func globalScaleStaysPositiveAtDCCapFloorBoundary() throws {
+		for bits in [UInt32(0x4760_70FB), 0x4760_70FC, 0x4760_70FD, 0x7F7F_FFFF] {
+			let params = try DistanceParams(distance: Float(bitPattern: bits))
+			#expect(params.globalScale >= 1)
+			#expect(params.scale > 0 && params.scale.isFinite)
+			#expect(params.inverseScale.isFinite)
+		}
+	}
+
+	@Test
+	func positiveFiniteDistancesRemainRepresentable() throws {
+		let boundary = Float(bitPattern: 0x4760_70FC)
+		let resampling = Float(10)
+		let inputs: [Float] = [
+			.leastNonzeroMagnitude, .leastNormalMagnitude,
+			Float(0.03).nextDown, 0.03, Float(0.03).nextUp,
+			resampling.nextDown, resampling, resampling.nextUp, 26,
+			boundary.nextDown, boundary, boundary.nextUp,
+			Float(1 << 55).nextDown, Float(1 << 55), Float(1 << 55).nextUp,
+			Float.greatestFiniteMagnitude,
+		]
+		for input in inputs {
+			let params = try DistanceParams(distance: input)
+			#expect(params.globalScale > 0)
+			#expect(params.scale > 0 && params.scale.isFinite)
+			#expect(params.inverseScale > 0 && params.inverseScale.isFinite)
+			#expect(params.quantDC > 0 && params.quantDC <= 1 << 16)
+			#expect(params.scaleDC > 0 && params.scaleDC.isFinite)
+			#expect(params.uniformQuant > 0)
+			#expect(params.uniformQuant <= DistanceParams.quantMax)
+		}
+	}
+
+}

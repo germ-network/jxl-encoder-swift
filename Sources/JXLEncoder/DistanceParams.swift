@@ -40,15 +40,10 @@ public struct DistanceParams: Equatable, Sendable {
 
 	static let globalScaleDenominator = 1 << 16
 	static let globalScaleNumerator = 4096
-	/// `kCheetah`'s (`-e 4`'s) own literal in the uniform-quant-field branch
-	/// (`enc_heuristics.cc`), not `kAcQuant` (0.765, the adaptive branch's
-	/// constant) or libjxl-tiny's own historically-diverged 0.8.
-	static let acQuant: Float = 0.79
+	/// Denominator used by the source global-scale calculation.
 	static let quantFieldTarget: Float = 5
-	/// `Quantizer::kQuantMax`, minus one: `raw_quant_field` is `ImageI` in
-	/// the reference (int32, no 255 ceiling) but this port stores it as
-	/// `UInt8` — 256 has never been reached at any distance this port's
-	/// corpus covers, so this pre-existing ceiling is left as is.
+	/// The rounded quantizer stays below this storage limit throughout the
+	/// accepted finite-distance domain.
 	static let quantMax: Int = 255
 
 	public init(distance: Float) throws {
@@ -68,22 +63,21 @@ public struct DistanceParams: Equatable, Sendable {
 
 		let dcQuant = Self.quantDC(distance: distance)
 
+		let q = Float(0.79 / Double(distance))
 		var scale =
-			Float(Self.globalScaleDenominator) * Self.acQuant
-			/ (distance * Self.quantFieldTarget)
+			Float(Self.globalScaleDenominator) * (q - 0) / Self.quantFieldTarget
 		scale = clamp1(scale, 1.0, Float(1 << 15))
 
 		// `1.6` is a double literal in the reference, so the product promotes to
 		// double before being truncated.
 		let scaledQuantDC = Int(Double(dcQuant * Float(Self.globalScaleNumerator)) * 1.6)
-		globalScale = clamp1(Int(scale), 1, scaledQuantDC)
+		globalScale = max(1, min(Int(scale), scaledQuantDC))
 
 		self.scale = Float(globalScale) * (1.0 / Float(Self.globalScaleDenominator))
 		inverseScale = 1.0 / self.scale
-		quantDC = clamp1(Int(dcQuant / self.scale + 0.5), 1, 1 << 16)
+		quantDC = clamp1(Int(dcQuant * inverseScale + 0.5), 1, 1 << 16)
 		scaleDC = Float(quantDC) * self.scale
 
-		let q = Self.acQuant / distance
 		uniformQuant = UInt8(clamp1(Int(q * inverseScale + 0.5), 1, Self.quantMax))
 
 		var xScale: UInt32 = 3

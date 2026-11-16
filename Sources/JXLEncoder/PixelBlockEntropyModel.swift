@@ -7,18 +7,21 @@ enum PixelBlockEntropyModel {
 		let total = quantCounts.reduce(0, +)
 		precondition(total > 0)
 
-		let modelSize = Int(Float(1 << 10) * params.distance)
+		let modelSizeFloat = Float(1 << 10) * params.distance
+		guard modelSizeFloat < Float(Int.max) else { return .pixelDefault }
+		let modelSize = Int(modelSizeFloat)
 		if total < modelSize {
 			return JPEGBlockContextMap.Result.pixelDefault
 		}
 
-		let splitSize = Int(Float(1 << 13) * params.distance)
-		let segments = total < splitSize ? 1 : 2
+		let splitSizeFloat = Float(1 << 13) * params.distance
+		let segments =
+			splitSizeFloat >= Float(Int.max) || total < Int(splitSizeFloat) ? 1 : 2
 		var thresholds: [UInt32] = []
 		var cumulative = 0
 		var next = 1
 		var lastCut = 256
-		var cut = total * next / segments
+		var cut = total / segments * next + total % segments * next / segments
 		for quant in 0..<256 {
 			cumulative += quantCounts[quant]
 			if cumulative > cut {
@@ -26,7 +29,9 @@ enum PixelBlockEntropyModel {
 				lastCut = quant
 				while cumulative > cut {
 					next += 1
-					cut = total * next / segments
+					cut =
+						total / segments * next + total % segments * next
+						/ segments
 				}
 			} else if next > thresholds.count + 1,
 				quant > 0, quant - 1 == lastCut
