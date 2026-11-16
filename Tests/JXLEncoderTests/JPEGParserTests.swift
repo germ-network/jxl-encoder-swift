@@ -40,6 +40,11 @@ struct JPEGParserTests {
 				Self.withMarker(0xEE, payload: Self.adobe(1), in: noAPP0)
 			)
 			.hasSupportedColorInterpretation)
+		#expect(
+			try JPEGParser.parse(
+				Self.withMarker(0xEE, payload: Self.adobe(2), in: noAPP0)
+			)
+			.hasSupportedColorInterpretation)
 		let firstWins = Self.withMarkers(
 			[
 				(0xEE, Self.adobe(0)), (0xEE, Self.adobe(1)),
@@ -50,12 +55,30 @@ struct JPEGParserTests {
 				(0xEE, Array(Self.adobe(0).prefix(11))), (0xEE, Self.adobe(1)),
 			], in: noAPP0)
 		#expect(try JPEGParser.parse(invalidThenValid).hasSupportedColorInterpretation)
+		let overlongThenValid = Self.withMarkers(
+			[(0xEE, Self.adobe(0) + [0]), (0xEE, Self.adobe(2))], in: noAPP0)
+		#expect(try JPEGParser.parse(overlongThenValid).hasSupportedColorInterpretation)
+		var wrongSignature = Self.adobe(0)
+		wrongSignature[0] = 0x58
+		#expect(
+			try JPEGParser.parse(
+				Self.withMarker(0xEE, payload: wrongSignature, in: noAPP0)
+			).hasSupportedColorInterpretation)
 		#expect(
 			try JPEGParser.parse(Self.withComponentIDs([0x31, 0x32, 0x33], in: noAPP0))
+				.hasSupportedColorInterpretation)
+		#expect(
+			try JPEGParser.parse(Self.withComponentIDs([0x52, 0x42, 0x47], in: noAPP0))
 				.hasSupportedColorInterpretation)
 
 		let afterScan = Self.withMarkerAfterScan(0xE0, payload: [0], in: rgbIDs)
 		#expect(try JPEGParser.parse(afterScan).hasSupportedColorInterpretation)
+		let afterScanAdobe = Self.withMarkerAfterScan(
+			0xEE, payload: Self.adobe(0), in: noAPP0)
+		#expect(try !JPEGParser.parse(afterScanAdobe).hasSupportedColorInterpretation)
+		let afterScanICC = Self.withMarkerAfterScan(
+			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1], in: noAPP0)
+		#expect(try !JPEGParser.parse(afterScanICC).hasSupportedColorInterpretation)
 		let gray = try Self.fixture("hopper_gray_odd")
 		#expect(
 			try JPEGParser.parse(
@@ -64,6 +87,12 @@ struct JPEGParserTests {
 			.hasSupportedColorInterpretation)
 		#expect(
 			try JPEGParser.parse(rgbIDs).components.map(\.coefficients)
+				== JPEGParser.parse(noAPP0).components.map(\.coefficients))
+		#expect(
+			try JPEGParser.parse(afterScanAdobe).components.map(\.coefficients)
+				== JPEGParser.parse(noAPP0).components.map(\.coefficients))
+		#expect(
+			try JPEGParser.parse(afterScanICC).components.map(\.coefficients)
 				== JPEGParser.parse(noAPP0).components.map(\.coefficients))
 	}
 
