@@ -67,7 +67,6 @@ struct DistanceParamsTests {
 
 	@Test(
 		"non-finite distances throw invalidDistance",
-		.disabled("Pending distance validation implementation"),
 		arguments: [Float.nan, .infinity, -.infinity])
 	func rejectsNonFiniteDistances(distance: Float) {
 		#expect {

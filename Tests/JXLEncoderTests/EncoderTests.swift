@@ -94,7 +94,6 @@ struct EncoderTests {
 
 	@Test(
 		"pixel entry points propagate invalidDistance for non-finite inputs",
-		.disabled("Pending distance validation implementation"),
 		arguments: [Float.nan, .infinity, -.infinity])
 	func rejectsNonFiniteDistances(distance: Float) async throws {
 		let image = try ImageBuffer(width: 1, height: 1, samples: [0, 0, 0])
