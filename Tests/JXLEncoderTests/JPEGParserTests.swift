@@ -745,7 +745,8 @@ struct JPEGParserTests {
 		"matches libjpeg's coefficients",
 		arguments: [
 			"small_444", "small_422", "small_440", "small_411", "hopper_420_odd",
-			"hopper_gray_odd", "scan_420_111", "scan_420_111_restart", "scan_422_21",
+			"hopper_gray_odd", "hopper_gray_2x2_odd", "scan_420_111",
+			"scan_420_111_restart", "scan_422_21",
 			"scan_440_12",
 		])
 	func matchesReference(name: String) throws {
@@ -830,10 +831,7 @@ struct JPEGParserTests {
 		#expect(plain.components[0].blocksPerLine == 13)  // ceil(101 / 8)
 		#expect(plain.components[0].blocksPerColumn == 9)  // ceil(67 / 8)
 
-		var patched = try Self.fixture("hopper_gray_odd")
-		let sampling = try #require(Self.segmentOffset(patched, marker: 0xC0)) + 9
-		patched[sampling] = 0x22
-		let image = try JPEGParser.parse(patched)
+		let image = try JPEGParser.parse(Self.fixture("hopper_gray_2x2_odd"))
 
 		#expect(image.components[0].blocksPerLine == 14)
 		#expect(image.components[0].blocksPerColumn == 10)

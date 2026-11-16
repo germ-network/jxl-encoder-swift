@@ -89,6 +89,10 @@ struct JPEGTranscodeTests {
 		let transcode = try Self.transcode("hopper_gray_odd")
 		#expect(transcode.componentMap == [0, 0, 0])
 		#expect(transcode.subsampling.is444)
+		let sampledGray = try Self.transcode("hopper_gray_2x2_odd")
+		#expect(sampledGray.subsampling.is444)
+		#expect(sampledGray.component(1).blocksPerLine == 14)
+		#expect(sampledGray.component(1).blocksPerColumn == 10)
 	}
 
 	/// JXL transposes the DCT relative to JPEG, so both the coefficients and the

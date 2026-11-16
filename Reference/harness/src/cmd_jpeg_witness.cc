@@ -33,7 +33,7 @@ bool SameCoefficients(const jxl::jpeg::JPEGData& source,
   for (size_t i = 0; i < source.components.size(); ++i) {
     const auto& a = source.components[i];
     const auto& b = decoded.components[i];
-    if (a.h_samp_factor != b.h_samp_factor ||
+    if (a.id != b.id || a.h_samp_factor != b.h_samp_factor ||
         a.v_samp_factor != b.v_samp_factor ||
         a.width_in_blocks != b.width_in_blocks ||
         a.height_in_blocks != b.height_in_blocks ||
@@ -64,6 +64,7 @@ jxl::jpeg::JPEGData CoefficientShell(const jxl::jpeg::JPEGData& source) {
   jxl::jpeg::JPEGData shell;
   shell.components.resize(source.components.size());
   for (size_t i = 0; i < source.components.size(); ++i) {
+    shell.components[i].id = source.components[i].id;
     shell.components[i].quant_idx = source.components[i].quant_idx;
   }
   uint32_t max_quant_idx = 0;
@@ -91,8 +92,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     std::fprintf(stderr, "jpeg-witness: reconstructed coefficients differ\n");
     return false;
   }
-  if (jpeg.components.size() != 3 || frame.header.color_transform != jxl::ColorTransform::kYCbCr ||
-      frame.header.encoding != jxl::FrameEncoding::kVarDCT ||
+  if (frame.header.encoding != jxl::FrameEncoding::kVarDCT ||
       frame.header.passes.num_passes != 1 || frame.state->used_acs != 1) {
     std::fprintf(stderr, "jpeg-witness: unsupported frame configuration\n");
     return false;
@@ -102,6 +102,28 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
   if (jpeg.width != static_cast<int>(frame.header.default_xsize()) ||
       jpeg.height != static_cast<int>(frame.header.default_ysize())) {
     std::fprintf(stderr, "jpeg-witness: source/reference dimensions differ\n");
+    return false;
+  }
+  if (jpeg.components.size() == 1) {
+    jxl::YCbCrChromaSubsampling source_sampling;
+    JXL_RETURN_IF_ERROR(
+        jxl::jpeg::SetChromaSubsamplingFromJpegData(jpeg, &source_sampling));
+    for (size_t c = 0; c < 3; ++c) {
+      if (source_sampling.HShift(c) != frame.header.chroma_subsampling.HShift(c) ||
+          source_sampling.VShift(c) != frame.header.chroma_subsampling.VShift(c)) {
+        std::fprintf(stderr, "jpeg-witness: grayscale sampling differs\n");
+        return false;
+      }
+    }
+    out->Integers("jpeg_context.reconstructed_coefficients_exact", {1});
+    out->Integers("jpeg_context.size",
+                  {static_cast<int64_t>(dim.xsize_blocks),
+                   static_cast<int64_t>(dim.ysize_blocks)});
+    return true;
+  }
+  if (jpeg.components.size() != 3 ||
+      frame.header.color_transform != jxl::ColorTransform::kYCbCr) {
+    std::fprintf(stderr, "jpeg-witness: unsupported frame configuration\n");
     return false;
   }
   jxl::YCbCrChromaSubsampling source_sampling;

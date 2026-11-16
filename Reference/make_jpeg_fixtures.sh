@@ -102,6 +102,15 @@ cjpeg -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/display_p
 cjpeg -quality 90 -sample 4x1 -outfile "$CORE/small_411.jpg" "$WORK/small.ppm"
 cjpeg -quality 85 -sample 2x2 -restart 3 -outfile "$CORE/hopper_420_odd.jpg" "$WORK/odd.ppm"
 cjpeg -quality 85 -grayscale -outfile "$CORE/hopper_gray_odd.jpg" "$WORK/odd.ppm"
+cp "$CORE/hopper_gray_odd.jpg" "$CORE/hopper_gray_2x2_odd.jpg"
+python3 - "$CORE/hopper_gray_2x2_odd.jpg" <<'PY'
+import sys
+path = sys.argv[1]
+data = bytearray(open(path, "rb").read())
+frame = next(i for i in range(2, len(data) - 1) if data[i] == 0xFF and data[i + 1] in (0xC0, 0xC1))
+data[frame + 4 + 6 + 1] = 0x22
+open(path, "wb").write(data)
+PY
 # Sequential scan partitions exercise interleaved and non-interleaved MCU grids.
 printf '2; 0; 1;\n' > "$WORK/scans_111.txt"
 printf '0 1; 2;\n' > "$WORK/scans_21.txt"
@@ -208,7 +217,7 @@ cjpeg -quality 80 -progressive -outfile "$CORE/reject_progressive.jpg" "$WORK/ti
 cjpeg -quality 80 -arithmetic -outfile "$CORE/reject_arithmetic.jpg" "$WORK/tiny.ppm"
 cjpeg -lossless 1 -outfile "$CORE/reject_lossless.jpg" "$WORK/tiny.ppm"
 
-for name in small_444 small_422 small_440 small_411 hopper_420_odd hopper_gray_odd \
+for name in small_444 small_422 small_440 small_411 hopper_420_odd hopper_gray_odd hopper_gray_2x2_odd \
 	scan_420_111 scan_420_111_restart scan_422_21 scan_440_12; do
 	"$OUT/dump_jpeg_coefficients" "$CORE/$name.jpg" "$CORE/$name.coef"
 done
@@ -237,6 +246,7 @@ cjpeg -quality 85 -sample 2x1 -outfile "$APPLE/hopper_422.jpg" "$WORK/full.ppm"
 cjpeg -quality 95 -sample 4x1 -outfile "$APPLE/hopper_411.jpg" "$WORK/full.ppm"
 cp "$CORE/hopper_420_restart.jpg" "$CORE/hopper_420_odd.jpg" \
 	"$CORE/hopper_gray_odd.jpg" "$CORE/hopper_420_sof1.jpg" \
+	"$CORE/hopper_gray_2x2_odd.jpg" \
 	"$CORE/small_422.jpg" "$CORE/small_440.jpg" "$CORE/small_444.jpg" \
 	"$CORE/reject_arithmetic.jpg" "$CORE/reject_progressive.jpg" \
 	"$CORE/scan_420_111.jpg" "$CORE/scan_420_111_restart.jpg" \

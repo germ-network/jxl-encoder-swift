@@ -20,6 +20,7 @@
 			for name in [
 				"scan_420_111", "scan_420_111_restart", "scan_422_21",
 				"scan_440_12", "scan_420_111_dqt_redefined",
+				"hopper_gray_2x2_odd",
 			] {
 				for optimize in [true, false] {
 					let error = try Self.meanError(name, optimize: optimize)

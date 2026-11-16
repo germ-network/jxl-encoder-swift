@@ -17,6 +17,7 @@
 				("scan_422_21", "scan_422_21"),
 				("scan_440_12", "scan_440_12"),
 				("scan_420_111_dqt_redefined", "scan_420_111_dqt_canonical"),
+				("hopper_gray_2x2_odd", "hopper_gray_2x2_odd"),
 			] {
 				let source = try JPEGParserTests.fixture(name)
 				let transcode = try JPEGTranscode(JPEGParser.parse(source))
