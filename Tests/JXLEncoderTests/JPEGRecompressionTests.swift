@@ -6,6 +6,20 @@ import Testing
 /// point, and JPEG XL signature detection.
 @Suite("Portable JPEG recompression")
 struct PortableJPEGRecompressionTests {
+
+	@Test(
+		"unsupported JPEG color interpretation returns nil")
+	func unsupportedColorFallsBack() throws {
+		let rgb = try JPEGParserTests.fixture("rgb_color")
+		let profile = try JPEGParserTests.fixture("display_p3_profile")
+		#expect(Encoder.recompressJPEG(rgb) == nil)
+		#expect(Encoder.recompressJPEG(profile) == nil)
+		#expect(Encoder.recompressJPEG(try JPEGParserTests.fixture("small_444")) != nil)
+		#expect(
+			Encoder.recompressJPEG(try JPEGParserTests.fixture("hopper_gray_odd"))
+				!= nil)
+	}
+
 	@Test(
 		"DC boundary JPEGs recompress through the public API",
 		arguments: [-1025, -1024, -1023, 1023, 1024]

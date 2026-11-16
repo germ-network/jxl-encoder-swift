@@ -18,6 +18,112 @@
 	/// nothing would otherwise look like a pass.
 	@Suite("JPEG recompression through the shim")
 	struct JPEGRecompressionTests {
+
+		@Test(
+			"RGB and profiled JPEG fallback preserves decoded colors")
+		func colorFallbackMatchesDecodedSource() throws {
+			for name in ["rgb_color", "display_p3_profile"] {
+				let source = try Self.fixture(name)
+				let output = try JXLEncoderApple.encode(data: source)
+				try Self.expectColorPreserved(
+					output, source: source,
+					profileFixture: name == "display_p3_profile")
+			}
+		}
+
+		@Test(
+			"concurrent RGB and profiled JPEG fallback preserves decoded colors")
+		func concurrentColorFallbackMatchesDecodedSource() async throws {
+			for name in ["rgb_color", "display_p3_profile"] {
+				let source = try Self.fixture(name)
+				let output = try await JXLEncoderApple.encodeConcurrently(
+					data: source)
+				try Self.expectColorPreserved(
+					output, source: source,
+					profileFixture: name == "display_p3_profile")
+			}
+		}
+
+		static func expectColorPreserved(_ output: Data, source: Data, profileFixture: Bool)
+			throws
+		{
+			let actual = try #require(Self.samples(output))
+			let reference = try #require(Self.samples(source))
+			#expect(actual.width == reference.width)
+			#expect(actual.height == reference.height)
+			let channels = 3
+			for channel in 0..<channels {
+				let errors = stride(
+					from: channel, to: reference.rgb.count, by: channels
+				).map {
+					abs(Int(actual.rgb[$0]) - Int(reference.rgb[$0]))
+				}
+				let mean = Double(errors.reduce(0, +)) / Double(errors.count)
+				#expect(mean < 5, "channel \(channel) mean error \(mean)")
+			}
+			var saturatedPatches = 0
+			for patchY in 0..<4 {
+				for patchX in 0..<4 {
+					var sourceMean = [Int](repeating: 0, count: channels)
+					var outputMean = [Int](repeating: 0, count: channels)
+					for y in (patchY * 48 + 20)..<(patchY * 48 + 28) {
+						for x in (patchX * 48 + 20)..<(patchX * 48 + 28) {
+							let start =
+								(y * reference.width + x) * channels
+							for channel in 0..<channels {
+								sourceMean[channel] += Int(
+									reference.rgb[
+										start + channel])
+								outputMean[channel] += Int(
+									actual.rgb[start + channel])
+							}
+						}
+					}
+					sourceMean = sourceMean.map { $0 / 64 }
+					outputMean = outputMean.map { $0 / 64 }
+					if sourceMean.max()! - sourceMean.min()! > 100 {
+						saturatedPatches += 1
+					}
+					for channel in 0..<channels {
+						#expect(
+							abs(
+								outputMean[channel]
+									- sourceMean[channel]) < 16)
+					}
+				}
+			}
+			#expect(saturatedPatches >= 8, "fixture lacks asymmetric saturated patches")
+			if profileFixture {
+				let unprofiled = Self.withoutICC(source)
+				let unprofiledSamples = try #require(Self.samples(unprofiled))
+				let difference =
+					zip(reference.rgb, unprofiledSamples.rgb).reduce(0.0) {
+						$0 + abs(Double($1.0) - Double($1.1))
+					} / Double(reference.rgb.count)
+				#expect(difference > 1, "ICC conversion was not observable")
+			}
+		}
+
+		static func withoutICC(_ data: Data) -> Data {
+			let bytes = [UInt8](data)
+			var index = 2
+			while index + 4 <= bytes.count, bytes[index] == 0xFF {
+				let marker = bytes[index + 1]
+				let length = (Int(bytes[index + 2]) << 8) | Int(bytes[index + 3])
+				let end = index + 2 + length
+				guard end <= bytes.count else { return data }
+				if marker == 0xE2,
+					bytes[index + 4..<min(index + 16, end)].starts(
+						with: Array("ICC_PROFILE\0".utf8))
+				{
+					return Data(Array(bytes[..<index]) + Array(bytes[end...]))
+				}
+				if marker == 0xDA { return data }
+				index = end
+			}
+			return data
+		}
+
 		/// Everything the transcode should handle.
 		static let recompressible = [
 			"hopper_444", "hopper_422", "hopper_420_restart", "hopper_420_odd",
@@ -29,7 +135,10 @@
 		/// 4:1:1 needs a subsampling shift of two and JXL carries a two-bit mode;
 		/// `cjxl --lossless_jpeg=1` refuses the same file. The other two are
 		/// entropy coders the parser does not implement.
-		static let mustFallBack = ["hopper_411", "reject_progressive", "reject_arithmetic"]
+		static let mustFallBack = [
+			"hopper_411", "reject_progressive", "reject_arithmetic", "rgb_color",
+			"display_p3_profile",
+		]
 
 		static func fixture(_ name: String) throws -> Data {
 			let url = try #require(

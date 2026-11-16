@@ -8,6 +8,21 @@ import Testing
 /// as swapped colours or a transposed image rather than as a coding error.
 @Suite("JPEG transcode layout")
 struct JPEGTranscodeTests {
+
+	@Test(
+		"unsupported color interpretation cannot enter coefficient coding")
+	func unsupportedColorInterpretation() throws {
+		let rgb = try JPEGParserTests.fixture("rgb_color")
+		let profile = try JPEGParserTests.fixture("display_p3_profile")
+		for bytes in [rgb, profile] {
+			let image = try JPEGParser.parse(bytes)
+			#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation)
+			{
+				try JPEGTranscode(image)
+			}
+		}
+	}
+
 	static func transcode(_ name: String) throws -> JPEGTranscode {
 		try JPEGTranscode(try JPEGParser.parse(try JPEGParserTests.fixture(name)))
 	}

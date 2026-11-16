@@ -23,6 +23,8 @@ public struct JPEGTranscode {
 	public let isGrayscale: Bool
 
 	public enum TranscodeError: Error, Equatable, Sendable {
+		/// Color interpretation the current coefficient writer cannot preserve.
+		case unsupportedColorInterpretation
 		/// Sampling factors JXL cannot express: it carries a 2-bit mode per
 		/// channel, not arbitrary factors.
 		case unsupportedSubsampling
@@ -32,6 +34,9 @@ public struct JPEGTranscode {
 	}
 
 	public init(_ image: JPEGImage) throws {
+		guard image.hasSupportedColorInterpretation else {
+			throw TranscodeError.unsupportedColorInterpretation
+		}
 		let count = image.components.count
 		switch count {
 		case 1:
