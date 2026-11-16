@@ -75,12 +75,14 @@ enum SwiftSemanticEncoding {
 	}
 	private static func compose(
 		width: Int, height: Int, distance: Float, transfer: TransferFunction,
-		stripeAt: @Sendable (Rect) -> PaddedStripe, altering: Alterations
+		stripeAt: @escaping @Sendable (Rect) -> PaddedStripe, altering: Alterations
 	) throws -> Result {
 		let params = try DistanceParams(distance: distance)
+		let pixelFrame = Encoder.preparePixelFrame(
+			stripeAt: stripeAt, width: width, height: height, params: params)
 		let loopFilter = FrameAssembly.LoopFilter(
 			gaborish: false, epfIterations: params.epfIterations)
-		let dim = ImageDim(width: width, height: height)
+		let dim = pixelFrame.dim
 		var writer = BitWriter()
 		try ImageHeader.write(
 			width: width, height: height, transferFunction: transfer, to: &writer)
@@ -93,7 +95,8 @@ enum SwiftSemanticEncoding {
 		for i in acRange { sections[i] = SectionWriter(mode: .staging(acCode)) }
 		let computes = (0..<dim.groupCount).map {
 			Encoder.computeACGroup(
-				stripeAt: stripeAt, dim: dim, groupX: $0 % dim.widthInGroups,
+				xybAt: pixelFrame.xybAt, dim: dim,
+				groupX: $0 % dim.widthInGroups,
 				groupY: $0 / dim.widthInGroups, params: params)
 		}
 		var order = Encoder.computeCoeffOrder(computes, dim: dim)
@@ -149,6 +152,7 @@ enum SwiftSemanticEncoding {
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
 			loopFilter: loopFilter,
+			upsampling: params.upsampling,
 			writer: &writer)
 		FrameAssembly.combineSections(sections.map { $0.finished() }, writer: &writer)
 		writer.zeroPadToByte()
@@ -179,9 +183,16 @@ extension SemanticDump {
 	/// harness's decoder-side dumpers write for the same categories.
 	init(swiftDecisions decisions: SwiftFrameDecisions) throws {
 		self.init()
-		try recordACEntropyCode(decisions.acCode)
-		let dim = ImageDim(width: decisions.width, height: decisions.height)
 		let params = decisions.params
+		let dim = ImageDim(
+			width: Geometry.divCeil(decisions.width, decisions.params.upsampling),
+			height: Geometry.divCeil(decisions.height, decisions.params.upsampling))
+		guard
+			let pixelGroups = decisions.pixelGroups,
+			pixelGroups.count == dim.groupCount,
+			decisions.quantFields.count == dim.groupCount
+		else { throw SemanticDumpError.unimplemented }
+		try recordACEntropyCode(decisions.acCode)
 		record("frame.encoding", .integers([0]))
 		record("frame.groups", .integers([Int64(dim.groupCount)]))
 		record("frame.dc_groups", .integers([Int64(dim.dcGroupCount)]))

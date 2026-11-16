@@ -159,7 +159,6 @@ struct PixelSemanticFixtureTests {
 		let swiftEPF = try distances.map {
 			Int64(try DistanceParams(distance: $0).epfIterations)
 		}
-		let epfIssues: Set<Int> = [43, 44]
 		for index in distances.indices {
 			let distance = distances[index]
 			#expect(
@@ -168,17 +167,9 @@ struct PixelSemanticFixtureTests {
 			#expect(
 				swiftXScale[index] == xScale[index],
 				"X matrix scale at \(distance)")
-			if epfIssues.contains(index) {
-				withKnownIssue(Comment(rawValue: "GER-3387")) {
-					#expect(
-						swiftEPF[index] == epf[index],
-						"EPF iterations at \(distance)")
-				}
-			} else {
-				#expect(
-					swiftEPF[index] == epf[index],
-					"EPF iterations at \(distance)")
-			}
+			#expect(
+				swiftEPF[index] == epf[index],
+				"EPF iterations at \(distance)")
 			#expect(bScale[index] == 2, "B matrix scale at \(distance)")
 		}
 	}

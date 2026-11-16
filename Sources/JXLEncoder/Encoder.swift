@@ -87,20 +87,16 @@ public enum Encoder {
 		let quantField: [UInt8]
 	}
 
-	/// Computes one AC group's coefficients: colour transform, forward DCT
-	/// and quantization — everything except tokenization.
+	/// Computes one AC group's coefficients: forward DCT and quantization.
 	///
-	/// This is where nearly all the per-pixel cost sits, and it reads nothing but
-	/// `stripeAt` and the geometry — groups never see each other. Separating it
+	/// This is where nearly all the per-pixel cost sits, and it reads only its
+	/// XYB source and geometry — groups never see each other. Separating it
 	/// from assembly is what lets them run concurrently.
 	///
-	/// `stripeAt` yields one padded, linear stripe for a pixel rect. Production
-	/// supplies a closure that linearizes 8-bit samples on the fly
-	/// (`copyAndPadLinearizing`), so the whole-image linear plane never exists;
-	/// the stage-dump tests supply one that reads pre-linearized floats. Either
-	/// way it is called once per stripe with disjoint rects, so it must be pure.
+	/// `xybAt` returns globally prepared XYB stripes, so group edges never become
+	/// independent filter boundaries.
 	static func computeACGroup(
-		stripeAt: @Sendable (Rect) -> PaddedStripe,
+		xybAt: @Sendable (Rect) -> PaddedStripe,
 		dim: ImageDim,
 		groupX imageGX: Int,
 		groupY imageGY: Int,
@@ -133,8 +129,7 @@ public enum Encoder {
 				maxWidth: Geometry.groupDim,
 				maxHeight: Geometry.tileDim,
 				xEnd: dim.width, yEnd: dim.height)
-			let padded = stripeAt(stripeRect)
-			let xyb = AdaptiveQuantPipeline.toXYB(padded)
+			let padded = xybAt(stripeRect)
 
 			// Keep the group's XYB so the AC pass sees the same values.
 			let rowOffset =
@@ -150,7 +145,7 @@ public enum Encoder {
 					}
 					for x in 0..<padded.width {
 						xybPlanes[c][destRow + x] =
-							xyb.planes[c][
+							padded.planes[c][
 								y * padded.width + x
 							]
 					}
@@ -322,13 +317,12 @@ public enum Encoder {
 	}
 
 	static func encodeFrame(
-		stripeAt: @Sendable (Rect) -> PaddedStripe,
-		width: Int, height: Int,
+		pixelFrame: PixelFrameInput,
 		params: DistanceParams,
 		optimizeCodes: Bool = true,
 		writer: inout BitWriter
 	) throws {
-		let dim = ImageDim(width: width, height: height)
+		let dim = pixelFrame.dim
 		var dcCode = EntropyCode.staticDC
 		var acCode = EntropyCode.staticAC
 
@@ -352,7 +346,7 @@ public enum Encoder {
 		for index in 0..<dim.groupCount {
 			computes.append(
 				computeACGroup(
-					stripeAt: stripeAt, dim: dim,
+					xybAt: pixelFrame.xybAt, dim: dim,
 					groupX: index % dim.widthInGroups,
 					groupY: index / dim.widthInGroups,
 					params: params))
@@ -441,6 +435,7 @@ public enum Encoder {
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
 			loopFilter: .init(gaborish: false, epfIterations: params.epfIterations),
+			upsampling: params.upsampling,
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)
@@ -457,14 +452,16 @@ public enum Encoder {
 		optimizeCodes: Bool = true
 	) throws -> [UInt8] {
 		let params = try DistanceParams(distance: distance)
+		let pixelFrame = preparePixelFrame(
+			stripeAt: linearizingStripeSource(image),
+			width: image.width, height: image.height, params: params)
 
 		var writer = BitWriter()
 		try ImageHeader.write(
 			width: image.width, height: image.height,
 			transferFunction: transferFunction, to: &writer)
 		try encodeFrame(
-			stripeAt: linearizingStripeSource(image),
-			width: image.width, height: image.height,
+			pixelFrame: pixelFrame,
 			params: params, optimizeCodes: optimizeCodes, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
@@ -488,8 +485,10 @@ extension Encoder {
 		optimizeCodes: Bool = true
 	) async throws -> [UInt8] {
 		let params = try DistanceParams(distance: distance)
-		let stripeAt = linearizingStripeSource(image)
-		let dim = ImageDim(width: image.width, height: image.height)
+		let pixelFrame = preparePixelFrame(
+			stripeAt: linearizingStripeSource(image),
+			width: image.width, height: image.height, params: params)
+		let dim = pixelFrame.dim
 
 		var writer = BitWriter()
 		try ImageHeader.write(
@@ -511,7 +510,7 @@ extension Encoder {
 			for index in 0..<dim.groupCount {
 				group.addTask {
 					computeACGroup(
-						stripeAt: stripeAt, dim: dim,
+						xybAt: pixelFrame.xybAt, dim: dim,
 						groupX: index % dim.widthInGroups,
 						groupY: index / dim.widthInGroups,
 						params: params)
@@ -607,6 +606,7 @@ extension Encoder {
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
 			loopFilter: .init(gaborish: false, epfIterations: params.epfIterations),
+			upsampling: params.upsampling,
 			writer: &writer)
 		FrameAssembly.combineSections(
 			sections.map { $0.finished() }, writer: &writer)
@@ -888,13 +888,6 @@ extension Encoder {
 }
 
 extension Encoder {
-	static func computeACGroup(
-		xybAt: @Sendable (Rect) -> PaddedStripe,
-		dim: ImageDim, groupX: Int, groupY: Int, params: DistanceParams
-	) -> ACGroupCompute {
-		fatalError("Unimplemented contract")
-	}
-
 	struct PixelFrameInput: Sendable {
 		let dim: ImageDim
 		let xybAt: @Sendable (Rect) -> PaddedStripe
@@ -904,12 +897,218 @@ extension Encoder {
 		stripeAt: @escaping @Sendable (Rect) -> PaddedStripe,
 		width: Int, height: Int, params: DistanceParams
 	) -> PixelFrameInput {
-		fatalError("Unimplemented contract")
+		precondition(width > 0 && height > 0)
+		if params.upsampling == 1 {
+			return PixelFrameInput(
+				dim: ImageDim(width: width, height: height),
+				xybAt: { AdaptiveQuantPipeline.toXYB(stripeAt($0)) })
+		}
+
+		let original = stripeAt(Rect(x0: 0, y0: 0, width: width, height: height))
+		let downsampled = PixelDownsampler.downsample2(
+			AdaptiveQuantPipeline.toXYB(original))
+		let storage = paddedPixelStorage(downsampled)
+		return PixelFrameInput(
+			dim: ImageDim(
+				width: Geometry.divCeil(width, 2),
+				height: Geometry.divCeil(height, 2)),
+			xybAt: { rect in Self.copyPixelStorage(storage, rect: rect) })
+	}
+
+	private static func paddedPixelStorage(_ image: PaddedStripe) -> PaddedStripe {
+		let width = Geometry.roundUp(image.width, to: Geometry.blockDim)
+		let height = Geometry.roundUp(image.height, to: Geometry.blockDim)
+		let planes = image.planes.map { plane in
+			var padded = [Float](repeating: 0, count: width * height)
+			for y in 0..<height {
+				let sourceY = min(y, image.height - 1)
+				for x in 0..<width {
+					padded[y * width + x] =
+						plane[
+							sourceY * image.width
+								+ min(x, image.width - 1)]
+				}
+			}
+			return padded
+		}
+		return PaddedStripe(width: width, height: height, planes: planes)
+	}
+
+	private static func copyPixelStorage(
+		_ image: PaddedStripe, rect: Rect
+	) -> PaddedStripe {
+		let width = Geometry.roundUp(rect.width, to: Geometry.blockDim)
+		let height = Geometry.roundUp(rect.height, to: Geometry.blockDim)
+		let planes = image.planes.map { plane in
+			var output = [Float](repeating: 0, count: width * height)
+			for y in 0..<height {
+				let sourceY = min(rect.y0 + y, image.height - 1)
+				for x in 0..<width {
+					let sourceX = min(rect.x0 + x, image.width - 1)
+					output[y * width + x] =
+						plane[sourceY * image.width + sourceX]
+				}
+			}
+			return output
+		}
+		return PaddedStripe(width: width, height: height, planes: planes)
 	}
 }
 
 enum PixelDownsampler {
+	static let kernel: [Float] = [
+		-0.000314256996835, -0.000314256996835, -0.000897597057705,
+		-0.000562751488849, -0.000176807273646, 0.001864627368902,
+		0.001864627368902, -0.000176807273646, -0.000562751488849,
+		-0.000897597057705, -0.000314256996835, -0.000314256996835,
+		-0.000314256996835, -0.001527942804748, -0.000121760530512,
+		0.000191123989093, 0.010193185932466, 0.058637519197110,
+		0.058637519197110, 0.010193185932466, 0.000191123989093,
+		-0.000121760530512, -0.001527942804748, -0.000314256996835,
+		-0.000897597057705, -0.000121760530512, 0.000946363683751,
+		0.007113577630288, 0.000437956841058, -0.000372823835211,
+		-0.000372823835211, 0.000437956841058, 0.007113577630288,
+		0.000946363683751, -0.000121760530512, -0.000897597057705,
+		-0.000562751488849, 0.000191123989093, 0.007113577630288,
+		0.044592622228814, 0.000222278879007, -0.162864473015945,
+		-0.162864473015945, 0.000222278879007, 0.044592622228814,
+		0.007113577630288, 0.000191123989093, -0.000562751488849,
+		-0.000176807273646, 0.010193185932466, 0.000437956841058,
+		0.000222278879007, -0.000913092543974, -0.017071696107902,
+		-0.017071696107902, -0.000913092543974, 0.000222278879007,
+		0.000437956841058, 0.010193185932466, -0.000176807273646,
+		0.001864627368902, 0.058637519197110, -0.000372823835211,
+		-0.162864473015945, -0.017071696107902, 0.414660099370354,
+		0.414660099370354, -0.017071696107902, -0.162864473015945,
+		-0.000372823835211, 0.058637519197110, 0.001864627368902,
+		0.001864627368902, 0.058637519197110, -0.000372823835211,
+		-0.162864473015945, -0.017071696107902, 0.414660099370354,
+		0.414660099370354, -0.017071696107902, -0.162864473015945,
+		-0.000372823835211, 0.058637519197110, 0.001864627368902,
+		-0.000176807273646, 0.010193185932466, 0.000437956841058,
+		0.000222278879007, -0.000913092543974, -0.017071696107902,
+		-0.017071696107902, -0.000913092543974, 0.000222278879007,
+		0.000437956841058, 0.010193185932466, -0.000176807273646,
+		-0.000562751488849, 0.000191123989093, 0.007113577630288,
+		0.044592622228814, 0.000222278879007, -0.162864473015945,
+		-0.162864473015945, 0.000222278879007, 0.044592622228814,
+		0.007113577630288, 0.000191123989093, -0.000562751488849,
+		-0.000897597057705, -0.000121760530512, 0.000946363683751,
+		0.007113577630288, 0.000437956841058, -0.000372823835211,
+		-0.000372823835211, 0.000437956841058, 0.007113577630288,
+		0.000946363683751, -0.000121760530512, -0.000897597057705,
+		-0.000314256996835, -0.001527942804748, -0.000121760530512,
+		0.000191123989093, 0.010193185932466, 0.058637519197110,
+		0.058637519197110, 0.010193185932466, 0.000191123989093,
+		-0.000121760530512, -0.001527942804748, -0.000314256996835,
+		-0.000314256996835, -0.000314256996835, -0.000897597057705,
+		-0.000562751488849, -0.000176807273646, 0.001864627368902,
+		0.001864627368902, -0.000176807273646, -0.000562751488849,
+		-0.000897597057705, -0.000314256996835, -0.000314256996835,
+	]
+
 	static func downsample2(_ xyb: PaddedStripe) -> PaddedStripe {
-		fatalError("Unimplemented contract")
+		let width = Geometry.divCeil(xyb.width, 2)
+		let height = Geometry.divCeil(xyb.height, 2)
+		let box = xyb.planes.map { boxDownsample($0, width: xyb.width, height: xyb.height) }
+		let masks = box.map { createMask($0, width: width, height: height) }
+		let planes = xyb.planes.indices.map { channel -> [Float] in
+			let input = xyb.planes[channel]
+			let mask = masks[channel]
+			var output = [Float](repeating: 0, count: width * height)
+			for y in 0..<height {
+				for x in 0..<width {
+					var minValue = Float.greatestFiniteMagnitude
+					// The source uses the smallest positive normal value here.
+					var maxValue = Float.leastNormalMagnitude
+					for ky in 5..<7 {
+						let iy = clampIndex(
+							y * 2 + ky - 5, limit: xyb.height)
+						for kx in 5..<7 {
+							let ix = clampIndex(
+								x * 2 + kx - 5, limit: xyb.width)
+							let value = input[iy * xyb.width + ix]
+							minValue = min(minValue, value)
+							maxValue = max(maxValue, value)
+						}
+					}
+
+					var sum: Float = 0
+					for ky in 0..<12 {
+						let iy = clampIndex(
+							y * 2 + ky - 5, limit: xyb.height)
+						let inputRow = iy * xyb.width
+						for kx in 0..<12 {
+							let ix = clampIndex(
+								x * 2 + kx - 5, limit: xyb.width)
+							sum +=
+								input[inputRow + ix]
+								* Self.kernel[ky * 12 + kx]
+						}
+					}
+
+					let a = mask[y * width + x]
+					let clipMin = minValue - a
+					let clipMax = maxValue + a
+					output[y * width + x] = min(max(sum, clipMin), clipMax)
+				}
+			}
+			return output
+		}
+		return PaddedStripe(width: width, height: height, planes: planes)
+	}
+
+	private static func boxDownsample(_ input: [Float], width: Int, height: Int) -> [Float] {
+		let outWidth = Geometry.divCeil(width, 2)
+		let outHeight = Geometry.divCeil(height, 2)
+		var output = [Float](repeating: 0, count: outWidth * outHeight)
+		for y in 0..<outHeight {
+			for x in 0..<outWidth {
+				var sum: Float = 0
+				var count: Float = 0
+				for dy in 0..<2 where y * 2 + dy < height {
+					for dx in 0..<2 where x * 2 + dx < width {
+						sum += input[(y * 2 + dy) * width + x * 2 + dx]
+						count += 1
+					}
+				}
+				output[y * outWidth + x] = sum / count
+			}
+		}
+		return output
+	}
+
+	private static func createMask(_ image: [Float], width: Int, height: Int) -> [Float] {
+		var mask = [Float](repeating: 0, count: width * height)
+		for y in 0..<height {
+			for x in 0..<width {
+				let center = image[y * width + x]
+				let west = image[y * width + max(x - 1, 0)]
+				let east = image[y * width + min(x + 1, width - 1)]
+				let north = image[max(y - 1, 0) * width + x]
+				let south = image[min(y + 1, height - 1) * width + x]
+				var min1 = Float.greatestFiniteMagnitude
+				var min2 = Float.greatestFiniteMagnitude
+				for difference in [
+					abs(center - west), abs(center - east), abs(center - north),
+					abs(center - south),
+				] {
+					if difference < min2 {
+						if difference < min1 {
+							min2 = min1
+							min1 = difference
+						} else {
+							min2 = difference
+						}
+					}
+				}
+				mask[y * width + x] = min2
+			}
+		}
+		return mask
+	}
+
+	private static func clampIndex(_ index: Int, limit: Int) -> Int {
+		min(max(index, 0), limit - 1)
 	}
 }
