@@ -36,3 +36,5 @@ jobs:
           swift-version: '6.3'
       - name: Build portable core for Android
         run: ${{ steps.android.outputs.swift-build }} --target JXLEncoder
+      - name: Build Dispatch adapter for Android
+        run: ${{ steps.android.outputs.swift-build }} --target JXLEncoderDispatch
