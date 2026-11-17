@@ -12,7 +12,11 @@
 			alphaPolicy: AlphaPolicy = .flatten(background: defaultBackground),
 			runner: any ParallelRunner
 		) throws -> Data {
-			fatalError("Synchronous parallel image encoding is not implemented")
+			guard runner.maximumWorkers > 0 else {
+				throw EncoderError.invalidWorkerCount(runner.maximumWorkers)
+			}
+			let buffer = try imageBuffer(from: image, alphaPolicy: alphaPolicy)
+			return Data(try Encoder.encode(buffer, distance: distance, runner: runner))
 		}
 
 		/// Encodes image data synchronously using bounded internal parallelism.
@@ -28,7 +32,17 @@
 			maxSourceBytes: Int = defaultMaxSourceBytes,
 			runner: any ParallelRunner
 		) throws -> Data {
-			fatalError("Synchronous parallel data encoding is not implemented")
+			guard runner.maximumWorkers > 0 else {
+				throw EncoderError.invalidWorkerCount(runner.maximumWorkers)
+			}
+			if maxPixelSize == nil, let recompressed = recompressedJPEG(data) {
+				return recompressed
+			}
+			let image = try decodedImage(
+				data: data, maxPixelSize: maxPixelSize,
+				maxSourceBytes: maxSourceBytes)
+			let buffer = try imageBuffer(from: image, alphaPolicy: alphaPolicy)
+			return Data(try Encoder.encode(buffer, distance: distance, runner: runner))
 		}
 	}
 #endif

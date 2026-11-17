@@ -130,7 +130,7 @@ struct DecisionInventory {
 	/// planner files for this audit is added here in the same change.
 	static let replacementIssues: Set<String> = [
 		"GER-3386", "GER-3387", "GER-3388", "GER-3389", "GER-3392", "GER-3418",
-		"GER-3419",
+		"GER-3419", "GER-3640",
 	]
 
 	/// Id prefix for each inventoried source file; mirrors the table in
@@ -140,6 +140,7 @@ struct DecisionInventory {
 		"AG": "Sources/JXLEncoder/ACGroupEncoder.swift",
 		"AH": "Sources/JXLEncoder/ANSHistogramWriter.swift",
 		"AN": "Sources/JXLEncoder/ANSCoder.swift",
+		"APE": "Sources/JXLEncoderApple/ParallelEncoding.swift",
 		"AQ": "Sources/JXLEncoder/AdaptiveQuantPipeline.swift",
 		"AT": "Sources/JXLEncoder/ACTokenizer.swift",
 		"AW": "Sources/JXLEncoder/ANSTokenWriter.swift",
@@ -151,6 +152,7 @@ struct DecisionInventory {
 		"DCT": "Sources/JXLEncoder/DCT.swift",
 		"DG": "Sources/JXLEncoder/DCGroupEncoder.swift",
 		"DP": "Sources/JXLEncoder/DistanceParams.swift",
+		"DPA": "Sources/JXLEncoderDispatch/DispatchParallelRunner.swift",
 		"DPR": "Sources/JXLEncoder/DCPredictor.swift",
 		"EC": "Sources/JXLEncoder/EntropyCode.swift",
 		"ENC": "Sources/JXLEncoder/Encoder.swift",
@@ -170,7 +172,9 @@ struct DecisionInventory {
 		"PB": "Sources/JXLEncoder/PlaneBuffer.swift",
 		"PC": "Sources/JXLEncoder/PrefixCodeWriter.swift",
 		"PM": "Sources/JXLEncoder/PixelBlockEntropyModel.swift",
+		"PR": "Sources/JXLEncoder/ParallelRunner.swift",
 		"PX": "Sources/JXLEncoder/PixelBlockEntropyConsumers.swift",
+		"PW": "Sources/JXLEncoder/ParallelWork.swift",
 		"QM": "Sources/JXLEncoder/QuantMatrices.swift",
 		"QR": "Sources/JXLEncoder/QuantizeRoundtrip.swift",
 		"QW": "Sources/JXLEncoder/QuantMatrixWriter.swift",
@@ -668,7 +672,11 @@ enum SourceGroup: String, CaseIterable {
 				"Sources/JXLEncoder/Encoder.swift",
 				"Sources/JXLEncoder/EncoderError.swift",
 				"Sources/JXLEncoder/FrameAssembly.swift",
+				"Sources/JXLEncoder/ParallelRunner.swift",
+				"Sources/JXLEncoder/ParallelWork.swift",
 				"Sources/JXLEncoderApple/JXLEncoderApple.swift",
+				"Sources/JXLEncoderApple/ParallelEncoding.swift",
+				"Sources/JXLEncoderDispatch/DispatchParallelRunner.swift",
 				"Sources/jxlbench/main.swift",
 				"Sources/jxlencode/main.swift",
 			]

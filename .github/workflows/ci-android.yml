@@ -21,8 +21,8 @@ permissions:
 
 jobs:
   linux-android:
-    name: Test Android (portable core)
-    runs-on: ubuntu-latest
+    name: Test Android (core and Dispatch adapter)
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -34,6 +34,8 @@ jobs:
         uses: skiptools/swift-android-action@2044b79660f201ccef8cbce62877e4ec5409f9c8 # v2.9.5
         with:
           swift-version: '6.3'
+          build-tests: true
+          run-tests: true
       - name: Build portable core for Android
         run: ${{ steps.android.outputs.swift-build }} --target JXLEncoder
       - name: Build Dispatch adapter for Android

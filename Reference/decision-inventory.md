@@ -100,6 +100,7 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `AG` | ACGroupEncoder.swift |
 | `AH` | ANSHistogramWriter.swift |
 | `AN` | ANSCoder.swift |
+| `APE` | ParallelEncoding.swift |
 | `AQ` | AdaptiveQuantPipeline.swift |
 | `AT` | ACTokenizer.swift |
 | `AW` | ANSTokenWriter.swift |
@@ -111,6 +112,7 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `DCT` | DCT.swift |
 | `DG` | DCGroupEncoder.swift |
 | `DP` | DistanceParams.swift |
+| `DPA` | DispatchParallelRunner.swift |
 | `DPR` | DCPredictor.swift |
 | `EC` | EntropyCode.swift |
 | `ENC` | Encoder.swift |
@@ -130,6 +132,8 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `PB` | PlaneBuffer.swift |
 | `PC` | PrefixCodeWriter.swift |
 | `PM` | PixelBlockEntropyModel.swift |
+| `PR` | ParallelRunner.swift |
+| `PW` | ParallelWork.swift |
 | `PX` | PixelBlockEntropyConsumers.swift |
 | `QM` | QuantMatrices.swift |
 | `QR` | QuantizeRoundtrip.swift |

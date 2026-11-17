@@ -22,7 +22,8 @@ sizes.
 
 | Target | Contents |
 |---|---|
-| `JXLEncoder` | Portable core. **Swift stdlib only** — no Foundation, no platform frameworks. Linux and Android CI build and test the core. |
+| `JXLEncoder` | Portable encoder core. No Foundation or platform frameworks. Linux and Android CI build and test the core and Dispatch adapter. |
+| `JXLEncoderDispatch` | Optional synchronous worker scheduler backed by Dispatch. |
 | `JXLEncoderApple` | Platform shim. The only target that touches Foundation / CoreGraphics / ImageIO: decodes arbitrary input, handles thumbnails and alpha policy, returns `Data`. |
 
 ## Usage
@@ -36,6 +37,25 @@ let jxl = try JXLEncoderApple.encode(data: jpegData, distance: 1.0)
 let thumb = try JXLEncoderApple.encode(
 	data: jpegData, distance: 1.0, maxPixelSize: 200)
 ```
+
+For synchronous pixel encoding with an explicit worker bound, add the
+`JXLEncoderDispatch` product and use its runner:
+
+```swift
+import JXLEncoder
+import JXLEncoderDispatch
+import JXLEncoderApple
+
+let runner = try DispatchParallelRunner(maximumWorkers: 4)
+let bytes = try Encoder.encode(imageBuffer, distance: 1.0, runner: runner)
+let appleData = try JXLEncoderApple.encode(data: pngData, runner: runner)
+```
+
+Runner-based APIs require iOS 18 or macOS 15 and block the calling thread until
+encoding completes. `maximumWorkers` bounds active pixel work in each run;
+concurrent encodes have separate limits. Existing serial and async APIs remain
+available. Eligible full-size upright JPEGs keep using the serial coefficient
+recompression path and do not invoke the runner.
 
 `distance` is a positive finite butteraugli target: lower is higher quality.
 Zero is unsupported, values below 0.05 are normalized to 0.05, and values at
@@ -150,9 +170,11 @@ JPEG recompression (lossless both sides, `flower.jpg` at matched quality):
 | 4:2:0 | 486 422 B | 456 104 B (+6.7%) |
 | 4:4:4 | 609 787 B | 568 375 B (+7.3%) |
 
-On Apple silicon the encoder runs at ~10 MP/s single-threaded and adds ~336 KB
-to a stripped iOS binary. `encodeConcurrently` splits the AC groups across a
-task group for byte-identical output at roughly twice the speed:
+On Apple silicon the serial encoder runs at ~10 MP/s and adds ~336 KB to a
+stripped iOS binary. The legacy `encodeConcurrently` API remains available for
+source compatibility. New callers that need synchronous parallel execution
+can use the explicit runner API above. The existing task-group path measured
+roughly twice the serial speed:
 
 | size | serial | concurrent |
 |---|---|---|
