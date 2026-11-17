@@ -68,7 +68,8 @@ struct JPEGCfLIntegrationTests {
 			try FileManager.default.createDirectory(
 				at: directory, withIntermediateDirectories: true)
 			for name in [
-				"small_444", "cfl_endpoint_444", "small_422", "hopper_gray_odd",
+				"small_444", "cfl_endpoint_444", "cfl_tile_65x8", "small_422",
+				"hopper_gray_odd",
 			] {
 				let transcode = try JPEGTranscode(
 					JPEGParser.parse(JPEGSemanticCorpusEntry.jpegBytes(name)))
@@ -109,7 +110,8 @@ struct JPEGCfLIntegrationTests {
 		}
 		let directory = URL(fileURLWithPath: try #require(checkPath), isDirectory: true)
 		for name in [
-			"small_444", "cfl_endpoint_444", "small_422", "hopper_gray_odd",
+			"small_444", "cfl_endpoint_444", "cfl_tile_65x8", "small_422",
+			"hopper_gray_odd",
 		] {
 			let expected = try SemanticDump(
 				parsing: String(

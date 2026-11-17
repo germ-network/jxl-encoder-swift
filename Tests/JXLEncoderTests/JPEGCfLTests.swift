@@ -84,6 +84,84 @@ struct JPEGCfLTests {
 		}
 	}
 
+	@Test("Source maps and residuals match across partial tiles and a nonzero origin")
+	func jpegCfLMatchesSourceMapsAcrossPartialTilesAndGlobalOrigin() throws {
+		let sourceDump = try SemanticDump(fixture: "cfl_tile_65x8_source")
+		let expectedSize = SemanticDump.Values.integers([2, 1])
+		let expectedYToX = SemanticDump.Values.integers([11, -20])
+		let expectedYToB = SemanticDump.Values.integers([-10, 20])
+		#expect(sourceDump.fields["jpeg_cfl.map_size"] == expectedSize)
+		#expect(sourceDump.fields["jpeg_cfl.ytox_map"] == expectedYToX)
+		#expect(sourceDump.fields["jpeg_cfl.ytob_map"] == expectedYToB)
+		#expect(
+			sourceDump.fields["jpeg_context.reconstructed_coefficients_exact"]
+				== .integers([1]))
+
+		let source = try JPEGTranscode(
+			JPEGParser.parse(JPEGParserTests.fixture("cfl_tile_65x8")))
+		var partialTile = DCGroupData(widthInBlocks: 9, heightInBlocks: 1)
+		source.populateColorCorrelation(
+			data: &partialTile, blockX0: 0, blockY0: 0)
+		#expect(partialTile.cmapWidth == 2)
+		#expect(
+			SemanticDump.Values.integers(partialTile.ytoxMap.map(Int64.init))
+				== sourceDump.fields["jpeg_cfl.ytox_map"])
+		#expect(
+			SemanticDump.Values.integers(partialTile.ytobMap.map(Int64.init))
+				== sourceDump.fields["jpeg_cfl.ytob_map"])
+
+		let origin = Geometry.dcGroupDim / Geometry.blockDim
+		let blocksPerLine = origin + source.component(1).blocksPerLine
+		var components = (0..<3).map { _ in
+			[Int32](repeating: 0, count: blocksPerLine * 64)
+		}
+		for blockX in 0..<source.component(1).blocksPerLine {
+			for channel in 0..<3 {
+				let sourceBlock = source.block(channel: channel, x: blockX, y: 0)
+				let component = [1, 0, 2][channel]
+				for y in 0..<8 {
+					for x in 0..<8 {
+						components[component][
+							(origin + blockX) * 64 + y * 8 + x] =
+							sourceBlock[x * 8 + y]
+					}
+				}
+			}
+		}
+		let offsetTranscode = try Self.transcode(
+			luma: components[0], cb: components[1], cr: components[2],
+			blocksPerLine: blocksPerLine)
+		var offsetData = DCGroupData(widthInBlocks: origin, heightInBlocks: 1)
+		offsetTranscode.populateColorCorrelation(
+			data: &offsetData, blockX0: origin, blockY0: 0)
+		#expect(offsetData.ytoxMap.prefix(2) == [11, -20])
+		#expect(offsetData.ytobMap.prefix(2) == [-10, 20])
+		#expect(offsetData.ytoxMap.dropFirst(2).allSatisfy { $0 == 0 })
+		#expect(offsetData.ytobMap.dropFirst(2).allSatisfy { $0 == 0 })
+		for blockX in 0..<source.component(1).blocksPerLine {
+			for (channel, map) in [
+				(0, offsetData.ytoxMap[blockX / 8]),
+				(2, offsetData.ytobMap[blockX / 8]),
+			] {
+				let x = origin + blockX
+				let raw = offsetTranscode.block(channel: channel, x: x, y: 0)
+				let residual = try offsetTranscode.block(
+					channel: channel, x: x, y: 0, correlation: map)
+				let expectedRaw: [Int32]
+				let expectedResidual: [Int32]
+				if channel == 0 {
+					expectedRaw = blockX < 8 ? [10, 11] : [-20, -20]
+					expectedResidual = blockX < 8 ? [-1, 0] : [0, 0]
+				} else {
+					expectedRaw = blockX < 8 ? [-10, -11] : [20, 20]
+					expectedResidual = blockX < 8 ? [0, -1] : [0, 0]
+				}
+				#expect([raw[8], raw[16]] == expectedRaw)
+				#expect([residual[8], residual[16]] == expectedResidual)
+			}
+		}
+	}
+
 	@Test("Separated maxima use the endpoint midpoint and strict gain rule")
 	func jpegCfLUsesSourceMaximumAndGainRules() throws {
 		var differences = [Int32](repeating: 0, count: 257)

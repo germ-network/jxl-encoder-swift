@@ -89,7 +89,8 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 			}
 		)
 		.union([
-			"Tests/JXLEncoderTests/Fixtures/semantic/distinct_quant_tables.sem#block_context"
+			"Tests/JXLEncoderTests/Fixtures/semantic/distinct_quant_tables.sem#block_context",
+			"Tests/JXLEncoderTests/Fixtures/semantic/cfl_tile_65x8_source.sem#jpeg_cfl",
 		])
 	}
 	static let contextWitnessCategory = "jpeg_context"
@@ -392,7 +393,7 @@ struct JPEGSemanticFixtureTests {
 		"known JPEG issues name applicable categories and cannot verify inventory rows",
 	)
 	func jpegKnownIssuesWellFormed() throws {
-		#expect(JPEGSemanticCase.references.count == 157)
+		#expect(JPEGSemanticCase.references.count == 158)
 		#expect(
 			Set(JPEGSemanticCorpusEntry.categories)
 				== SemanticDump.decoderObservableCategories)
