@@ -144,6 +144,48 @@ struct CoeffOrderContractTests {
 	}
 
 	@Test
+	func optimizedPixelAnalysisRetainsNonidentityOrder() throws {
+		func group(x: Int, width: Int, zeros: [(position: Int, blocks: Int)])
+			-> Encoder.ACGroupCompute
+		{
+			var plane = [Int32](repeating: 1, count: width * DCT.blockSize)
+			for (position, blocks) in zeros {
+				for block in 0..<blocks {
+					plane[block * DCT.blockSize + position] = 0
+				}
+			}
+			return Encoder.ACGroupCompute(
+				groupX: x, groupY: 0, widthInBlocks: width, heightInBlocks: 1,
+				coefficients: [
+					plane, [Int32](repeating: 1, count: width * DCT.blockSize),
+					[Int32](repeating: 1, count: width * DCT.blockSize),
+				], rawDC: [], quantField: [UInt8](repeating: 1, count: width))
+		}
+		let computes = [
+			group(
+				x: 0, width: 32,
+				zeros: [
+					(position: CoeffOrder.natural[1], blocks: 8),
+					(position: CoeffOrder.natural[2], blocks: 1),
+				]),
+			group(
+				x: 1, width: 12,
+				zeros: [(position: CoeffOrder.natural[2], blocks: 7)]),
+		]
+		let dim = ImageDim(width: 352, height: 8)
+		let params = try DistanceParams(distance: 1)
+
+		let optimized = Encoder.analyzePixelFrame(
+			computes: computes, dim: dim, params: params, optimizeCodes: true)
+		let unoptimized = Encoder.analyzePixelFrame(
+			computes: computes, dim: dim, params: params, optimizeCodes: false)
+
+		#expect(optimized.coeffOrder.isCustom)
+		#expect(!unoptimized.coeffOrder.isCustom)
+		#expect(unoptimized.coeffOrder.orders == CoeffOrder.Result.identity.orders)
+	}
+
+	@Test
 	func quantizedCountsUseFloatAndRankTies() throws {
 		let fixture = try EntropyReferenceFixture.load("coefficient_sort_boundary")
 		let counts = try fixture.integers(fixture.input, "input.coefficient_order.counts")
