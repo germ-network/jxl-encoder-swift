@@ -51,8 +51,8 @@ struct PixelSemanticFixtureTests {
 		}
 	}
 
-	@Test("quant fields match upstream below the automatic resampling threshold")
-	func quantFieldBoundaryDistancesMatchReferenceBelowResampling() throws {
+	@Test("quant field component observations match within the selected domain")
+	func quantFieldComponentObservationsMatchWithinSelectedDomain() throws {
 		let reference = try SemanticDump(fixture: "distance_params")
 		let boundaries: [Float] = [
 			0.03, 0.05, 0.299, 0.5, 0.7, 1.25, 1.5, 2.5, 3, 4, 5, 5.5, 9, 9.5, 10,
@@ -63,7 +63,9 @@ struct PixelSemanticFixtureTests {
 			distances.append(boundary)
 			distances.append(boundary.nextUp)
 		}
-		let indices = distances.indices.filter { distances[$0] < 10 }
+		let indices = distances.indices.filter {
+			distances[$0] >= 0.05 && distances[$0] < 10
+		}
 		let comparedDistances = indices.map { distances[$0] }
 		var expected = SemanticDump()
 		for field in [

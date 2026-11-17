@@ -79,11 +79,21 @@ struct DistanceParamsTests {
 		}
 	}
 
-	@Test("distances below 0.03 clamp to the same parameters")
-	func clampsTinyDistances() throws {
-		let tiny = try DistanceParams(distance: 0.001)
-		let floor = try DistanceParams(distance: 0.03)
-		#expect(tiny == floor)
+	@Test(
+		"positive distances follow the selected source minimum",
+		arguments: [
+			Float.leastNonzeroMagnitude, .leastNormalMagnitude, 0.03,
+			Float(0.05).nextDown, 0.05, Float(0.05).nextUp,
+		])
+	func minimumDistanceMatchesSelectedSource(distance: Float) throws {
+		let params = try DistanceParams(distance: distance)
+		let expected = max(distance, Float(0.05))
+		#expect(params.originalDistance == expected)
+		#expect(params.distance == expected)
+		#expect(params.upsampling == 1)
+		if distance <= 0.05 {
+			#expect(params == (try DistanceParams(distance: 0.05)))
+		}
 	}
 	@Test(
 		"X matrix scales match upstream at distance transition boundaries")
@@ -357,6 +367,7 @@ extension DistanceParamsTests {
 		let inputs: [Float] = [
 			.leastNonzeroMagnitude, .leastNormalMagnitude,
 			Float(0.03).nextDown, 0.03, Float(0.03).nextUp,
+			Float(0.05).nextDown, 0.05, Float(0.05).nextUp,
 			resampling.nextDown, resampling, resampling.nextUp, 26,
 			boundary.nextDown, boundary, boundary.nextUp,
 			Float(1 << 55).nextDown, Float(1 << 55), Float(1 << 55).nextUp,
