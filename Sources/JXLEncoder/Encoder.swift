@@ -411,6 +411,22 @@ public enum Encoder {
 			sections.map { $0.finished() }, writer: &writer)
 	}
 
+	static func initialPixelSections(dim: ImageDim, optimizeCodes: Bool) -> [SectionWriter] {
+		let dcCode = EntropyCode.staticDC
+		let acCode = EntropyCode.staticAC
+		let mode: SectionWriter.Mode =
+			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
+		var sections = [SectionWriter](
+			repeating: SectionWriter(mode: mode),
+			count: 2 + dim.dcGroupCount + dim.groupCount)
+		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
+		for index in acRange {
+			sections[index] = SectionWriter(
+				mode: optimizeCodes ? .staging(acCode) : .direct(acCode))
+		}
+		return sections
+	}
+
 	static func encodeFrame(
 		pixelFrame: PixelFrameInput,
 		params: DistanceParams,
@@ -418,23 +434,7 @@ public enum Encoder {
 		writer: inout BitWriter
 	) throws {
 		let dim = pixelFrame.dim
-		let dcCode = EntropyCode.staticDC
-		let acCode = EntropyCode.staticAC
-
-		// Staging defers entropy coding until the image's own statistics are
-		// known. The static tables ship in full on every file otherwise, which
-		// dominates small images.
-		let mode: SectionWriter.Mode =
-			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
-		var sections = [SectionWriter](
-			repeating: SectionWriter(mode: mode),
-			count: 2 + dim.dcGroupCount + dim.groupCount)
-		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
-		if optimizeCodes {
-			for i in acRange { sections[i] = SectionWriter(mode: .staging(acCode)) }
-		} else {
-			for i in acRange { sections[i] = SectionWriter(mode: .direct(acCode)) }
-		}
+		var sections = initialPixelSections(dim: dim, optimizeCodes: optimizeCodes)
 
 		var computes: [ACGroupCompute] = []
 		computes.reserveCapacity(dim.groupCount)

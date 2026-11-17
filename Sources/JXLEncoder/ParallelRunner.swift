@@ -14,6 +14,40 @@ public protocol ParallelRunner: Sendable {
 }
 
 extension Encoder {
+	@available(iOS 18, macOS 15, *)
+	static func computePixelGroups(
+		pixelFrame: PixelFrameInput, params: DistanceParams,
+		runner: any ParallelRunner, maximumWorkers: Int
+	) -> [ACGroupCompute] {
+		let dim = pixelFrame.dim
+		return ParallelWork.drain(
+			Array(0..<dim.groupCount), maximumWorkers: maximumWorkers,
+			runner: runner
+		) { index in
+			computeACGroup(
+				xybAt: pixelFrame.xybAt, dim: dim,
+				groupX: index % dim.widthInGroups,
+				groupY: index / dim.widthInGroups, params: params)
+		}
+	}
+
+	@available(iOS 18, macOS 15, *)
+	static func tokenizePixelGroups(
+		computes: consuming [ACGroupCompute], dim: ImageDim,
+		analysis: PixelFrameAnalysis, optimizeCodes: Bool,
+		runner: any ParallelRunner, maximumWorkers: Int
+	) -> [ACGroupOutput] {
+		let mode: SectionWriter.Mode =
+			optimizeCodes ? .staging(analysis.acCode) : .direct(analysis.acCode)
+		return ParallelWork.drain(
+			consume computes, maximumWorkers: maximumWorkers, runner: runner
+		) { compute in
+			tokenizeACGroup(
+				compute, order: analysis.coeffOrder.orders,
+				mode: mode, blockContextMap: analysis.blockContextMap)
+		}
+	}
+
 	/// Encodes pixels synchronously using bounded internal parallelism.
 	///
 	/// Blocks the calling thread until encoding finishes. Produces the same bytes as
@@ -26,6 +60,36 @@ extension Encoder {
 		optimizeCodes: Bool = true,
 		runner: any ParallelRunner
 	) throws -> [UInt8] {
-		fatalError("Synchronous parallel encoding is not implemented")
+		let maximumWorkers = runner.maximumWorkers
+		guard maximumWorkers > 0 else {
+			throw EncoderError.invalidWorkerCount(maximumWorkers)
+		}
+		let params = try DistanceParams(distance: distance)
+		let pixelFrame = preparePixelFrame(
+			stripeAt: linearizingStripeSource(image),
+			width: image.width, height: image.height, params: params)
+		let dim = pixelFrame.dim
+
+		var writer = BitWriter()
+		try ImageHeader.write(
+			width: image.width, height: image.height,
+			transferFunction: transferFunction, to: &writer)
+		var sections = initialPixelSections(dim: dim, optimizeCodes: optimizeCodes)
+		let computes = Self.computePixelGroups(
+			pixelFrame: pixelFrame, params: params, runner: runner,
+			maximumWorkers: maximumWorkers)
+		let analysis = analyzePixelFrame(
+			computes: computes, dim: dim, params: params,
+			optimizeCodes: optimizeCodes)
+		let outputs = Self.tokenizePixelGroups(
+			computes: consume computes, dim: dim, analysis: analysis,
+			optimizeCodes: optimizeCodes, runner: runner,
+			maximumWorkers: maximumWorkers)
+		try finishPixelFrame(
+			outputs: outputs, dim: dim, params: params,
+			optimizeCodes: optimizeCodes, analysis: analysis,
+			sections: &sections, writer: &writer)
+		writer.zeroPadToByte()
+		return writer.take()
 	}
 }
