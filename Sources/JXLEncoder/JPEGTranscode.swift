@@ -21,6 +21,7 @@ public struct JPEGTranscode {
 	/// A single-component source. JXL still codes three channels, and the two
 	/// chroma ones carry zeros rather than a copy of the luma.
 	public let isGrayscale: Bool
+	let quantizationRatios: [[Int32]]
 
 	public enum TranscodeError: Error, Equatable, Sendable {
 		/// Color interpretation the current coefficient writer cannot preserve.
@@ -31,6 +32,12 @@ public struct JPEGTranscode {
 		case unsupportedComponentCount(Int)
 		/// A component naming a quantization table the file never defined.
 		case missingQuantTable(index: Int)
+		/// A quantizer is zero and cannot be used as a divisor.
+		case invalidQuantizationTable(index: Int, coefficient: Int)
+		/// A luma-to-chroma quantizer ratio exceeds the fixed-point range.
+		case excessiveQuantizationRatio(channel: Int, coefficient: Int)
+		/// A transformed AC residual cannot be represented by the coefficient plane.
+		case residualOverflow(channel: Int, blockX: Int, blockY: Int, coefficient: Int)
 	}
 
 	public init(_ image: JPEGImage) throws {
@@ -78,6 +85,7 @@ public struct JPEGTranscode {
 			throw TranscodeError.missingQuantTable(index: component.quantTableIndex)
 		}
 		self.image = image
+		quantizationRatios = []
 	}
 
 	public var width: Int { image.width }
