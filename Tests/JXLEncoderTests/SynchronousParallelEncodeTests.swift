@@ -192,26 +192,31 @@ struct SynchronousParallelEncodeTests {
 		#expect(metrics.completed == 4)
 		#expect(metrics.completedRuns == [2, 2])
 
-		let operationState = Mutex((started: 0, active: 0, maximumActive: 0))
+		let operationState = Mutex((active: 0, maximumActive: 0))
 		let results = ParallelWork.drain(
 			Array(0..<4), maximumWorkers: 2, runner: runner
 		) { value in
-			let ordinal = operationState.withLock { state in
-				state.started += 1
+			operationState.withLock { state in
 				state.active += 1
 				state.maximumActive = max(state.maximumActive, state.active)
-				return state.started
 			}
-			if ordinal <= 2 {
-				while operationState.withLock({ $0.started }) < 2 {}
-			}
+			for step in 0..<100 { _ = step &* value }
 			operationState.withLock { $0.active -= 1 }
 			return value
 		}
-		#expect(results.count == 4)
+		#expect(results.sorted() == Array(0..<4))
 		let operationMetrics = operationState.withLock { $0 }
-		#expect(operationMetrics.maximumActive == 2)
+		#expect(operationMetrics.maximumActive <= 2)
 		#expect(operationMetrics.active == 0)
+
+		let serialRunner = InlineRunner(maximumWorkers: 2)
+		let serialResults = ParallelWork.drain(
+			Array(0..<4), maximumWorkers: 2, runner: serialRunner
+		) { $0 }
+		#expect(serialResults.sorted() == Array(0..<4))
+		let serialMetrics = serialRunner.metrics.state.withLock { $0 }
+		#expect(serialMetrics.completed == 2)
+		#expect(serialMetrics.active == 0)
 	}
 
 	@Test

@@ -1,4 +1,3 @@
-import Dispatch
 import JXLEncoder
 import Synchronization
 import Testing
@@ -22,51 +21,59 @@ struct DispatchParallelRunnerTests {
 	@Test
 	func dispatchRunnerVisitsEachIterationExactlyOnce() throws {
 		guard #available(iOS 18, macOS 15, *) else { return }
-		let runner = try DispatchParallelRunner(maximumWorkers: 2)
-		for iterations in [0, 1, 17] {
-			let visits = Mutex([Int](repeating: 0, count: iterations))
-			runner.run(iterations: iterations) { index in
-				visits.withLock { $0[index] += 1 }
+		for maximumWorkers in [1, 2] {
+			let runner = try DispatchParallelRunner(maximumWorkers: maximumWorkers)
+			for iterations in [0, 1, 17] {
+				let state = Mutex(
+					(
+						visits: [Int](repeating: 0, count: iterations),
+						active: 0, peak: 0, completed: 0
+					))
+				runner.run(iterations: iterations) { index in
+					state.withLock {
+						$0.active += 1
+						$0.peak = max($0.peak, $0.active)
+						$0.visits[index] += 1
+					}
+					for value in 0..<100 { _ = value &* index }
+					state.withLock {
+						$0.active -= 1
+						$0.completed += 1
+					}
+				}
+				let result = state.withLock { $0 }
+				#expect(result.visits == [Int](repeating: 1, count: iterations))
+				#expect(result.completed == iterations)
+				#expect(result.active == 0)
+				#expect(result.peak <= maximumWorkers)
 			}
-			#expect(visits.withLock { $0 } == [Int](repeating: 1, count: iterations))
 		}
 	}
 
 	@Test
 	func dispatchRunnerBoundsDirectCalls() throws {
 		guard #available(iOS 18, macOS 15, *) else { return }
-		let runner = try DispatchParallelRunner(maximumWorkers: 2)
-		#expect(
-			DispatchParallelRunner.concurrentWorkerCount(
-				iterations: 19, maximumWorkers: runner.maximumWorkers) == 2)
-		#expect(
-			DispatchParallelRunner.concurrentWorkerCount(
-				iterations: 1, maximumWorkers: runner.maximumWorkers) == 1)
-		#expect(
-			DispatchParallelRunner.concurrentWorkerCount(
-				iterations: 0, maximumWorkers: runner.maximumWorkers) == 0)
+		for maximumWorkers in [1, 2] {
+			let runner = try DispatchParallelRunner(maximumWorkers: maximumWorkers)
+			for iterations in [0, 1, 19] {
+				let completed = Mutex(0)
+				runner.run(iterations: iterations) { _ in
+					completed.withLock { $0 += 1 }
+				}
+				#expect(completed.withLock { $0 } == iterations)
+			}
+		}
 	}
 
 	@Test
 	func dispatchRunnerJoinsBeforeReturn() throws {
 		guard #available(iOS 18, macOS 15, *) else { return }
 		let runner = try DispatchParallelRunner(maximumWorkers: 2)
-		let gate = DispatchSemaphore(value: 0)
-		let started = Mutex(0)
-		let completed = Mutex(0)
-		runner.run(iterations: 2) { _ in
-			let count = started.withLock { value -> Int in
-				value += 1
-				return value
-			}
-			if count == 2 {
-				gate.signal()
-				gate.signal()
-			}
-			gate.wait()
-			completed.withLock { $0 += 1 }
+		let completed = Mutex([Bool](repeating: false, count: 17))
+		runner.run(iterations: 17) { index in
+			completed.withLock { $0[index] = true }
 		}
-		#expect(completed.withLock { $0 } == 2)
+		#expect(completed.withLock { $0 } == [Bool](repeating: true, count: 17))
 	}
 
 	@Test

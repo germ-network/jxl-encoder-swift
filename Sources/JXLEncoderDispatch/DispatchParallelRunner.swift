@@ -8,10 +8,6 @@ import Synchronization
 public struct DispatchParallelRunner: ParallelRunner {
 	public let maximumWorkers: Int
 
-	static func concurrentWorkerCount(iterations: Int, maximumWorkers: Int) -> Int {
-		min(maximumWorkers, iterations)
-	}
-
 	/// Creates a runner with a positive per-call limit on active operations.
 	public init(maximumWorkers: Int = ProcessInfo.processInfo.activeProcessorCount) throws {
 		guard maximumWorkers > 0 else {
@@ -22,8 +18,7 @@ public struct DispatchParallelRunner: ParallelRunner {
 
 	public func run(iterations: Int, _ operation: @Sendable (Int) -> Void) {
 		precondition(iterations >= 0)
-		let workerCount = Self.concurrentWorkerCount(
-			iterations: iterations, maximumWorkers: maximumWorkers)
+		let workerCount = min(maximumWorkers, iterations)
 		guard workerCount > 0 else { return }
 		let next = Mutex(0)
 		DispatchQueue.concurrentPerform(iterations: workerCount) { _ in
