@@ -37,7 +37,10 @@ let thumb = try JXLEncoderApple.encode(
 	data: jpegData, distance: 1.0, maxPixelSize: 200)
 ```
 
-`distance` is a butteraugli target: lower is higher quality. Input carrying
+`distance` is a positive finite butteraugli target: lower is higher quality.
+Zero is unsupported, values below 0.05 are normalized to 0.05, and values at
+10 or above select automatic 2x resampling. See the [distance surface](Reference/distance-surface.md)
+for accepted values and the original/effective distance roles. Input carrying
 alpha is composited onto `alphaPolicy`'s background, white by default.
 
 ### Memory

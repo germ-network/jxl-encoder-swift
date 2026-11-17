@@ -46,15 +46,16 @@ public struct DistanceParams: Equatable, Sendable {
 	/// accepted finite-distance domain.
 	static let quantMax: Int = 255
 
+	/// Creates quantizer settings for a positive finite Butteraugli distance.
+	/// Values below the source minimum are normalized to 0.05; the exposed
+	/// `distance` is the effective value after optional automatic 2x resampling.
 	public init(distance: Float) throws {
 		guard distance.isFinite && distance >= 0 else {
 			throw EncoderError.invalidDistance(distance)
 		}
 		guard distance > 0 else { throw EncoderError.losslessNotSupported }
 
-		// Below this the average bits-per-pixel exceeds lossless, so the
-		// reference clamps rather than encoding a pointlessly large file.
-		let originalDistance = max(distance, 0.03)
+		let originalDistance = max(distance, 0.05)
 		self.originalDistance = originalDistance
 		let upsampling = originalDistance >= 10 ? 2 : 1
 		self.upsampling = upsampling

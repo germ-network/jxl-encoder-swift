@@ -443,8 +443,10 @@ public enum Encoder {
 
 	/// Encodes an image as a bare JPEG XL codestream.
 	///
-	/// `distance` is a butteraugli target: lower is higher quality. Lossless is
-	/// not supported by this VarDCT-only encoder.
+	/// `distance` must be positive and finite; zero is unsupported. Values below
+	/// 0.05 are normalized to 0.05. At values of 10 and above, the encoder
+	/// selects 2x resampling for the input image and derives its effective distance
+	/// from the original value. Lower targets mean higher quality; this VarDCT encoder is lossy.
 	public static func encode(
 		_ image: ImageBuffer,
 		distance: Float,
@@ -475,6 +477,11 @@ extension Encoder {
 	/// 8-bit samples and their own geometry, and the assembly step keys off each
 	/// group's coordinates rather than the order results arrive in. What changes
 	/// is only how long it takes.
+	///
+	/// `distance` must be positive and finite; zero is unsupported. Values below
+	/// 0.05 are normalized to 0.05. At values of 10 and above, the encoder
+	/// selects 2x resampling for the input image and derives its effective distance
+	/// from the original value. Lower targets mean higher quality; this VarDCT encoder is lossy.
 	///
 	/// Worth using at full size and pointless below 256 px, where the image is a
 	/// single group and there is nothing to overlap.

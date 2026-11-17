@@ -367,6 +367,7 @@ extension DistanceParamsTests {
 		let inputs: [Float] = [
 			.leastNonzeroMagnitude, .leastNormalMagnitude,
 			Float(0.03).nextDown, 0.03, Float(0.03).nextUp,
+			Float(0.05).nextDown, 0.05, Float(0.05).nextUp,
 			resampling.nextDown, resampling, resampling.nextUp, 26,
 			boundary.nextDown, boundary, boundary.nextUp,
 			Float(1 << 55).nextDown, Float(1 << 55), Float(1 << 55).nextUp,
