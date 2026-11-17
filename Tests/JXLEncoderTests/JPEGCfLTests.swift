@@ -187,14 +187,8 @@ struct JPEGCfLTests {
 		#expect(
 			JPEGTranscode.colorCorrelationFactor(zeroCountDifferences: differences) == 0
 		)
-		var luma = [Int32](repeating: 0, count: 64)
-		var cb = [Int32](repeating: 0, count: 64)
-		luma[1] = 84
-		luma[2] = 84
-		cb[1] = 128
-		cb[2] = 128
-		let transcode = try Self.transcode(
-			luma: luma, cb: cb, cr: [Int32](repeating: 0, count: 64))
+		let transcode = try JPEGTranscode(
+			JPEGParser.parse(JPEGParserTests.fixture("cfl_endpoint_444")))
 		var data = DCGroupData(widthInBlocks: 1, heightInBlocks: 1)
 		transcode.populateColorCorrelation(data: &data, blockX0: 0, blockY0: 0)
 		#expect(data.ytoxMap == [0])
@@ -202,7 +196,9 @@ struct JPEGCfLTests {
 		let residual = try transcode.block(
 			channel: 0, x: 0, y: 0, correlation: data.ytoxMap[0])
 		#expect(raw[8] == 128)
+		#expect(raw[16] == 128)
 		#expect(residual[8] == 128)
+		#expect(residual[16] == 128)
 		#expect(residual[8] == raw[8])
 	}
 

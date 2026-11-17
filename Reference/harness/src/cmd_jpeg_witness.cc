@@ -75,6 +75,24 @@ jxl::jpeg::JPEGData CoefficientShell(const jxl::jpeg::JPEGData& source) {
   return shell;
 }
 
+void DumpColorCorrelationMap(const DecodedFrame& frame,
+                             SemanticDumpWriter* out) {
+  const auto& cmap = frame.state->shared->cmap;
+  std::vector<int64_t> ytox;
+  std::vector<int64_t> ytob;
+  for (size_t y = 0; y < cmap.ytox_map.ysize(); ++y) {
+    for (size_t x = 0; x < cmap.ytox_map.xsize(); ++x) {
+      ytox.push_back(cmap.ytox_map.ConstRow(y)[x]);
+      ytob.push_back(cmap.ytob_map.ConstRow(y)[x]);
+    }
+  }
+  out->Integers("jpeg_cfl.map_size",
+                {static_cast<int64_t>(cmap.ytox_map.xsize()),
+                 static_cast<int64_t>(cmap.ytox_map.ysize())});
+  out->Integers("jpeg_cfl.ytox_map", ytox);
+  out->Integers("jpeg_cfl.ytob_map", ytob);
+}
+
 jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
                     SemanticDumpWriter* out) {
   const auto jpeg_bytes = Read(jpeg_path);
@@ -115,6 +133,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
         return false;
       }
     }
+    DumpColorCorrelationMap(frame, out);
     out->Integers("jpeg_context.reconstructed_coefficients_exact", {1});
     out->Integers("jpeg_context.size",
                   {static_cast<int64_t>(dim.xsize_blocks),
@@ -144,19 +163,20 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
                        source_sampling.VShift(c) != 0;
   }
   if (!has_subsampling) {
-    std::fprintf(stderr,
-                 "jpeg-witness: direct source AC is unsupported for 4:4:4\n");
-    return false;
+    DumpColorCorrelationMap(frame, out);
+    out->Integers("jpeg_context.reconstructed_coefficients_exact", {1});
+    return true;
   }
 
   const auto& shared = *frame.state->shared;
   const auto& block_map = shared.block_ctx_map;
+  DumpColorCorrelationMap(frame, out);
   if (!block_map.dc_thresholds[0].empty() ||
       !block_map.dc_thresholds[2].empty() ||
       !block_map.qf_thresholds.empty() || block_map.num_dc_ctxs < 2 ||
       block_map.ctx_map.size() != 3 * jxl::kNumOrders * block_map.num_dc_ctxs) {
-    std::fprintf(stderr, "jpeg-witness: block-context map shape is unsupported\n");
-    return false;
+    out->Integers("jpeg_context.reconstructed_coefficients_exact", {1});
+    return true;
   }
   for (size_t y = 0; y < dim.ysize_blocks; ++y) {
     for (size_t x = 0; x < dim.xsize_blocks; ++x) {

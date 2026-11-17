@@ -243,20 +243,9 @@ public enum ACGroupEncoder {
 }
 
 extension ACGroupEncoder {
-	/// Encodes one group from a JPEG's own quantized coefficients.
-	///
-	/// The pixel path's middle is all absent here: no forward DCT, no
-	/// quantization, and no decorrelation of X and B against Y. The JPEG
-	/// already quantized these values and a transcode must not touch them.
-	///
-	/// `force_cfl_jpeg_recompression` actually defaults to **true** in full
-	/// libjxl (`enc_params.h`) and applies fixed-point chroma-from-luma to
-	/// 4:4:4 three-component transcodes with no speed-tier gate — so this is
-	/// a real, currently-unported gap on that specific input shape (4:2:0
-	/// and grayscale sources are unaffected), not an out-of-scope default.
-	/// Coefficient-exactness would survive porting it (the decoder's inverse
-	/// is bit-identical integer arithmetic), but it needs its own work: see
-	/// docs/gap-closure-plan.md, "CfL-default alignment check," §5.2.
+	/// Writes raw quantized JPEG blocks through the nonthrowing primitive.
+	/// The JPEG frame path uses the required-map overload below so its
+	/// coefficient-order and tokenization walks share the populated residuals.
 	///
 	/// The block walk is the same as the pixel path's, including how a subsampled
 	/// channel codes only where its own grid aligns.
@@ -276,6 +265,26 @@ extension ACGroupEncoder {
 		order: [[Int]],
 		writer: inout SectionWriter
 	) {
+		encodeJPEGUsingBlocks(
+			transcode: transcode, blockX0: blockX0, blockY0: blockY0,
+			widthInBlocks: widthInBlocks, heightInBlocks: heightInBlocks,
+			quantDC: &quantDC, blockContextMap: blockContextMap, order: order,
+			writer: &writer
+		) { channel, x, y in transcode.block(channel: channel, x: x, y: y) }
+	}
+
+	static func encodeJPEGUsingBlocks(
+		transcode: JPEGTranscode,
+		blockX0: Int,
+		blockY0: Int,
+		widthInBlocks: Int,
+		heightInBlocks: Int,
+		quantDC: inout [[Int32]],
+		blockContextMap: JPEGBlockContextMap.Result?,
+		order: [[Int]],
+		writer: inout SectionWriter,
+		blockProvider: (Int, Int, Int) throws -> [Int32]
+	) rethrows {
 		let subsampling = transcode.subsampling
 		// Nonzero-neighbour bookkeeping runs over the coded block grid, which
 		// rounds up; the DC planes use the decoder's floor. They are separate
@@ -328,8 +337,7 @@ extension ACGroupEncoder {
 						continue
 					}
 
-					let block = transcode.block(
-						channel: channel, x: sourceX, y: sourceY)
+					let block = try blockProvider(channel, sourceX, sourceY)
 					quantized[channel] = block
 
 					let localX = subsampling.subsampledX(
@@ -390,6 +398,17 @@ extension ACGroupEncoder {
 		transcode: JPEGTranscode, blockX0: Int, blockY0: Int,
 		widthInBlocks: Int, heightInBlocks: Int
 	) -> [[Int32]] {
+		jpegCoefficientsForOrderingUsingBlocks(
+			transcode: transcode, blockX0: blockX0, blockY0: blockY0,
+			widthInBlocks: widthInBlocks, heightInBlocks: heightInBlocks
+		) { channel, x, y in transcode.block(channel: channel, x: x, y: y) }
+	}
+
+	static func jpegCoefficientsForOrderingUsingBlocks(
+		transcode: JPEGTranscode, blockX0: Int, blockY0: Int,
+		widthInBlocks: Int, heightInBlocks: Int,
+		blockProvider: (Int, Int, Int) throws -> [Int32]
+	) rethrows -> [[Int32]] {
 		precondition(widthInBlocks >= 0 && heightInBlocks >= 0)
 		let groupSize = widthInBlocks * heightInBlocks * DCT.blockSize
 		var result = (0..<3).map { _ in [Int32]() }
@@ -416,9 +435,8 @@ extension ACGroupEncoder {
 						sourceY < component.blocksPerColumn
 					{
 						result[channel].append(
-							contentsOf: transcode.block(
-								channel: channel, x: sourceX,
-								y: sourceY))
+							contentsOf: try blockProvider(
+								channel, sourceX, sourceY))
 					} else {
 						result[channel].append(
 							contentsOf: repeatElement(
@@ -432,5 +450,63 @@ extension ACGroupEncoder {
 				0, count: max(0, groupSize - result[channel].count))
 		}
 		return result
+	}
+}
+
+extension ACGroupEncoder {
+	static func encodeJPEG(
+		transcode: JPEGTranscode,
+		colorCorrelation: DCGroupData,
+		colorCorrelationBlockX0: Int, colorCorrelationBlockY0: Int,
+		blockX0: Int, blockY0: Int,
+		widthInBlocks: Int, heightInBlocks: Int,
+		quantDC: inout [[Int32]],
+		blockContextMap: JPEGBlockContextMap.Result?,
+		order: [[Int]], writer: inout SectionWriter
+	) throws {
+		try encodeJPEGUsingBlocks(
+			transcode: transcode, blockX0: blockX0, blockY0: blockY0,
+			widthInBlocks: widthInBlocks, heightInBlocks: heightInBlocks,
+			quantDC: &quantDC, blockContextMap: blockContextMap,
+			order: order, writer: &writer
+		) { channel, x, y in
+			let correlation = colorCorrelation.factor(
+				channel: channel, x: x, y: y,
+				blockX0: colorCorrelationBlockX0,
+				blockY0: colorCorrelationBlockY0)
+			return try transcode.block(
+				channel: channel, x: x, y: y, correlation: correlation)
+		}
+	}
+
+	static func jpegCoefficientsForOrdering(
+		transcode: JPEGTranscode,
+		colorCorrelation: DCGroupData,
+		colorCorrelationBlockX0: Int, colorCorrelationBlockY0: Int,
+		blockX0: Int, blockY0: Int,
+		widthInBlocks: Int, heightInBlocks: Int
+	) throws -> [[Int32]] {
+		try jpegCoefficientsForOrderingUsingBlocks(
+			transcode: transcode, blockX0: blockX0, blockY0: blockY0,
+			widthInBlocks: widthInBlocks, heightInBlocks: heightInBlocks
+		) { channel, x, y in
+			let correlation = colorCorrelation.factor(
+				channel: channel, x: x, y: y,
+				blockX0: colorCorrelationBlockX0,
+				blockY0: colorCorrelationBlockY0)
+			return try transcode.block(
+				channel: channel, x: x, y: y, correlation: correlation)
+		}
+	}
+}
+
+extension DCGroupData {
+	fileprivate func factor(channel: Int, x: Int, y: Int, blockX0: Int, blockY0: Int) -> Int8 {
+		guard channel != 1, x >= blockX0, y >= blockY0 else { return 0 }
+		let mapX = (x - blockX0) / 8
+		let mapY = (y - blockY0) / 8
+		guard mapX < cmapWidth, mapY < cmapHeight else { return 0 }
+		let index = mapY * cmapWidth + mapX
+		return channel == 0 ? ytoxMap[index] : ytobMap[index]
 	}
 }
