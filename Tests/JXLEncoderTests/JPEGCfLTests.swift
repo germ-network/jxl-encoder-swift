@@ -14,7 +14,7 @@ struct JPEGCfLTests {
 			throws: JPEGTranscode.TranscodeError.invalidQuantizationTable(
 				index: 0, coefficient: 0)
 		) {
-			try Self.transcode(
+			_ = try Self.transcode(
 				luma: [Int32](repeating: 0, count: 64),
 				cb: [Int32](repeating: 0, count: 64),
 				cr: [Int32](repeating: 0, count: 64),
@@ -30,6 +30,44 @@ struct JPEGCfLTests {
 					cr: [Int32](repeating: 0, count: 64),
 					componentQuantTableIndexes: [1, index, 2])
 			}
+		}
+		var zeroAC = unit
+		zeroAC[1] = 0
+		#expect(
+			throws: JPEGTranscode.TranscodeError.invalidQuantizationTable(
+				index: 0, coefficient: 1)
+		) {
+			_ = try Self.transcode(
+				luma: [Int32](repeating: 0, count: 64),
+				cb: [Int32](repeating: 0, count: 64),
+				cr: [Int32](repeating: 0, count: 64),
+				quantTables: [zeroAC, unit, unit])
+		}
+		let gray = JPEGImage(
+			width: 8, height: 8,
+			components: [
+				JPEGComponent(
+					identifier: 1, horizontalSampling: 1, verticalSampling: 1,
+					quantTableIndex: 0, blocksPerLine: 1, blocksPerColumn: 1,
+					coefficients: [Int32](repeating: 0, count: 64))
+			],
+			quantTables: [zeroAC], restartInterval: 0)
+		#expect(
+			throws: JPEGTranscode.TranscodeError.invalidQuantizationTable(
+				index: 0, coefficient: 1)
+		) {
+			try JPEGTranscode(gray)
+		}
+		#expect(
+			throws: JPEGTranscode.TranscodeError.invalidQuantizationTable(
+				index: 0, coefficient: 1)
+		) {
+			try Self.transcode(
+				luma: [Int32](repeating: 0, count: 64),
+				cb: [Int32](repeating: 0, count: 64),
+				cr: [Int32](repeating: 0, count: 64),
+				quantTables: [zeroAC, unit, unit],
+				horizontalSampling: [2, 1, 1])
 		}
 		var highLuma = unit
 		highLuma[0] = 256
@@ -53,6 +91,19 @@ struct JPEGCfLTests {
 			cr: [Int32](repeating: 0, count: 64),
 			quantTables: [maxChroma, maxLuma, maxChroma])
 		#expect(largest.quantizationRatios[0][0] == 524_280)
+		#expect(
+			throws: JPEGTranscode.TranscodeError.excessiveQuantizationRatio(
+				channel: 0, coefficient: 1)
+		) {
+			var excessiveAC = unit
+			excessiveAC[1] = 256
+			_ = try Self.transcode(
+				luma: [Int32](repeating: 0, count: 64),
+				cb: [Int32](repeating: 0, count: 64),
+				cr: [Int32](repeating: 0, count: 64),
+				quantTables: [unit, excessiveAC, unit],
+				horizontalSampling: [2, 1, 1])
+		}
 		let transcode = try JPEGTranscodeTests.transcode("small_444")
 		#expect(transcode.quantizationRatios.count == 3)
 		#expect(transcode.quantizationRatios.allSatisfy { $0.count == 64 })
@@ -213,18 +264,37 @@ struct JPEGCfLTests {
 		#expect(
 			Int64(crResidual[1]) - 1
 				== Int64(transcode.block(channel: 2, x: 0, y: 0)[1]))
+
+		let parsed = try JPEGTranscode(JPEGParser.parse(Self.maximumACJPEG()))
+		#expect(parsed.component(1).coefficients[1] == 32_767)
+		let parsedLuma = parsed.block(channel: 1, x: 0, y: 0)
+		let parsedCb = parsed.block(channel: 0, x: 0, y: 0)
+		#expect(parsedLuma[8] == 32_767)
+		#expect(parsedCb[8] == 32_767)
+		#expect(parsed.block(channel: 2, x: 0, y: 0)[8] == -32_767)
+		let parsedCbResidual = try parsed.block(
+			channel: 0, x: 0, y: 0, correlation: -7)
+		let scale = Int64(-7) * 2048 / 84
+		let coefficientScale =
+			(scale * Int64(parsed.quantizationRatios[0][8]) + 1024) >> 11
+		let prediction = (Int64(parsedLuma[8]) * coefficientScale + 1024) >> 11
+		#expect(parsedCbResidual[8] > 32_767)
+		#expect(Int64(parsedCbResidual[8]) + prediction == Int64(parsedCb[8]))
 	}
 
 	static func transcode(
 		luma: [Int32], cb: [Int32], cr: [Int32],
 		blocksPerLine: Int = 1, blocksPerColumn: Int = 1,
 		componentQuantTableIndexes: [Int] = [1, 0, 2],
-		quantTables: [[UInt16]] = (0..<3).map { _ in [UInt16](repeating: 1, count: 64) }
+		quantTables: [[UInt16]] = (0..<3).map { _ in [UInt16](repeating: 1, count: 64) },
+		horizontalSampling: [Int] = [1, 1, 1],
+		verticalSampling: [Int] = [1, 1, 1]
 	) throws -> JPEGTranscode {
 		let components = [luma, cb, cr].enumerated().map { index, coefficients in
 			JPEGComponent(
-				identifier: UInt8(index + 1), horizontalSampling: 1,
-				verticalSampling: 1,
+				identifier: UInt8(index + 1),
+				horizontalSampling: horizontalSampling[index],
+				verticalSampling: verticalSampling[index],
 				quantTableIndex: componentQuantTableIndexes[index],
 				blocksPerLine: blocksPerLine, blocksPerColumn: blocksPerColumn,
 				coefficients: coefficients)
@@ -237,9 +307,45 @@ struct JPEGCfLTests {
 			))
 	}
 
+	private static func maximumACJPEG() -> [UInt8] {
+		func segment(_ marker: UInt8, _ payload: [UInt8]) -> [UInt8] {
+			let length = payload.count + 2
+			return [0xFF, marker, UInt8(length >> 8), UInt8(length & 0xFF)] + payload
+		}
+		func amplitude(_ value: Int32) -> [UInt8] {
+			let encoded = value >= 0 ? value : value + (1 << 15) - 1
+			return (0..<15).reversed().map { UInt8(encoded >> $0 & 1) }
+		}
+
+		var bits: [UInt8] = []
+		for coefficient: Int32 in [32_767, 32_767, -32_767] {
+			bits += [0, 0, 0]
+			bits += amplitude(coefficient)
+			bits += [0, 1]
+		}
+		while !bits.count.isMultiple(of: 8) { bits.append(1) }
+		var entropy: [UInt8] = []
+		for start in stride(from: 0, to: bits.count, by: 8) {
+			let byte = bits[start..<start + 8].reduce(UInt8(0)) { ($0 << 1) | $1 }
+			entropy.append(byte)
+			if byte == 0xFF { entropy.append(0) }
+		}
+
+		let quant = segment(0xDB, [0] + [UInt8](repeating: 1, count: 64))
+		let frame = segment(
+			0xC0,
+			[8, 0, 8, 0, 8, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0])
+		let huffman = segment(
+			0xC4,
+			[0, 1] + [UInt8](repeating: 0, count: 15) + [0]
+				+ [0x10, 0, 2] + [UInt8](repeating: 0, count: 14) + [0x0F, 0])
+		let scan = segment(0xDA, [3, 1, 0, 2, 0, 3, 0, 0, 63, 0])
+		return [0xFF, 0xD8] + quant + frame + huffman + scan + entropy + [0xFF, 0xD9]
+	}
+
 	@Test("Grayscale and subsampled inputs retain zero maps and original AC")
 	func jpegCfLIsDisabledForGrayscaleAndSubsampling() throws {
-		for name in ["hopper_gray_odd", "small_422", "small_440"] {
+		for name in ["hopper_gray_odd", "hopper_420_odd", "small_422", "small_440"] {
 			let transcode = try JPEGTranscodeTests.transcode(name)
 			var data = DCGroupData(
 				widthInBlocks: transcode.width / 8,
@@ -282,6 +388,23 @@ struct JPEGCfLTests {
 
 	@Test("Only an unrepresentable actual residual raises overflow")
 	func jpegCfLChecksActualResidualRange() throws {
+		var largeLuma = [Int32](repeating: 0, count: 64)
+		var largeCb = [Int32](repeating: 0, count: 64)
+		largeLuma[1] = 32_767
+		largeCb[1] = 32_767
+		let large = try Self.transcode(
+			luma: largeLuma, cb: largeCb, cr: [Int32](repeating: 0, count: 64))
+		let largeRaw = large.block(channel: 0, x: 0, y: 0)
+		let largeResidual = try large.block(channel: 0, x: 0, y: 0, correlation: -7)
+		let scale = Int64(-7) * 2048 / 84
+		let coefficientScale =
+			(scale * Int64(large.quantizationRatios[0][8]) + 1024) >> 11
+		let prediction =
+			(Int64(large.block(channel: 1, x: 0, y: 0)[8]) * coefficientScale + 1024)
+			>> 11
+		#expect(largeResidual[8] > 32_767)
+		#expect(Int64(largeResidual[8]) + prediction == Int64(largeRaw[8]))
+
 		var luma = [Int32](repeating: 0, count: 64)
 		var cb = [Int32](repeating: 0, count: 64)
 		luma[1] = .max

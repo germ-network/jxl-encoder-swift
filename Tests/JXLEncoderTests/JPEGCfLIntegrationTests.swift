@@ -12,10 +12,13 @@ struct JPEGCfLIntegrationTests {
 		var luma = [Int32](repeating: 0, count: blockCount * 64)
 		var cb = [Int32](repeating: 0, count: blockCount * 64)
 		var cr = [Int32](repeating: 0, count: blockCount * 64)
+		luma[dcGroupBlocks * 64] = 23
 		luma[dcGroupBlocks * 64 + 1] = 84
 		luma[dcGroupBlocks * 64 + 2] = 84
+		cb[dcGroupBlocks * 64] = 17
 		cb[dcGroupBlocks * 64 + 1] = 10
 		cb[dcGroupBlocks * 64 + 2] = 10
+		cr[dcGroupBlocks * 64] = -19
 		cr[dcGroupBlocks * 64 + 1] = -10
 		cr[dcGroupBlocks * 64 + 2] = -10
 		let transcode = try JPEGCfLTests.transcode(
@@ -32,8 +35,15 @@ struct JPEGCfLIntegrationTests {
 			colorCorrelationBlockX0: dcGroupBlocks, colorCorrelationBlockY0: 0,
 			blockX0: dcGroupBlocks, blockY0: 0,
 			widthInBlocks: 1, heightInBlocks: 1)
-		#expect(ordered[0][1] == 0)
-		#expect(ordered[2][1] == 0)
+		#expect(ordered[0][0] == 17)
+		#expect(ordered[1][0] == 23)
+		#expect(ordered[2][0] == -19)
+		#expect(ordered[0][8] == 0)
+		#expect(ordered[0][16] == 0)
+		#expect(ordered[1][8] == 84)
+		#expect(ordered[1][16] == 84)
+		#expect(ordered[2][8] == 0)
+		#expect(ordered[2][16] == 0)
 		var rawDC = [[Int32]](repeating: [0], count: 3)
 		var rawWriter = SectionWriter(mode: .direct(.staticAC))
 		ACGroupEncoder.encodeJPEG(
@@ -50,6 +60,8 @@ struct JPEGCfLIntegrationTests {
 			widthInBlocks: 1, heightInBlocks: 1,
 			quantDC: &mappedDC, blockContextMap: nil,
 			order: CoeffOrder.Result.identity.orders, writer: &mappedWriter)
+		#expect(rawDC == [[17], [23], [-19]])
+		#expect(mappedDC == rawDC)
 		#expect(rawWriter.bitsWritten != mappedWriter.bitsWritten)
 	}
 
