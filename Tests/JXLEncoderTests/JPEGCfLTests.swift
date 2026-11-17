@@ -335,12 +335,22 @@ struct JPEGCfLTests {
 		let frame = segment(
 			0xC0,
 			[8, 0, 8, 0, 8, 3, 1, 0x11, 0, 2, 0x11, 0, 3, 0x11, 0])
-		let huffman = segment(
-			0xC4,
-			[0, 1] + [UInt8](repeating: 0, count: 15) + [0]
-				+ [0x10, 0, 2] + [UInt8](repeating: 0, count: 14) + [0x0F, 0])
+		var huffmanPayload: [UInt8] = [0, 1]
+		huffmanPayload += [UInt8](repeating: 0, count: 15)
+		huffmanPayload.append(0)
+		huffmanPayload += [0x10, 0, 2]
+		huffmanPayload += [UInt8](repeating: 0, count: 14)
+		huffmanPayload += [0x0F, 0]
+		let huffman = segment(0xC4, huffmanPayload)
 		let scan = segment(0xDA, [3, 1, 0, 2, 0, 3, 0, 0, 63, 0])
-		return [0xFF, 0xD8] + quant + frame + huffman + scan + entropy + [0xFF, 0xD9]
+		var jpeg: [UInt8] = [0xFF, 0xD8]
+		jpeg += quant
+		jpeg += frame
+		jpeg += huffman
+		jpeg += scan
+		jpeg += entropy
+		jpeg += [0xFF, 0xD9]
+		return jpeg
 	}
 
 	@Test("Grayscale and subsampled inputs retain zero maps and original AC")
