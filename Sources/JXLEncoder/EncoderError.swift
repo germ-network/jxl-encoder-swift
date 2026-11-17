@@ -10,6 +10,8 @@ public enum EncoderError: Error, Equatable, Sendable {
 	/// rather than silently encoded at the minimum distance.
 	case losslessNotSupported
 	case invalidDistance(Float)
+	/// The requested number of parallel workers must be positive.
+	case invalidWorkerCount(Int)
 	/// DC preparation cannot represent a sample or residual safely.
 	case unsupportedDCRange
 	case pixelCountMismatch(expected: Int, actual: Int)
