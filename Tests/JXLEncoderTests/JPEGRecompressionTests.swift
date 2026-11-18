@@ -11,11 +11,13 @@ struct PortableJPEGRecompressionTests {
 		"Ordered RGB IDs and Adobe transform zero each select coefficient recompression",
 	)
 	func recognizedRGBRoutesRecompress() throws {
-		let adobe = try JPEGParserTests.fixture("rgb_color")
-		let ids = JPEGParserTests.withRGBIDs(
-			JPEGParserTests.withoutMarker(
-				0xE0, in: try JPEGParserTests.fixture("small_444")))
+		let base = JPEGParserTests.withoutMarker(
+			0xE0, in: try JPEGParserTests.fixture("small_444"))
+		let adobe = JPEGParserTests.withMarker(
+			0xEE, payload: JPEGParserTests.adobe(0), in: base)
+		let ids = JPEGParserTests.withRGBIDs(base)
 		for jpeg in [adobe, ids] {
+			#expect(try JPEGParser.parse(jpeg).sourceIsRGB)
 			let stream = try #require(Encoder.recompressJPEG(jpeg))
 			#expect(JXLSignature.matches(stream))
 		}
@@ -27,8 +29,8 @@ struct PortableJPEGRecompressionTests {
 		let subsampled = JPEGParserTests.withRGBIDs(
 			JPEGParserTests.withoutMarker(
 				0xE0, in: try JPEGParserTests.fixture("small_422")))
-		var image = try JPEGParser.parse(subsampled)
-		image.sourceIsRGB = true
+		let image = try JPEGParser.parse(subsampled)
+		#expect(image.sourceIsRGB)
 		#expect(throws: JPEGTranscode.TranscodeError.unsupportedSubsampling) {
 			try JPEGTranscode(image)
 		}
