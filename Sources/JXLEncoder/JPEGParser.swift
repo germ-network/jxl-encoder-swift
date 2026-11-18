@@ -83,7 +83,6 @@ public struct JPEGComponent: Equatable, Sendable {
 }
 
 public struct JPEGImage: Equatable, Sendable {
-	var hasSupportedColorInterpretation = true
 	var sourceIsRGB = false
 	var hasICCProfileTag = false
 
@@ -271,7 +270,8 @@ private struct JPEGSegmentParser {
 			components: components,
 			quantTables: (0..<highestTable).map { boundQuantTables[$0] ?? [] },
 			restartInterval: restartInterval)
-		image.hasSupportedColorInterpretation = !sourceIsRGB && !hasICCProfileTag
+		image.sourceIsRGB = sourceIsRGB
+		image.hasICCProfileTag = hasICCProfileTag
 		return image
 	}
 

@@ -98,6 +98,29 @@ with open(sys.argv[1], "wb") as output:
     output.write(b"P6\n192 192\n255\n" + pixels)
 PY
 cjpeg -rgb -quality 90 -outfile "$CORE/rgb_color.jpg" "$WORK/colors.ppm"
+python3 - "$WORK/rgb-witness.ppm" "$WORK/rgb-witness.qtables" <<'PY'
+import sys
+
+width = height = 64
+pixels = bytearray()
+for y in range(height):
+    for x in range(width):
+        red = (17 + 3 * x + 5 * y + 7 * ((x * y) % 19)) & 255
+        green = (29 + 2 * red + 3 * y + (x * x) % 23) & 255
+        blue = (11 + red + 2 * green + 5 * x) & 255
+        pixels.extend((red, green, blue))
+with open(sys.argv[1], "wb") as output:
+    output.write(b"P6\n64 64\n255\n" + pixels)
+
+with open(sys.argv[2], "w") as output:
+    for channel, q00 in enumerate((3, 5, 7)):
+        values = [q00 + ((i * (channel + 3) + (i // 8) * (channel + 2)) % 29)
+                  for i in range(64)]
+        values[0] = q00
+        output.write(",".join(map(str, values)) + "\n")
+PY
+cjpeg -rgb -qtables "$WORK/rgb-witness.qtables" -qslots 0,1,2 \
+	-outfile "$CORE/rgb_coded_dc.jpg" "$WORK/rgb-witness.ppm"
 cjpeg -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/display_p3_profile.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 4x1 -outfile "$CORE/small_411.jpg" "$WORK/small.ppm"
 cjpeg -quality 85 -sample 2x2 -restart 3 -outfile "$CORE/hopper_420_odd.jpg" "$WORK/odd.ppm"

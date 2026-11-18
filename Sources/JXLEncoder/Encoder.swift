@@ -587,11 +587,10 @@ extension Encoder {
 
 	/// Re-codes a parsed JPEG as JPEG XL without an inverse DCT.
 	///
-	/// The coefficients cross over exactly as the JPEG stored them, so this is
-	/// lossless with respect to the source: decoding the result gives the same
-	/// pixels the JPEG would. What changes is the signalling — YCbCr instead of
-	/// XYB, the JPEG's own quantization tables instead of the built-in ones — and
-	/// the entropy layer, which is where the saving comes from.
+	/// JPEG quantized coefficients cross over without requantization. Unprofiled
+	/// RGB sources add the JPEG decoder's integer DC offset before coding; when
+	/// q00 does not divide 1024, decoded RGB pixels can differ by the resulting
+	/// fractional source-unit offset. RGB is signalled without a color transform.
 	public static func encodeJPEG(
 		_ transcode: JPEGTranscode,
 		optimizeCodes: Bool = true
@@ -874,7 +873,8 @@ extension Encoder {
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
-			colorMode: .ycbcr(subsampling: transcode.subsampling),
+			colorMode: transcode.image.sourceIsRGB
+				? .rgb : .ycbcr(subsampling: transcode.subsampling),
 			loopFilter: loopFilter,
 			writer: &writer)
 		FrameAssembly.combineSections(

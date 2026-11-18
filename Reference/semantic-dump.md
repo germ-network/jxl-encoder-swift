@@ -210,6 +210,13 @@ manifest records each input hash, encoder settings, source revision and SIMD
 target. It does not treat a successful reference rejection as a semantic
 fixture; 4:1:1 remains an explicit rejected input.
 
+The opt-in `jpeg-witness` RGB branch independently classifies the source with
+the pinned libjxl helper, checks the decoded frame's no-transform/sRGB/skip
+smoothing fields, and compares reconstructed coefficients and quantizers.
+`rgb_coded_dc.jpg` also fixes the optimized green DC threshold at 203 and
+contains a nonzero AC block whose adaptive context changes when the integer DC
+offset is omitted from bucket selection.
+
 For the three 513×267 color inputs, the generator also decodes the reference
 JXL with `jpeg-witness` and verifies its dimensions, sampling, DCT8 strategy,
 raw quant field and DC roundtrip before emitting `*_context.sem`. That witness

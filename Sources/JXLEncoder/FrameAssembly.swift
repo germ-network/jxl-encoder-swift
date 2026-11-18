@@ -11,9 +11,8 @@
 //
 
 enum FrameAssembly {
-	/// How the frame's colour is coded, which decides three things in the frame
-	/// header: whether a colour-transform bit appears at all, whether chroma
-	/// subsampling follows it, and whether the quant-matrix scales are written.
+	/// How the frame's colour is coded, which determines its transform bit,
+	/// optional chroma sampling fields, and quant-matrix scales.
 	public enum ColorMode: Equatable, Sendable {
 		/// XYB, the pixel path. The image header's `xyb_encoded` bit already says
 		/// so, so the frame header carries no colour-transform field.
@@ -43,18 +42,23 @@ enum FrameAssembly {
 		writer.write(1, 0)  // not all default
 		writer.write(2, 0)  // regular frame
 		writer.write(1, 0)  // vardct
-		if case .ycbcr = colorMode {
+		if case .xyb = colorMode {
+			writer.write(2, 0)  // no frame flags
+		} else {
 			writer.write(2, 2)  // flags selector bits (17 .. 272)
 			writer.write(8, 111)  // skip adaptive dc smoothing (128)
-		} else {
-			writer.write(2, 0)  // no frame flags
 		}
 
-		// Only present when the image header said `xyb_encoded` is false: the
-		// bit chooses YCbCr over none.
-		if case .ycbcr(let subsampling) = colorMode {
+		// Non-XYB frames always write do_YCbCr; only its true branch carries
+		// sampling fields.
+		switch colorMode {
+		case .ycbcr(let subsampling):
 			writer.write(1, 1)  // alternate: YCbCr
 			subsampling.write(to: &writer)
+		case .rgb:
+			writer.write(1, 0)  // no color transform
+		case .xyb:
+			break
 		}
 
 		precondition(upsampling == 1 || upsampling == 2)

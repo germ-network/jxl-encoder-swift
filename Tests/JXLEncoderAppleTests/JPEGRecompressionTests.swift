@@ -19,8 +19,7 @@
 	@Suite("JPEG recompression through the shim")
 	struct JPEGRecompressionTests {
 
-		@Test(
-			"RGB and profiled JPEG fallback preserves decoded colors")
+		@Test("RGB coefficient path and profiled fallback preserve decoded colors")
 		func colorFallbackMatchesDecodedSource() throws {
 			for name in ["rgb_color", "display_p3_profile"] {
 				let source = try Self.fixture(name)
@@ -32,7 +31,8 @@
 		}
 
 		@Test(
-			"concurrent RGB and profiled JPEG fallback preserves decoded colors")
+			"concurrent RGB coefficient path and profiled fallback preserve decoded colors"
+		)
 		func concurrentColorFallbackMatchesDecodedSource() async throws {
 			for name in ["rgb_color", "display_p3_profile"] {
 				let source = try Self.fixture(name)
@@ -128,6 +128,7 @@
 		static let recompressible = [
 			"hopper_444", "hopper_422", "hopper_420_restart", "hopper_420_odd",
 			"hopper_420_sof1", "hopper_gray_odd", "small_444", "small_422",
+			"rgb_color",
 			"small_440",
 		]
 		/// Everything it should decline, with the reason.
@@ -136,7 +137,7 @@
 		/// `cjxl --lossless_jpeg=1` refuses the same file. The other two are
 		/// entropy coders the parser does not implement.
 		static let mustFallBack = [
-			"hopper_411", "reject_progressive", "reject_arithmetic", "rgb_color",
+			"hopper_411", "reject_progressive", "reject_arithmetic",
 			"display_p3_profile",
 		]
 

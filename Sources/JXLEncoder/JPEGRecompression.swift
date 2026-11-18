@@ -23,8 +23,9 @@ extension Encoder {
 	/// Re-codes a JPEG from its own quantized coefficients, or returns nil if
 	/// this one cannot take that path.
 	///
-	/// A non-JPEG, unsupported layout, RGB interpretation, or tagged ICC profile
-	/// returns nil so the caller can decode and re-encode the pixels instead.
+	/// A non-JPEG, unsupported layout, or tagged ICC profile returns nil so the
+	/// caller can decode and re-encode the pixels instead. Unprofiled RGB and
+	/// YCbCr inputs use the coefficient path when all RGB components are 1×1.
 	/// The output declares no orientation, so a
 	/// caller that must keep a rotated source upright checks
 	/// `JPEGParser.exifOrientation` first.

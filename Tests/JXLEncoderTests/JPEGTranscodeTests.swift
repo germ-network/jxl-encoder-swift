@@ -9,10 +9,26 @@ import Testing
 @Suite("JPEG transcode layout")
 struct JPEGTranscodeTests {
 	@Test(
-		"RGB channels retain component order and use the mapped quantizers for coded DC",
-		.disabled("Pending RGB channel mapping and coded DC"))
-	func rgbChannelOrderAndShiftedDC() {
-		Issue.record("Pending RGB channel mapping and coded DC")
+		"RGB channels retain component order and use the mapped quantizers for coded DC")
+	func rgbChannelOrderAndShiftedDC() throws {
+		let base = try JPEGParserTests.fixture("rgb_coded_dc")
+		let image = try JPEGParser.parse(base)
+		let transcode = try JPEGTranscode(image)
+		#expect(transcode.componentMap == [0, 1, 2])
+		#expect((0..<3).map { transcode.component($0).identifier } == [0x52, 0x47, 0x42])
+		let rawDCs = image.components.map { $0.coefficients[0] }
+		#expect(Set(rawDCs).count == 3)
+		#expect(
+			(0..<3).map { image.quantTables[image.components[$0].quantTableIndex][0] }
+				== [3, 5, 7])
+		for channel in 0..<3 {
+			let source = image.components[channel]
+			let q00 = image.quantTables[source.quantTableIndex][0]
+			let raw = source.coefficients[0]
+			#expect(transcode.block(channel: channel, x: 0, y: 0)[0] == raw)
+			#expect(transcode.dc(channel: channel, x: 0, y: 0) == raw)
+			#expect(transcode.codedDC(raw, channel: channel) == raw + Int32(1024 / q00))
+		}
 	}
 
 	@Test("channel quantization views consume immutable component-bound values")
@@ -60,16 +76,12 @@ struct JPEGTranscodeTests {
 	}
 
 	@Test(
-		"unsupported color interpretation cannot enter coefficient coding")
+		"profiled source cannot enter coefficient coding")
 	func unsupportedColorInterpretation() throws {
-		let rgb = try JPEGParserTests.fixture("rgb_color")
 		let profile = try JPEGParserTests.fixture("display_p3_profile")
-		for bytes in [rgb, profile] {
-			let image = try JPEGParser.parse(bytes)
-			#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation)
-			{
-				try JPEGTranscode(image)
-			}
+		let image = try JPEGParser.parse(profile)
+		#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation) {
+			try JPEGTranscode(image)
 		}
 	}
 

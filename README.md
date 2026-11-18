@@ -121,13 +121,16 @@ section, DC modular sub-encoder, chroma subsampling, alpha flattening, and
 baseline JPEG recompression. A bare `FF 0A` codestream decodes through ImageIO
 on macOS and iOS — no ISOBMFF container needed.
 
-**JPEG input is recompressed rather than re-encoded.** A JPEG's own quantized
-coefficients are re-coded directly — no inverse transform, so no generation of
-loss. Fidelity matches `cjxl --lossless_jpeg=1`: identical mean error to three
-decimals where comparable, slightly better at 4:4:4, better on greyscale. What
-the parser or the format declines — progressive, arithmetic-coded, CMYK, 4:1:1 —
-falls back to decoding and re-encoding the pixels, and a `maxPixelSize` does too,
-since a transcode reproduces the source's own resolution.
+**JPEG input is recompressed rather than re-encoded.** For supported baseline
+JPEGs, the source quantized coefficients and tables are carried into the JPEG XL
+stream without an inverse transform or requantization. Unprofiled RGB and
+YCbCr sources use separate frame signaling; RGB requires 1×1 sampling. Its DC
+coding includes the JPEG decoder's integer offset `1024 / q00`. When `q00` does
+not divide 1024, that integer offset can leave a fractional source-unit
+difference after decoding and rounding, even though the original JPEG
+coefficients are recovered exactly. Progressive, arithmetic-coded, CMYK,
+profiled, unsupported-sampling JPEGs and a `maxPixelSize` use the pixel path
+instead.
 
 The saving is 1–3%, not the 20% often quoted for JPEG recompression; small
 greyscale files come out larger. The reasons to use it are the absence of
