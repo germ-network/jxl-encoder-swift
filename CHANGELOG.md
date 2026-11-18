@@ -1,5 +1,13 @@
 # @germ-network/jxl-encoder-swift
 
+## 0.4.2
+
+### Patch Changes
+
+- [#57](https://github.com/germ-network/jxl-encoder-swift/pull/57) [`fe753ba`](https://github.com/germ-network/jxl-encoder-swift/commit/fe753ba29e26d2421614f7c34d658ae0ce0bdb1d) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Recompress recognized unprofiled 4:4:4 RGB JPEGs from their quantized coefficients while signaling RGB meaning and the source decoder's integer DC offset.
+
+  The offset can leave a fractional source-unit difference in decoded pixels when q00 does not divide 1024, while the original JPEG coefficients remain exactly recoverable.
+
 ## 0.4.1
 
 ### Patch Changes
