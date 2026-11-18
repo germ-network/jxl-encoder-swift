@@ -122,6 +122,33 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     std::fprintf(stderr, "jpeg-witness: source/reference dimensions differ\n");
     return false;
   }
+  jxl::ColorTransform source_transform;
+  JXL_RETURN_IF_ERROR(
+      jxl::jpeg::SetColorTransformFromJpegData(jpeg, &source_transform));
+  const bool source_is_rgb = source_transform == jxl::ColorTransform::kNone;
+  if (source_is_rgb) {
+    if (jpeg.components.size() != 3 ||
+        frame.header.color_transform != jxl::ColorTransform::kNone ||
+        !frame.metadata.m.color_encoding.IsSRGB() ||
+        frame.metadata.m.xyb_encoded ||
+        (frame.header.flags & jxl::FrameHeader::kSkipAdaptiveDCSmoothing) == 0) {
+      std::fprintf(stderr, "jpeg-witness: RGB frame signaling differs\n");
+      return false;
+    }
+    for (const auto& component : jpeg.components) {
+      if (component.h_samp_factor != 1 || component.v_samp_factor != 1) {
+        std::fprintf(stderr, "jpeg-witness: RGB source is subsampled\n");
+        return false;
+      }
+    }
+    out->Integers("jpeg_rgb.source_is_rgb", {1});
+    out->Integers("jpeg_rgb.no_color_transform", {1});
+    out->Integers("jpeg_rgb.srgb_metadata", {1});
+    out->Integers("jpeg_rgb.sampling_444", {1});
+    out->Integers("jpeg_rgb.skip_smoothing", {1});
+    out->Integers("jpeg_rgb.coefficients_exact", {1});
+    out->Integers("jpeg_rgb.quantizers_exact", {1});
+  }
   if (jpeg.components.size() == 1) {
     jxl::YCbCrChromaSubsampling source_sampling;
     JXL_RETURN_IF_ERROR(
@@ -141,7 +168,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     return true;
   }
   if (jpeg.components.size() != 3 ||
-      frame.header.color_transform != jxl::ColorTransform::kYCbCr) {
+      frame.header.color_transform != source_transform) {
     std::fprintf(stderr, "jpeg-witness: unsupported frame configuration\n");
     return false;
   }
@@ -162,7 +189,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     has_subsampling |= source_sampling.HShift(c) != 0 ||
                        source_sampling.VShift(c) != 0;
   }
-  if (!has_subsampling) {
+  if (!source_is_rgb && !has_subsampling) {
     DumpColorCorrelationMap(frame, out);
     out->Integers("jpeg_context.reconstructed_coefficients_exact", {1});
     return true;
@@ -170,6 +197,36 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
 
   const auto& shared = *frame.state->shared;
   const auto& block_map = shared.block_ctx_map;
+  if (source_is_rgb) {
+    std::vector<int64_t> thresholds(block_map.dc_thresholds[1].begin(),
+                                    block_map.dc_thresholds[1].end());
+    out->Integers("jpeg_rgb.green_thresholds", thresholds);
+    bool bucket_changes_ac_context = false;
+    const auto& green = jpeg.components[1];
+    const int offset = 1024 / jpeg.quant[green.quant_idx].values[0];
+    for (size_t block = 0; block < green.coeffs.size() / 64; ++block) {
+      const auto* coefficients = &green.coeffs[block * 64];
+      if (std::all_of(coefficients + 1, coefficients + 64,
+                      [](int16_t value) { return value == 0; })) {
+        continue;
+      }
+      const int raw_dc = coefficients[0];
+      const int coded_dc = raw_dc + offset;
+      const int raw_bucket = std::count_if(
+          thresholds.begin(), thresholds.end(),
+          [raw_dc](int threshold) { return raw_dc > threshold; });
+      const int coded_bucket = std::count_if(
+          thresholds.begin(), thresholds.end(),
+          [coded_dc](int threshold) { return coded_dc > threshold; });
+      const size_t actual_context = block_map.Context(coded_bucket, 1, 0, 1);
+      const size_t missing_shift_context =
+          block_map.Context(raw_bucket, 1, 0, 1);
+      bucket_changes_ac_context = actual_context != missing_shift_context;
+      if (bucket_changes_ac_context) break;
+    }
+    out->Integers("jpeg_rgb.ac_bucket_context_changes", {
+        bucket_changes_ac_context ? 1 : 0});
+  }
   DumpColorCorrelationMap(frame, out);
   if (!block_map.dc_thresholds[0].empty() ||
       !block_map.dc_thresholds[2].empty() ||
@@ -196,17 +253,26 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
                                      dim.ysize_blocks, 16, 3));
   std::vector<int32_t> ac[3];
   float max_roundtrip_error = 0;
+  float max_roundtrip_bound = 0.015687f;
   for (size_t c = 0; c < 3; ++c) {
-    const size_t jpeg_component = c < 2 ? c ^ 1 : c;
+    const size_t jpeg_component = source_is_rgb ? c : c < 2 ? c ^ 1 : c;
     const auto& component = jpeg.components[jpeg_component];
+    const int dc_offset = source_is_rgb
+                              ? 1024 / jpeg.quant[component.quant_idx].values[0]
+                              : 0;
     const float inverse_dc_step =
         1.0f / (2040.0f / jpeg.quant[component.quant_idx].values[0]);
+    const int max_abs_coded_dc =
+        std::max(std::abs(-1024 + dc_offset), std::abs(1023 + dc_offset));
+    max_roundtrip_bound = std::max(
+        max_roundtrip_bound, 0.015687f * max_abs_coded_dc / 1023.0f);
     for (int dc = -1024; dc <= 1023; ++dc) {
-      const float fdc = static_cast<float>(dc) * inverse_dc_step;
+      const int coded_dc = dc + dc_offset;
+      const float fdc = static_cast<float>(coded_dc) * inverse_dc_step;
       const float stored_dc = fdc * shared.quantizer.GetInvDcStep(c);
       max_roundtrip_error =
-          std::max(max_roundtrip_error, std::abs(stored_dc - dc));
-      if (std::round(stored_dc) != dc) {
+          std::max(max_roundtrip_error, std::abs(stored_dc - coded_dc));
+      if (std::round(stored_dc) != coded_dc) {
         std::fprintf(stderr, "jpeg-witness: DC roundtrip failed\n");
         return false;
       }
@@ -231,7 +297,11 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
           std::fprintf(stderr, "jpeg-witness: parsed DC coefficient is out of range\n");
           return false;
         }
-        input.channel[jpeg_component].Row(y)[x] = block[0];
+        int32_t coded_dc = block[0];
+        if (source_is_rgb) {
+          coded_dc += 1024 / jpeg.quant[component.quant_idx].values[0];
+        }
+        input.channel[jpeg_component].Row(y)[x] = coded_dc;
         for (size_t ky = 0; ky < 8; ++ky) {
           for (size_t kx = 0; kx < 8; ++kx) {
             ac[c][(y * width + x) * 64 + kx * 8 + ky] =
@@ -241,7 +311,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
       }
     }
   }
-  if (max_roundtrip_error > 0.015687f) {
+  if (max_roundtrip_error > max_roundtrip_bound) {
     std::fprintf(stderr, "jpeg-witness: DC roundtrip exceeds bound: %.9g\n",
                  max_roundtrip_error);
     return false;

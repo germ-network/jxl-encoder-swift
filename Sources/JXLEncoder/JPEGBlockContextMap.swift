@@ -108,7 +108,10 @@ public enum JPEGBlockContextMap {
 		var total = 0
 		for y in 0..<height {
 			for x in 0..<width {
-				let dc = Int(transcode.dc(channel: luma, x: x, y: y))
+				let dc = Int(
+					transcode.codedDC(
+						transcode.dc(channel: luma, x: x, y: y),
+						channel: luma))
 				let bucket = UInt32(truncatingIfNeeded: dc + 1024)
 				counts[Int(min(bucket, 2047))] += 1
 				total += 1

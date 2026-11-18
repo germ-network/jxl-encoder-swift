@@ -345,7 +345,9 @@ extension ACGroupEncoder {
 					let localY = subsampling.subsampledY(
 						channel: channel, blockY: by)
 					quantDC[channel][localY * channelWidths[channel] + localX] =
-						Int32(clamping: block[0])
+						Int32(
+							clamping: transcode.codedDC(
+								block[0], channel: channel))
 				}
 
 				// Every channel's context at this position shares the same
@@ -353,7 +355,9 @@ extension ACGroupEncoder {
 				// not resampled per channel (confirmed at the source —
 				// `row_qdc[bx]` is indexed by the full-resolution position).
 				let dcBucket = blockContextMap?.bucket(
-					dc: quantized[1].isEmpty ? 0 : quantized[1][0])
+					dc: quantized[1].isEmpty
+						? 0 : transcode.codedDC(quantized[1][0], channel: 1)
+				)
 
 				for channel in ACTokenizer.channelOrder {
 					guard

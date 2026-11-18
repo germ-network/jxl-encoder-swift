@@ -8,12 +8,64 @@ import Testing
 struct PortableJPEGRecompressionTests {
 
 	@Test(
-		"unsupported JPEG color interpretation returns nil")
+		"Ordered RGB IDs and Adobe transform zero each select coefficient recompression",
+	)
+	func recognizedRGBRoutesRecompress() throws {
+		let base = JPEGParserTests.withoutMarker(
+			0xE0, in: try JPEGParserTests.fixture("small_444"))
+		let adobe = JPEGParserTests.withMarker(
+			0xEE, payload: JPEGParserTests.adobe(0), in: base)
+		let ids = JPEGParserTests.withRGBIDs(base)
+		for jpeg in [adobe, ids] {
+			#expect(try JPEGParser.parse(jpeg).sourceIsRGB)
+			let stream = try #require(Encoder.recompressJPEG(jpeg))
+			#expect(JXLSignature.matches(stream))
+		}
+	}
+
+	@Test(
+		"RGB coefficient recompression requires 1×1 sampling for every component")
+	func rgbRejectsSubsampling() throws {
+		let subsampled = JPEGParserTests.withRGBIDs(
+			JPEGParserTests.withoutMarker(
+				0xE0, in: try JPEGParserTests.fixture("small_422")))
+		let image = try JPEGParser.parse(subsampled)
+		#expect(image.sourceIsRGB)
+		#expect(throws: JPEGTranscode.TranscodeError.unsupportedSubsampling) {
+			try JPEGTranscode(image)
+		}
+		#expect(Encoder.recompressJPEG(subsampled) == nil)
+
+		let parsed = try JPEGParser.parse(try JPEGParserTests.fixture("small_444"))
+		let repeated = JPEGImage(
+			width: parsed.width,
+			height: parsed.height,
+			components: parsed.components.map {
+				JPEGComponent(
+					identifier: $0.identifier, horizontalSampling: 2,
+					verticalSampling: 2, quantTableIndex: $0.quantTableIndex,
+					blocksPerLine: $0.blocksPerLine,
+					blocksPerColumn: $0.blocksPerColumn,
+					coefficients: $0.coefficients)
+			},
+			quantTables: parsed.quantTables,
+			restartInterval: parsed.restartInterval)
+		var rgb = repeated
+		rgb.sourceIsRGB = true
+		#expect(throws: JPEGTranscode.TranscodeError.unsupportedSubsampling) {
+			try JPEGTranscode(rgb)
+		}
+	}
+
+	@Test("profiled JPEGs fall back while supported JPEG color modes recompress")
 	func unsupportedColorFallsBack() throws {
 		let rgb = try JPEGParserTests.fixture("rgb_color")
 		let profile = try JPEGParserTests.fixture("display_p3_profile")
-		#expect(Encoder.recompressJPEG(rgb) == nil)
+		let rgbWithProfile = JPEGParserTests.withMarker(
+			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1], in: rgb)
+		#expect(Encoder.recompressJPEG(rgb) != nil)
 		#expect(Encoder.recompressJPEG(profile) == nil)
+		#expect(Encoder.recompressJPEG(rgbWithProfile) == nil)
 		#expect(Encoder.recompressJPEG(try JPEGParserTests.fixture("small_444")) != nil)
 		#expect(
 			Encoder.recompressJPEG(try JPEGParserTests.fixture("hopper_gray_odd"))

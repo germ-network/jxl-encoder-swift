@@ -24,7 +24,7 @@ public struct JPEGTranscode {
 	let quantizationRatios: [[Int32]]
 
 	public enum TranscodeError: Error, Equatable, Sendable {
-		/// Color interpretation the current coefficient writer cannot preserve.
+		/// A tagged profile the coefficient route does not serialize.
 		case unsupportedColorInterpretation
 		/// Sampling factors JXL cannot express: it carries a 2-bit mode per
 		/// channel, not arbitrary factors.
@@ -41,7 +41,7 @@ public struct JPEGTranscode {
 	}
 
 	public init(_ image: JPEGImage) throws {
-		guard image.hasSupportedColorInterpretation else {
+		guard !image.hasICCProfileTag else {
 			throw TranscodeError.unsupportedColorInterpretation
 		}
 		let count = image.components.count
@@ -62,10 +62,18 @@ public struct JPEGTranscode {
 			else { throw TranscodeError.unsupportedSubsampling }
 			subsampling = sampling
 		case 3:
-			// libjxl's `JpegOrder` for kYCbCr. JXL orders channels X, Y, B, and
-			// under a YCbCr colour transform that reads as Cb, Y, Cr — so the
-			// first two components swap.
-			componentMap = [1, 0, 2]
+			if image.sourceIsRGB {
+				guard
+					image.components.allSatisfy({
+						$0.horizontalSampling == 1
+							&& $0.verticalSampling == 1
+					})
+				else { throw TranscodeError.unsupportedSubsampling }
+				componentMap = [0, 1, 2]
+			} else {
+				// JXL channels X, Y, B read as Cb, Y, Cr in YCbCr mode.
+				componentMap = [1, 0, 2]
+			}
 			isGrayscale = false
 			guard
 				let subsampling = ChromaSubsampling.fromJPEG(
@@ -158,6 +166,12 @@ public struct JPEGTranscode {
 
 	// MARK: - Coefficients
 
+	func codedDC(_ coefficient: Int32, channel: Int) -> Int32 {
+		guard image.sourceIsRGB else { return coefficient }
+		let q00 = image.quantTables[component(channel).quantTableIndex][0]
+		return coefficient + Int32(1024 / q00)
+	}
+
 	/// Blocks this channel carries, in its own subsampled grid.
 	public func blocksPerLine(channel: Int) -> Int {
 		component(channel).blocksPerLine
@@ -169,9 +183,8 @@ public struct JPEGTranscode {
 
 	/// One block in JXL layout: transposed, DC included at index 0.
 	///
-	/// The DC is carried across untouched. libjxl offsets it by `1024 / qt[0]`
-	/// only when the colour transform is `kNone`; under YCbCr — which is what a
-	/// JPEG transcode signals — it takes the stored value as is.
+	/// Returns the raw transposed block. The RGB coding consumers apply `codedDC`
+	/// at the DC coding and context-statistics seams; this accessor stays raw.
 	public func block(channel: Int, x: Int, y: Int) -> [Int32] {
 		let component = component(channel)
 		let offset = (y * component.blocksPerLine + x) * 64

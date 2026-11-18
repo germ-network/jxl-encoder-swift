@@ -35,8 +35,8 @@ struct YCbCrHeaderTests {
 		return writer
 	}
 
-	/// The colour-transform bit and subsampling modes only exist in YCbCr; the
-	/// quant-matrix scales only exist in XYB. JPEG transcodes also carry flag 128.
+	/// The colour-transform bit always exists for non-XYB frames. JPEG transcodes
+	/// also carry flag 128; only YCbCr follows the transform bit with subsampling.
 	@Test("YCbCr trades the quant-matrix scales for a transform and subsampling")
 	func fieldsSwapped() {
 		let xyb = Self.header(.xyb(xQuantMatrixScale: 3))
@@ -51,6 +51,23 @@ struct YCbCrHeaderTests {
 		var reader = BitReader(bytes: writer.take())
 		#expect(reader.read(1) == 0)
 		#expect(reader.read(2) == 0)
+		#expect(reader.read(1) == 0)
+		#expect(reader.read(2) == 0)
+	}
+
+	@Test("RGB frame headers skip smoothing without YCbCr or XYB fields")
+	func rgbFields() {
+		let rgb = Self.header(.rgb)
+		let ycbcr = Self.header(.ycbcr(subsampling: .none))
+		#expect(rgb.bitsWritten == ycbcr.bitsWritten - 6)
+		var writer = rgb
+		writer.zeroPadToByte()
+		var reader = BitReader(bytes: writer.take())
+		#expect(reader.read(1) == 0)
+		#expect(reader.read(2) == 0)
+		#expect(reader.read(1) == 0)
+		#expect(reader.read(2) == 2)
+		#expect(reader.read(8) == 111)
 		#expect(reader.read(1) == 0)
 		#expect(reader.read(2) == 0)
 	}

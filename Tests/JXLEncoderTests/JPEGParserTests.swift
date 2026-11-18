@@ -530,79 +530,74 @@ struct JPEGParserTests {
 	}
 
 	@Test(
-		"APP0, first valid Adobe marker, and ordered component IDs determine color eligibility"
+		"APP0, first valid Adobe marker, and ordered component IDs determine source RGB"
 	)
 	func markerColorPrecedence() throws {
 		let base = try Self.fixture("small_444")
 		#expect(
-			try !JPEGParser.parse(Self.fixture("rgb_color"))
-				.hasSupportedColorInterpretation)
+			try JPEGParser.parse(Self.fixture("rgb_color")).sourceIsRGB)
 		let noAPP0 = Self.withoutMarker(0xE0, in: base)
 		let rgbIDs = Self.withRGBIDs(noAPP0)
-		#expect(try !JPEGParser.parse(rgbIDs).hasSupportedColorInterpretation)
+		#expect(try JPEGParser.parse(rgbIDs).sourceIsRGB)
 		#expect(
 			try JPEGParser.parse(Self.withMarker(0xE0, payload: [0], in: rgbIDs))
-				.hasSupportedColorInterpretation)
+				.sourceIsRGB == false)
 		#expect(
 			try JPEGParser.parse(
 				Self.withMarkers([(0xE0, [0]), (0xEE, Self.adobe(0))], in: rgbIDs)
 			)
-			.hasSupportedColorInterpretation)
+			.sourceIsRGB == false)
 		#expect(
 			try JPEGParser.parse(
 				Self.withMarker(0xEE, payload: Self.adobe(0), in: noAPP0)
 			)
-			.hasSupportedColorInterpretation == false)
+			.sourceIsRGB)
 		#expect(
 			try JPEGParser.parse(
 				Self.withMarker(0xEE, payload: Self.adobe(1), in: noAPP0)
 			)
-			.hasSupportedColorInterpretation)
+			.sourceIsRGB == false)
 		#expect(
 			try JPEGParser.parse(
 				Self.withMarker(0xEE, payload: Self.adobe(2), in: noAPP0)
 			)
-			.hasSupportedColorInterpretation)
+			.sourceIsRGB == false)
 		let firstWins = Self.withMarkers(
 			[
 				(0xEE, Self.adobe(0)), (0xEE, Self.adobe(1)),
 			], in: noAPP0)
-		#expect(try !JPEGParser.parse(firstWins).hasSupportedColorInterpretation)
+		#expect(try JPEGParser.parse(firstWins).sourceIsRGB)
 		let invalidThenValid = Self.withMarkers(
 			[
 				(0xEE, Array(Self.adobe(0).prefix(11))), (0xEE, Self.adobe(1)),
 			], in: noAPP0)
-		#expect(try JPEGParser.parse(invalidThenValid).hasSupportedColorInterpretation)
+		#expect(try !JPEGParser.parse(invalidThenValid).sourceIsRGB)
 		let overlongThenValid = Self.withMarkers(
 			[(0xEE, Self.adobe(0) + [0]), (0xEE, Self.adobe(2))], in: noAPP0)
-		#expect(try JPEGParser.parse(overlongThenValid).hasSupportedColorInterpretation)
+		#expect(try !JPEGParser.parse(overlongThenValid).sourceIsRGB)
 		var wrongSignature = Self.adobe(0)
 		wrongSignature[0] = 0x58
 		#expect(
 			try JPEGParser.parse(
 				Self.withMarker(0xEE, payload: wrongSignature, in: noAPP0)
-			).hasSupportedColorInterpretation)
+			).sourceIsRGB == false)
 		#expect(
 			try JPEGParser.parse(Self.withComponentIDs([0x31, 0x32, 0x33], in: noAPP0))
-				.hasSupportedColorInterpretation)
-		#expect(
-			try JPEGParser.parse(Self.withComponentIDs([0x52, 0x42, 0x47], in: noAPP0))
-				.hasSupportedColorInterpretation)
-
+				.sourceIsRGB == false)
 		let afterScan = Self.withMarkerAfterScan(0xE0, payload: [0], in: rgbIDs)
-		#expect(try JPEGParser.parse(afterScan).hasSupportedColorInterpretation)
+		#expect(try !JPEGParser.parse(afterScan).sourceIsRGB)
 		let afterScanAdobe = Self.withMarkerAfterScan(
 			0xEE, payload: Self.adobe(0), in: noAPP0)
-		#expect(try !JPEGParser.parse(afterScanAdobe).hasSupportedColorInterpretation)
+		#expect(try JPEGParser.parse(afterScanAdobe).sourceIsRGB)
 		let afterScanICC = Self.withMarkerAfterScan(
 			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1], in: noAPP0)
-		#expect(try !JPEGParser.parse(afterScanICC).hasSupportedColorInterpretation)
+		#expect(try JPEGParser.parse(afterScanICC).hasICCProfileTag)
 		let gray = try Self.fixture("hopper_gray_odd")
 		#expect(
 			try JPEGParser.parse(
 				Self.withMarker(0xEE, payload: Self.adobe(0), in: gray)
 			)
-			.hasSupportedColorInterpretation)
+			.sourceIsRGB == false)
 		#expect(
 			try JPEGParser.parse(rgbIDs).components.map(\.coefficients)
 				== JPEGParser.parse(noAPP0).components.map(\.coefficients))
@@ -615,16 +610,21 @@ struct JPEGParserTests {
 	}
 
 	@Test(
-		"fully tagged ICC metadata declines coefficient recompression")
+		"ICC signature detection is independent of RGB classification")
 	func iccProfileEligibility() throws {
 		let base = try Self.fixture("small_444")
 		#expect(
-			try !JPEGParser.parse(Self.fixture("display_p3_profile"))
-				.hasSupportedColorInterpretation)
+			try JPEGParser.parse(Self.fixture("display_p3_profile")).hasICCProfileTag)
 		let tag: [UInt8] = Array("ICC_PROFILE\0".utf8)
+		let rgbICC = try JPEGParser.parse(
+			Self.withMarker(
+				0xE2, payload: tag + [1, 1],
+				in: Self.withRGBIDs(Self.withoutMarker(0xE0, in: base))))
+		#expect(rgbICC.sourceIsRGB)
+		#expect(rgbICC.hasICCProfileTag)
 		for tail: [UInt8] in [[], [0, 1], [1, 1, 1, 2], [1, 2, 1, 2]] {
 			let tagged = Self.withMarker(0xE2, payload: tag + tail, in: base)
-			#expect(try !JPEGParser.parse(tagged).hasSupportedColorInterpretation)
+			#expect(try JPEGParser.parse(tagged).hasICCProfileTag)
 		}
 		for prefix in [
 			Array("ICC_PROFIL".utf8), Array("ICC_PROFILE".utf8),
@@ -634,7 +634,7 @@ struct JPEGParserTests {
 				try JPEGParser.parse(
 					Self.withMarker(0xE2, payload: prefix, in: base)
 				)
-				.hasSupportedColorInterpretation)
+				.hasICCProfileTag == false)
 		}
 	}
 
