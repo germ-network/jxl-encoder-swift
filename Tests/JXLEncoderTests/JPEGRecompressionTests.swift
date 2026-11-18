@@ -8,6 +8,20 @@ import Testing
 struct PortableJPEGRecompressionTests {
 
 	@Test(
+		"Ordered RGB IDs and Adobe transform zero each select coefficient recompression",
+		.disabled("Pending RGB recompression admission"))
+	func recognizedRGBRoutesRecompress() {
+		Issue.record("Pending RGB recompression admission")
+	}
+
+	@Test(
+		"RGB coefficient recompression requires 1×1 sampling for every component",
+		.disabled("Pending RGB sampling validation"))
+	func rgbRejectsSubsampling() {
+		Issue.record("Pending RGB sampling validation")
+	}
+
+	@Test(
 		"unsupported JPEG color interpretation returns nil")
 	func unsupportedColorFallsBack() throws {
 		let rgb = try JPEGParserTests.fixture("rgb_color")

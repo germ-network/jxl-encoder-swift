@@ -8,6 +8,13 @@ import Testing
 /// as swapped colours or a transposed image rather than as a coding error.
 @Suite("JPEG transcode layout")
 struct JPEGTranscodeTests {
+	@Test(
+		"RGB channels retain component order and use the mapped quantizers for coded DC",
+		.disabled("Pending RGB channel mapping and coded DC"))
+	func rgbChannelOrderAndShiftedDC() {
+		Issue.record("Pending RGB channel mapping and coded DC")
+	}
+
 	@Test("channel quantization views consume immutable component-bound values")
 	func quantizationViewsUseBoundTables() throws {
 		var data = try JPEGParserTests.fixture("scan_420_111")

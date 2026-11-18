@@ -21,6 +21,7 @@ enum FrameAssembly {
 		/// YCbCr, carrying a JPEG's own coefficients. The scales are XYB-only and
 		/// must be left out, not written as their defaults.
 		case ycbcr(subsampling: ChromaSubsampling)
+		case rgb
 	}
 
 	struct LoopFilter: Equatable, Sendable {

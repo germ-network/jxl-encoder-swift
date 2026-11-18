@@ -158,6 +158,10 @@ public struct JPEGTranscode {
 
 	// MARK: - Coefficients
 
+	func codedDC(_ coefficient: Int32, channel: Int) -> Int32 {
+		coefficient
+	}
+
 	/// Blocks this channel carries, in its own subsampled grid.
 	public func blocksPerLine(channel: Int) -> Int {
 		component(channel).blocksPerLine

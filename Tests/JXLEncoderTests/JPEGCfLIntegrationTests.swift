@@ -5,6 +5,13 @@ import Testing
 
 @Suite("JPEG chroma from luma production consumers")
 struct JPEGCfLIntegrationTests {
+	@Test(
+		"Serialized RGB frames signal RGB and recover the source quantizers and coefficients",
+		.disabled("Pending independent decoding of serialized RGB frames"))
+	func actualRGBJPEGSerializationCrossCheck() {
+		Issue.record("Pending independent decoding of serialized RGB frames")
+	}
+
 	@Test("Ordering and tokenization consume the same mapped residuals")
 	func jpegCfLOrderingAndTokenizationUseResiduals() throws {
 		let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim

@@ -84,6 +84,8 @@ public struct JPEGComponent: Equatable, Sendable {
 
 public struct JPEGImage: Equatable, Sendable {
 	var hasSupportedColorInterpretation = true
+	var sourceIsRGB = false
+	var hasICCProfileTag = false
 
 	public let width: Int
 	public let height: Int
