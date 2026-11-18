@@ -1,5 +1,15 @@
 # @germ-network/jxl-encoder-swift
 
+## 0.4.1
+
+### Patch Changes
+
+- [#53](https://github.com/germ-network/jxl-encoder-swift/pull/53) [`b8163a9`](https://github.com/germ-network/jxl-encoder-swift/commit/b8163a972f337ad91cec42ba8fb3d4f5d9d181ac) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Normalize positive pixel distances below the selected libjxl minimum of 0.05 and document the accepted Swift distance surface.
+
+- [#55](https://github.com/germ-network/jxl-encoder-swift/pull/55) [`cc36ce8`](https://github.com/germ-network/jxl-encoder-swift/commit/cc36ce8d4928120b2b2b9f99a76f45dd50d5a7de) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Apply the default JPEG 4:4:4 chroma-from-luma transform while preserving source coefficients.
+
+- [#56](https://github.com/germ-network/jxl-encoder-swift/pull/56) [`cbb8a9e`](https://github.com/germ-network/jxl-encoder-swift/commit/cbb8a9e9ebb334a0758186537f4b9017df66e4da) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Add synchronous pixel encoding with bounded worker scheduling through the optional Dispatch product. Runner APIs require iOS 18 or macOS 15; existing serial and async calls remain available, and eligible JPEG recompression stays serial.
+
 ## 0.4.0
 
 ### Minor Changes
