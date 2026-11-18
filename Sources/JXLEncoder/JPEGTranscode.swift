@@ -21,6 +21,7 @@ public struct JPEGTranscode {
 	/// A single-component source. JXL still codes three channels, and the two
 	/// chroma ones carry zeros rather than a copy of the luma.
 	public let isGrayscale: Bool
+	let quantizationRatios: [[Int32]]
 
 	public enum TranscodeError: Error, Equatable, Sendable {
 		/// Color interpretation the current coefficient writer cannot preserve.
@@ -31,6 +32,12 @@ public struct JPEGTranscode {
 		case unsupportedComponentCount(Int)
 		/// A component naming a quantization table the file never defined.
 		case missingQuantTable(index: Int)
+		/// A quantizer is zero and cannot be used as a divisor.
+		case invalidQuantizationTable(index: Int, coefficient: Int)
+		/// A luma-to-chroma quantizer ratio exceeds the fixed-point range.
+		case excessiveQuantizationRatio(channel: Int, coefficient: Int)
+		/// A transformed AC residual cannot be represented by the coefficient plane.
+		case residualOverflow(channel: Int, blockX: Int, blockY: Int, coefficient: Int)
 	}
 
 	public init(_ image: JPEGImage) throws {
@@ -71,13 +78,49 @@ public struct JPEGTranscode {
 			throw TranscodeError.unsupportedComponentCount(count)
 		}
 
-		for component in image.components
-		where component.quantTableIndex >= image.quantTables.count
-			|| image.quantTables[component.quantTableIndex].count != 64
-		{
-			throw TranscodeError.missingQuantTable(index: component.quantTableIndex)
+		for component in image.components {
+			guard component.quantTableIndex >= 0,
+				component.quantTableIndex < image.quantTables.count,
+				image.quantTables[component.quantTableIndex].count == 64
+			else {
+				throw TranscodeError.missingQuantTable(
+					index: component.quantTableIndex)
+			}
+		}
+		let mappedComponents = componentMap
+		let sourceComponents = image.components
+		let sourceTables = image.quantTables
+		let tables = (0..<3).map { channel in
+			sourceTables[sourceComponents[mappedComponents[channel]].quantTableIndex]
+		}
+		var ratios = [[Int32]](repeating: [Int32](repeating: 0, count: 64), count: 3)
+		for channel in 0..<3 {
+			for coefficient in 0..<64 {
+				let qy = tables[1][coefficient]
+				let qc = tables[channel][coefficient]
+				guard qy > 0 else {
+					throw TranscodeError.invalidQuantizationTable(
+						index: image.components[componentMap[1]]
+							.quantTableIndex,
+						coefficient: coefficient)
+				}
+				guard qc > 0 else {
+					throw TranscodeError.invalidQuantizationTable(
+						index: image.components[componentMap[channel]]
+							.quantTableIndex,
+						coefficient: coefficient)
+				}
+				let ratio = Int64(qy) * 2048 / Int64(qc)
+				guard ratio <= 524_287 else {
+					throw TranscodeError.excessiveQuantizationRatio(
+						channel: channel, coefficient: coefficient)
+				}
+				ratios[channel][(coefficient % 8) * 8 + coefficient / 8] = Int32(
+					ratio)
+			}
 		}
 		self.image = image
+		quantizationRatios = ratios
 	}
 
 	public var width: Int { image.width }

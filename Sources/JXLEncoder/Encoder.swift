@@ -675,10 +675,14 @@ extension Encoder {
 			let groupDim = ImageDim(
 				width: rect.width, height: rect.height,
 				blockAlignment: alignment)
-			return DCGroupData(
+			var data = DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks,
 				subsampling: transcode.subsampling, epfSharpness: 0)
+			transcode.populateColorCorrelation(
+				data: &data, blockX0: rect.x0 / Geometry.blockDim,
+				blockY0: rect.y0 / Geometry.blockDim)
+			return data
 		}
 
 		// No meaning without per-image code optimisation to carry it — the
@@ -693,16 +697,26 @@ extension Encoder {
 			var sampler = CoeffOrder.Sampler()
 			for gy in 0..<dim.heightInGroups {
 				for gx in 0..<dim.widthInGroups {
+					let blockX0 = gx * Geometry.groupDimInBlocks
+					let blockY0 = gy * Geometry.groupDimInBlocks
 					let rect = dim.pixelRect(
 						ix: gx, iy: gy, dim: Geometry.groupDim)
 					let groupDim = ImageDim(
 						width: rect.width, height: rect.height,
 						blockAlignment: alignment)
+					let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
+					let dcGroupX = blockX0 / dcGroupBlocks
+					let dcGroupY = blockY0 / dcGroupBlocks
+					let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
 					let coefficients =
-						ACGroupEncoder.jpegCoefficientsForOrdering(
+						try ACGroupEncoder.jpegCoefficientsForOrdering(
 							transcode: transcode,
-							blockX0: gx * Geometry.groupDimInBlocks,
-							blockY0: gy * Geometry.groupDimInBlocks,
+							colorCorrelation: dcData[dcIndex],
+							colorCorrelationBlockX0: dcGroupX
+								* dcGroupBlocks,
+							colorCorrelationBlockY0: dcGroupY
+								* dcGroupBlocks,
+							blockX0: blockX0, blockY0: blockY0,
 							widthInBlocks: groupDim.widthInBlocks,
 							heightInBlocks: groupDim.heightInBlocks)
 					CoeffOrder.accumulateGroup(
@@ -725,6 +739,12 @@ extension Encoder {
 				let acIndex = 2 + dim.dcGroupCount + gy * dim.widthInGroups + gx
 				let blockX0 = gx * Geometry.groupDimInBlocks
 				let blockY0 = gy * Geometry.groupDimInBlocks
+				let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
+				let correlationDCGroupX = blockX0 / dcGroupBlocks
+				let correlationDCGroupY = blockY0 / dcGroupBlocks
+				let correlationDCIndex =
+					correlationDCGroupY * dim.widthInDCGroups
+					+ correlationDCGroupX
 
 				var groupDC = [[Int32]](
 					repeating: [Int32](
@@ -733,8 +753,13 @@ extension Encoder {
 							* groupDim.heightInBlocks),
 					count: 3)
 
-				ACGroupEncoder.encodeJPEG(
+				try ACGroupEncoder.encodeJPEG(
 					transcode: transcode,
+					colorCorrelation: dcData[correlationDCIndex],
+					colorCorrelationBlockX0: correlationDCGroupX
+						* dcGroupBlocks,
+					colorCorrelationBlockY0: correlationDCGroupY
+						* dcGroupBlocks,
 					blockX0: blockX0, blockY0: blockY0,
 					widthInBlocks: groupDim.widthInBlocks,
 					heightInBlocks: groupDim.heightInBlocks,

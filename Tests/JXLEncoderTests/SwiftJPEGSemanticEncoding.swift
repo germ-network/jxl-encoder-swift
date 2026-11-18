@@ -14,6 +14,21 @@ enum SwiftJPEGSemanticEncoding {
 		let dim = ImageDim(
 			width: transcode.width, height: transcode.height,
 			blockAlignment: alignment)
+		let dcData = (0..<dim.dcGroupCount).map { index in
+			let rect = dim.pixelRect(
+				ix: index % dim.widthInDCGroups, iy: index / dim.widthInDCGroups,
+				dim: Geometry.dcGroupDim)
+			let groupDim = ImageDim(
+				width: rect.width, height: rect.height, blockAlignment: alignment)
+			var data = DCGroupData(
+				widthInBlocks: groupDim.widthInBlocks,
+				heightInBlocks: groupDim.heightInBlocks,
+				subsampling: transcode.subsampling, epfSharpness: 0)
+			transcode.populateColorCorrelation(
+				data: &data, blockX0: rect.x0 / Geometry.blockDim,
+				blockY0: rect.y0 / Geometry.blockDim)
+			return data
+		}
 		let blockContextMap = JPEGBlockContextMap.compute(transcode)
 		var counts = [CoeffOrder.ZeroCounts](repeating: .init(), count: 3)
 		var sampler = CoeffOrder.Sampler()
@@ -23,10 +38,18 @@ enum SwiftJPEGSemanticEncoding {
 				let groupDim = ImageDim(
 					width: rect.width, height: rect.height,
 					blockAlignment: alignment)
-				let coefficients = ACGroupEncoder.jpegCoefficientsForOrdering(
+				let blockX0 = gx * Geometry.groupDimInBlocks
+				let blockY0 = gy * Geometry.groupDimInBlocks
+				let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
+				let dcGroupX = blockX0 / dcGroupBlocks
+				let dcGroupY = blockY0 / dcGroupBlocks
+				let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
+				let coefficients = try ACGroupEncoder.jpegCoefficientsForOrdering(
 					transcode: transcode,
-					blockX0: gx * Geometry.groupDimInBlocks,
-					blockY0: gy * Geometry.groupDimInBlocks,
+					colorCorrelation: dcData[dcIndex],
+					colorCorrelationBlockX0: dcGroupX * dcGroupBlocks,
+					colorCorrelationBlockY0: dcGroupY * dcGroupBlocks,
+					blockX0: blockX0, blockY0: blockY0,
 					widthInBlocks: groupDim.widthInBlocks,
 					heightInBlocks: groupDim.heightInBlocks)
 				CoeffOrder.accumulateGroup(
@@ -65,10 +88,18 @@ enum SwiftJPEGSemanticEncoding {
 								fullHeightInBlocks: groupDim
 									.heightInBlocks))
 				}
-				ACGroupEncoder.encodeJPEG(
+				let blockX0 = gx * Geometry.groupDimInBlocks
+				let blockY0 = gy * Geometry.groupDimInBlocks
+				let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
+				let dcGroupX = blockX0 / dcGroupBlocks
+				let dcGroupY = blockY0 / dcGroupBlocks
+				let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
+				try ACGroupEncoder.encodeJPEG(
 					transcode: transcode,
-					blockX0: gx * Geometry.groupDimInBlocks,
-					blockY0: gy * Geometry.groupDimInBlocks,
+					colorCorrelation: dcData[dcIndex],
+					colorCorrelationBlockX0: dcGroupX * dcGroupBlocks,
+					colorCorrelationBlockY0: dcGroupY * dcGroupBlocks,
+					blockX0: blockX0, blockY0: blockY0,
 					widthInBlocks: groupDim.widthInBlocks,
 					heightInBlocks: groupDim.heightInBlocks,
 					quantDC: &quantDC, blockContextMap: blockContextMap,
@@ -106,10 +137,14 @@ enum SwiftJPEGSemanticEncoding {
 				dim: Geometry.dcGroupDim)
 			let groupDim = ImageDim(
 				width: rect.width, height: rect.height, blockAlignment: alignment)
-			return DCGroupData(
+			var data = DCGroupData(
 				widthInBlocks: groupDim.widthInBlocks,
 				heightInBlocks: groupDim.heightInBlocks, subsampling: t.subsampling,
 				epfSharpness: 0)
+			t.populateColorCorrelation(
+				data: &data, blockX0: rect.x0 / Geometry.blockDim,
+				blockY0: rect.y0 / Geometry.blockDim)
+			return data
 		}
 		for by in 0..<dim.heightInBlocks {
 			for bx in 0..<dim.widthInBlocks {

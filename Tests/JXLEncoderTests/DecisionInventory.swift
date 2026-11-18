@@ -130,7 +130,7 @@ struct DecisionInventory {
 	/// planner files for this audit is added here in the same change.
 	static let replacementIssues: Set<String> = [
 		"GER-3386", "GER-3387", "GER-3388", "GER-3389", "GER-3392", "GER-3418",
-		"GER-3419", "GER-3640",
+		"GER-3404", "GER-3419", "GER-3640",
 	]
 
 	/// Id prefix for each inventoried source file; mirrors the table in
@@ -168,6 +168,7 @@ struct DecisionInventory {
 		"JO": "Sources/JXLEncoder/JPEGOrientation.swift",
 		"JP": "Sources/JXLEncoder/JPEGParser.swift",
 		"JR": "Sources/JXLEncoder/JPEGRecompression.swift",
+		"JF": "Sources/JXLEncoder/JPEGCfL.swift",
 		"JT": "Sources/JXLEncoder/JPEGTranscode.swift",
 		"PB": "Sources/JXLEncoder/PlaneBuffer.swift",
 		"PC": "Sources/JXLEncoder/PrefixCodeWriter.swift",
@@ -663,7 +664,7 @@ enum SourceGroup: String, CaseIterable {
 			].map { "Sources/JXLEncoder/\($0).swift" }
 		case .jpeg:
 			return [
-				"JPEGBlockContextMap", "JPEGHuffman", "JPEGOrientation",
+				"JPEGCfL", "JPEGBlockContextMap", "JPEGHuffman", "JPEGOrientation",
 				"JPEGParser",
 				"JPEGRecompression", "JPEGTranscode",
 			].map { "Sources/JXLEncoder/\($0).swift" }

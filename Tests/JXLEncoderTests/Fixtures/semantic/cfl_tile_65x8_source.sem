@@ -1,0 +1,5 @@
+jxl-semantic-dump 1
+jpeg_cfl.map_size i 2 2 1
+jpeg_cfl.ytob_map i 2 -10 20
+jpeg_cfl.ytox_map i 2 11 -20
+jpeg_context.reconstructed_coefficients_exact i 1 1
