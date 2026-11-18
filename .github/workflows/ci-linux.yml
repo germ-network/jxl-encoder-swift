@@ -48,8 +48,10 @@ jobs:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
       - name: Build core
         run: swift build --target JXLEncoder
-      - name: Test core
-        run: swift test --filter JXLEncoderTests
+      - name: Build Dispatch adapter
+        run: swift build --target JXLEncoderDispatch
+      - name: Test core and Dispatch adapter
+        run: swift test --filter 'JXLEncoderTests|JXLEncoderDispatchTests'
 
   lint:
     name: Lint (swift-format)

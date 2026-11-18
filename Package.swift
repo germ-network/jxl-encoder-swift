@@ -7,6 +7,7 @@ let package = Package(
 	platforms: [.iOS(.v17), .macOS(.v15)],
 	products: [
 		.library(name: "JXLEncoder", targets: ["JXLEncoder"]),
+		.library(name: "JXLEncoderDispatch", targets: ["JXLEncoderDispatch"]),
 		.library(name: "JXLEncoderApple", targets: ["JXLEncoderApple"]),
 	],
 	dependencies: [
@@ -25,6 +26,8 @@ let package = Package(
 			name: "JXLEncoderApple",
 			dependencies: ["JXLEncoder"]
 		),
+		.target(name: "JXLEncoderDispatch", dependencies: ["JXLEncoder"]),
+		.testTarget(name: "JXLEncoderDispatchTests", dependencies: ["JXLEncoderDispatch"]),
 		.testTarget(
 			name: "JXLEncoderTests",
 			dependencies: ["JXLEncoder"],
