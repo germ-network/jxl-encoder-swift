@@ -35,10 +35,6 @@ struct JPEGSemanticCorpusEntry: Sendable, CustomTestStringConvertible {
 		if name == "ac_entropy_jpeg_2x1" {
 			issues["ac_entropy_alphabet"] = ["GER-3388"]
 		} else if name != "jpeg_flat_444" {
-			if name == "jpeg_small_444" {
-				issues["coeff_order"] = ["GER-3388"]
-				issues["ac_entropy"] = ["GER-3386"]
-			}
 			issues["ac_entropy_alphabet"] = ["GER-3388"]
 		}
 		if name == "jpeg_flower_513x267_420"
@@ -93,7 +89,8 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 			}
 		)
 		.union([
-			"Tests/JXLEncoderTests/Fixtures/semantic/distinct_quant_tables.sem#block_context"
+			"Tests/JXLEncoderTests/Fixtures/semantic/distinct_quant_tables.sem#block_context",
+			"Tests/JXLEncoderTests/Fixtures/semantic/cfl_tile_65x8_source.sem#jpeg_cfl",
 		])
 	}
 	static let contextWitnessCategory = "jpeg_context"
@@ -116,10 +113,6 @@ struct JPEGSemanticCase: Sendable, CustomTestStringConvertible {
 		}
 	}
 	static let knownDivergentFields: [String: Set<String>] = [
-		// 4:4:4 source JPEG coefficients are CfL-adjusted before order statistics;
-		// this port keeps them unchanged while the AG-18 gap remains open.
-		"jpeg_small_444#coeff_order": ["coeff_order.dct8.c2"],
-		"jpeg_small_444#ac_entropy": ["ac_entropy.ans.frequencies"],
 		"jpeg_small_444#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
 		"jpeg_small_422#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
 		"jpeg_small_440#ac_entropy_alphabet": ["ac_entropy_alphabet.ans_log_alpha_size"],
@@ -400,7 +393,7 @@ struct JPEGSemanticFixtureTests {
 		"known JPEG issues name applicable categories and cannot verify inventory rows",
 	)
 	func jpegKnownIssuesWellFormed() throws {
-		#expect(JPEGSemanticCase.references.count == 157)
+		#expect(JPEGSemanticCase.references.count == 158)
 		#expect(
 			Set(JPEGSemanticCorpusEntry.categories)
 				== SemanticDump.decoderObservableCategories)
@@ -412,7 +405,7 @@ struct JPEGSemanticFixtureTests {
 		#expect(
 			JPEGSemanticCase.knownIssueReferences.isSubset(
 				of: JPEGSemanticCase.references))
-		#expect(JPEGSemanticCase.knownIssueReferences.count == 15)
+		#expect(JPEGSemanticCase.knownIssueReferences.count == 13)
 		#expect(
 			JPEGSemanticCorpusEntry.all.allSatisfy { entry in
 				entry.knownIssues.values.allSatisfy {

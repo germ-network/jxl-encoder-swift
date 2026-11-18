@@ -126,6 +126,7 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `JO` | JPEGOrientation.swift |
 | `JP` | JPEGParser.swift |
 | `JR` | JPEGRecompression.swift |
+| `JF` | JPEGCfL.swift |
 | `JT` | JPEGTranscode.swift |
 | `PB` | PlaneBuffer.swift |
 | `PC` | PrefixCodeWriter.swift |
