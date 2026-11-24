@@ -228,7 +228,7 @@ enum SwiftJPEGSemanticEncoding {
 		var writer = BitWriter()
 		try ImageHeader.write(
 			width: t.width, height: t.height, transferFunction: .sRGB,
-			xybEncoded: false, to: &writer)
+			xybEncoded: false, isGrayscale: t.isGrayscale, to: &writer)
 		FrameAssembly.writeFrameHeader(
 			colorMode: .ycbcr(subsampling: t.subsampling),
 			loopFilter: d.loopFilter,

@@ -10,49 +10,20 @@
 			"serialized scan-derived frames preserve source coefficients",
 			.enabled(if: harness != nil))
 		func readerSerializationPreservesSourceCoefficients() throws {
-			guard let harness = Self.harness else { return }
+			guard Self.harness != nil else { return }
 			for (name, expected) in [
 				("scan_420_111", "scan_420_111"),
 				("scan_420_111_restart", "scan_420_111_restart"),
 				("scan_422_21", "scan_422_21"),
 				("scan_440_12", "scan_440_12"),
 				("scan_420_111_dqt_redefined", "scan_420_111_dqt_canonical"),
-				("hopper_gray_2x2_odd", "hopper_gray_2x2_odd"),
 			] {
 				let source = try JPEGParserTests.fixture(name)
 				let transcode = try JPEGTranscode(JPEGParser.parse(source))
-				let directory = FileManager.default.temporaryDirectory
-					.appendingPathComponent("jpeg-reader-\(UUID().uuidString)")
-				try FileManager.default.createDirectory(
-					at: directory, withIntermediateDirectories: true)
-				defer { try? FileManager.default.removeItem(at: directory) }
-				let expectedURL = directory.appendingPathComponent("expected.jpg")
-				let codestreamURL = directory.appendingPathComponent("encoded.jxl")
-				try Data(JPEGParserTests.fixture(expected)).write(to: expectedURL)
-				try Data(Encoder.encodeJPEG(transcode)).write(to: codestreamURL)
-				let process = Process()
-				process.executableURL = URL(fileURLWithPath: harness)
-				process.arguments = [
-					"jpeg-witness",
-					expectedURL.path,
-					codestreamURL.path,
-				]
-				let output = Pipe()
-				let errors = Pipe()
-				process.standardOutput = output
-				process.standardError = errors
-				try process.run()
-				let data = output.fileHandleForReading.readDataToEndOfFile()
-				process.waitUntilExit()
-				let errorText = String(
-					decoding: errors.fileHandleForReading.readDataToEndOfFile(),
-					as: UTF8.self)
-				#expect(
-					process.terminationStatus == 0,
-					Comment(rawValue: "\(name): \(errorText)"))
-				guard process.terminationStatus == 0 else { continue }
-				let witness = try SemanticDump(
-					parsing: String(decoding: data, as: UTF8.self))
+				let witness = try Self.jpegWitness(
+					sourceJPEG: Data(JPEGParserTests.fixture(expected)),
+					codestream: Data(Encoder.encodeJPEG(transcode)),
+					name: name)
 				#expect(
 					witness.fields[
 						"jpeg_context.reconstructed_coefficients_exact"]
@@ -61,7 +32,199 @@
 			}
 		}
 
+		@Test(
+			"Grayscale JPEG streams declare grayscale sRGB with YCbCr and preserve coefficients and quantizers",
+			.enabled(if: harness != nil),
+			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [false, true])
+		func actualGrayscaleJPEGSerializationCrossCheck(name: String, optimize: Bool) throws
+		{
+			guard Self.harness != nil else { return }
+			let source = try JPEGParserTests.fixture(name)
+			let transcode = try JPEGTranscode(JPEGParser.parse(source))
+			let codestream =
+				if optimize {
+					try #require(Encoder.recompressJPEG(source))
+				} else {
+					try Encoder.encodeJPEG(transcode, optimizeCodes: false)
+				}
+			let witness = try Self.jpegWitness(
+				sourceJPEG: Data(source), codestream: Data(codestream), name: name)
+			#expect(
+				witness.fields["jpeg_gray.signaling"]
+					== .integers([1, 1, 1, 1, 1, 1, 1, 1]),
+				Comment(rawValue: name))
+		}
+
+		@Test(
+			"grayscale JPEG native decoders preserve pixels",
+			.enabled(if: nativePixelDecoders != nil),
+			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [false, true])
+		func nativeGrayscalePixels(name: String, optimize: Bool) throws {
+			guard let nativePixelDecoders = Self.nativePixelDecoders else { return }
+			let source = try JPEGParserTests.fixture(name)
+			let transcode = try JPEGTranscode(JPEGParser.parse(source))
+			let codestream =
+				if optimize {
+					try #require(Encoder.recompressJPEG(source))
+				} else {
+					try Encoder.encodeJPEG(transcode, optimizeCodes: false)
+				}
+			let directory = FileManager.default.temporaryDirectory
+				.appendingPathComponent("jpeg-native-pixels-\(UUID().uuidString)")
+			try FileManager.default.createDirectory(
+				at: directory, withIntermediateDirectories: true)
+			defer { try? FileManager.default.removeItem(at: directory) }
+			let sourceURL = directory.appendingPathComponent("source.jpg")
+			let codestreamURL = directory.appendingPathComponent("encoded.jxl")
+			let sourcePixelsURL = directory.appendingPathComponent("source.pnm")
+			let outputPixelsURL = directory.appendingPathComponent("output.pnm")
+			try Data(source).write(to: sourceURL)
+			try Data(codestream).write(to: codestreamURL)
+			try Self.run(
+				nativePixelDecoders.jpeg,
+				[
+					"-pnm", "-outfile", sourcePixelsURL.path, sourceURL.path,
+				])
+			try Self.run(
+				nativePixelDecoders.jxl,
+				[
+					codestreamURL.path, outputPixelsURL.path,
+				])
+			let sourcePixels = try Self.pnmSamples(Data(contentsOf: sourcePixelsURL))
+			let outputPixels = try Self.pnmSamples(Data(contentsOf: outputPixelsURL))
+			#expect(sourcePixels.width == outputPixels.width, Comment(rawValue: name))
+			#expect(sourcePixels.height == outputPixels.height, Comment(rawValue: name))
+			try #require(sourcePixels.samples.count == outputPixels.samples.count)
+			let total = zip(sourcePixels.samples, outputPixels.samples).reduce(0.0) {
+				$0 + abs(Double($1.0) - Double($1.1))
+			}
+			let mae = total / Double(sourcePixels.samples.count)
+			let receipt =
+				"\(name) optimize=\(optimize) size=\(sourcePixels.width)x\(sourcePixels.height) mae=\(mae)\n"
+			if let evidenceDirectory = ProcessInfo.processInfo.environment[
+				"JXL_PIXEL_EVIDENCE_DIR"]
+			{
+				let evidenceURL = URL(fileURLWithPath: evidenceDirectory)
+					.appendingPathComponent(
+						"\(name)-\(optimize ? "optimized" : "static").txt")
+				try Data(receipt.utf8).write(to: evidenceURL, options: .atomic)
+			}
+			#expect(mae < 2.0, Comment(rawValue: receipt))
+		}
+
 		static let harness = ProcessInfo.processInfo.environment["JXL_HARNESS_PATH"]
+		static func jpegWitness(
+			sourceJPEG: Data, codestream: Data, name: String
+		) throws -> SemanticDump {
+			guard let harness else { throw NSError(domain: "jpeg-witness", code: 1) }
+			let directory = FileManager.default.temporaryDirectory
+				.appendingPathComponent("jpeg-witness-\(UUID().uuidString)")
+			try FileManager.default.createDirectory(
+				at: directory, withIntermediateDirectories: true)
+			defer { try? FileManager.default.removeItem(at: directory) }
+			let sourceURL = directory.appendingPathComponent("source.jpg")
+			let codestreamURL = directory.appendingPathComponent("encoded.jxl")
+			let outputURL = directory.appendingPathComponent("witness.sem")
+			let errorsURL = directory.appendingPathComponent("witness.err")
+			try sourceJPEG.write(to: sourceURL)
+			try codestream.write(to: codestreamURL)
+			FileManager.default.createFile(atPath: outputURL.path, contents: nil)
+			FileManager.default.createFile(atPath: errorsURL.path, contents: nil)
+			let output = try FileHandle(forWritingTo: outputURL)
+			let errors = try FileHandle(forWritingTo: errorsURL)
+			let process = Process()
+			process.executableURL = URL(fileURLWithPath: harness)
+			process.arguments = ["jpeg-witness", sourceURL.path, codestreamURL.path]
+			process.standardOutput = output
+			process.standardError = errors
+			try process.run()
+			process.waitUntilExit()
+			try output.close()
+			try errors.close()
+			let errorText = try String(contentsOf: errorsURL, encoding: .utf8)
+			guard process.terminationStatus == 0 else {
+				throw NSError(
+					domain: "jpeg-witness",
+					code: Int(process.terminationStatus),
+					userInfo: [
+						NSLocalizedDescriptionKey: "\(name): \(errorText)"
+					])
+			}
+			return try SemanticDump(
+				parsing: String(contentsOf: outputURL, encoding: .utf8))
+		}
+
+		static var nativePixelDecoders: (jpeg: String, jxl: String)? {
+			guard let harness,
+				let jpeg = ProcessInfo.processInfo.environment["JXL_DJPEG_PATH"]
+			else { return nil }
+			let jxl = URL(fileURLWithPath: harness)
+				.deletingLastPathComponent()
+				.appendingPathComponent("libjxl/tools/djxl").path
+			guard FileManager.default.isExecutableFile(atPath: jpeg),
+				FileManager.default.isExecutableFile(atPath: jxl)
+			else { return nil }
+			return (jpeg, jxl)
+		}
+
+		static func run(_ executable: String, _ arguments: [String]) throws {
+			let process = Process()
+			process.executableURL = URL(fileURLWithPath: executable)
+			process.arguments = arguments
+			let errors = Pipe()
+			process.standardError = errors
+			try process.run()
+			process.waitUntilExit()
+			let errorText = String(
+				decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+				as: UTF8.self)
+			#expect(process.terminationStatus == 0, Comment(rawValue: errorText))
+		}
+
+		static func pnmSamples(_ data: Data) throws -> (
+			width: Int, height: Int, samples: [UInt8]
+		) {
+			let bytes = [UInt8](data)
+			var offset = 0
+			func token() throws -> String {
+				while offset < bytes.count {
+					if bytes[offset] == 35 {
+						while offset < bytes.count && bytes[offset] != 10 {
+							offset += 1
+						}
+					} else if bytes[offset] == 10 || bytes[offset] == 13
+						|| bytes[offset] == 32 || bytes[offset] == 9
+					{
+						offset += 1
+					} else {
+						break
+					}
+				}
+				let start = offset
+				while offset < bytes.count && bytes[offset] != 10
+					&& bytes[offset] != 13 && bytes[offset] != 32
+					&& bytes[offset] != 9
+				{ offset += 1 }
+				guard start < offset,
+					let value = String(
+						bytes: bytes[start..<offset], encoding: .ascii)
+				else {
+					throw NSError(domain: "PNM", code: 1)
+				}
+				return value
+			}
+			guard try token() == "P5",
+				let width = Int(try token()), let height = Int(try token()),
+				try token() == "255"
+			else { throw NSError(domain: "PNM", code: 2) }
+			if offset < bytes.count && bytes[offset] == 13 { offset += 1 }
+			if offset < bytes.count && bytes[offset] == 10 { offset += 1 }
+			let samples = Array(bytes.dropFirst(offset))
+			guard samples.count == width * height else {
+				throw NSError(domain: "PNM", code: 3)
+			}
+			return (width, height, samples)
+		}
 		static var decoder: String? {
 			guard let harness else { return nil }
 			return URL(fileURLWithPath: harness)

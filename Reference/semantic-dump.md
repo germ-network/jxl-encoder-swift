@@ -217,6 +217,12 @@ smoothing fields, and compares reconstructed coefficients and quantizers.
 contains a nonzero AC block whose adaptive context changes when the integer DC
 offset is omitted from bucket selection.
 
+For unprofiled single-component JPEGs, the grayscale witness checks decoded
+gray sRGB fields, relative intent, absent embedded ICC and primaries, non-XYB
+coding, the YCbCr frame transform, source sampling, and exact coefficients and
+quantizers. The color checks inspect the decoded codestream, not the Swift
+transcode's input-derived color fields.
+
 For the three 513×267 color inputs, the generator also decodes the reference
 JXL with `jpeg-witness` and verifies its dimensions, sampling, DCT8 strategy,
 raw quant field and DC roundtrip before emitting `*_context.sem`. That witness

@@ -41,6 +41,19 @@ public enum ImageHeader {
 		xybEncoded: Bool = true,
 		to writer: inout BitWriter
 	) throws {
+		try write(
+			width: width, height: height, transferFunction: transferFunction,
+			xybEncoded: xybEncoded, isGrayscale: false, to: &writer)
+	}
+
+	static func write(
+		width: Int,
+		height: Int,
+		transferFunction: TransferFunction,
+		xybEncoded: Bool,
+		isGrayscale: Bool,
+		to writer: inout BitWriter
+	) throws {
 		guard width > 0, height > 0 else { throw EncoderError.emptyImage }
 		guard width <= maxDimension, height <= maxDimension else {
 			throw EncoderError.imageTooLarge(width: width, height: height)
@@ -75,9 +88,11 @@ public enum ImageHeader {
 		writer.write(1, xybEncoded ? 1 : 0)  // xyb encoded
 		writer.write(1, 0)  // not all default color encoding
 		writer.write(1, 0)  // no icc
-		writer.write(2, 0)  // RGB color space
+		writer.write(2, isGrayscale ? 1 : 0)  // color space
 		writer.write(2, 1)  // D65 white point
-		writer.write(2, 1)  // sRGB primaries
+		if !isGrayscale {
+			writer.write(2, 1)  // sRGB primaries
+		}
 		writer.write(1, 0)  // no gamma
 		writer.write(2, 2)  // transfer function selector bits (2 .. 17)
 		writer.write(4, transferFunction.enumValue - 2)

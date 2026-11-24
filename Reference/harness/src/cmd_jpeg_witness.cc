@@ -23,6 +23,19 @@ std::vector<uint8_t> Read(const std::string& path) {
   return {std::istreambuf_iterator<char>(file), {}};
 }
 
+bool HasICCProfileTag(const jxl::jpeg::JPEGData& jpeg) {
+  constexpr char kIccProfileTag[] = "ICC_PROFILE";
+  for (const auto& app : jpeg.app_data) {
+    if (app.size() >= 3 + sizeof(kIccProfileTag) &&
+        app[0] == jxl::jpeg::kApp2 &&
+        std::equal(kIccProfileTag, kIccProfileTag + sizeof(kIccProfileTag),
+                   app.begin() + 3)) {
+      return true;
+    }
+  }
+  return false;
+}
+
 bool SameCoefficients(const jxl::jpeg::JPEGData& source,
                       const jxl::jpeg::JPEGData& decoded) {
   if (source.width != decoded.width || source.height != decoded.height ||
@@ -150,6 +163,18 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     out->Integers("jpeg_rgb.quantizers_exact", {1});
   }
   if (jpeg.components.size() == 1) {
+    const bool has_icc_profile_tag = HasICCProfileTag(jpeg);
+    if (!has_icc_profile_tag) {
+      const auto& color = frame.metadata.m.color_encoding;
+      if (!color.IsGray() || !color.IsSRGB() || color.WantICC() ||
+          color.GetRenderingIntent() !=
+              jxl::cms::RenderingIntent::kRelative ||
+          color.HasPrimaries() || frame.metadata.m.xyb_encoded ||
+          frame.header.color_transform != jxl::ColorTransform::kYCbCr) {
+        std::fprintf(stderr, "jpeg-witness: grayscale frame signaling differs\n");
+        return false;
+      }
+    }
     jxl::YCbCrChromaSubsampling source_sampling;
     JXL_RETURN_IF_ERROR(
         jxl::jpeg::SetChromaSubsamplingFromJpegData(jpeg, &source_sampling));
@@ -161,6 +186,9 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
       }
     }
     DumpColorCorrelationMap(frame, out);
+    if (!has_icc_profile_tag) {
+      out->Integers("jpeg_gray.signaling", {1, 1, 1, 1, 1, 1, 1, 1});
+    }
     out->Integers("jpeg_context.reconstructed_coefficients_exact", {1});
     out->Integers("jpeg_context.size",
                   {static_cast<int64_t>(dim.xsize_blocks),
