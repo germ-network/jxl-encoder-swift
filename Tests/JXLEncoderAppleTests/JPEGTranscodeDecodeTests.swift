@@ -20,7 +20,7 @@
 			for name in [
 				"scan_420_111", "scan_420_111_restart", "scan_422_21",
 				"scan_440_12", "scan_420_111_dqt_redefined",
-				"hopper_gray_2x2_odd",
+				"hopper_gray_odd", "hopper_gray_2x2_odd",
 			] {
 				for optimize in [true, false] {
 					let error = try Self.meanError(name, optimize: optimize)
@@ -107,8 +107,9 @@
 		/// well under one level. The threshold is deliberately tight: it is what
 		/// distinguishes a working transcode from one that merely decodes.
 		@Test(
-			"unsubsampled transcodes match the source",
-			arguments: ["hopper_444", "hopper_gray_odd"], [true, false])
+			"JPEG transcodes match source pixels",
+			arguments: ["hopper_444", "hopper_gray_odd", "hopper_gray_2x2_odd"],
+			[true, false])
 		func unsubsampled(name: String, optimize: Bool) throws {
 			let error = try Self.meanError(name, optimize: optimize)
 			#expect(error < 2.0, "mean absolute error \(error)")

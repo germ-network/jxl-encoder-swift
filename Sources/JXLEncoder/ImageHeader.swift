@@ -88,9 +88,11 @@ public enum ImageHeader {
 		writer.write(1, xybEncoded ? 1 : 0)  // xyb encoded
 		writer.write(1, 0)  // not all default color encoding
 		writer.write(1, 0)  // no icc
-		writer.write(2, 0)  // RGB color space
+		writer.write(2, isGrayscale ? 1 : 0)  // color space
 		writer.write(2, 1)  // D65 white point
-		writer.write(2, 1)  // sRGB primaries
+		if !isGrayscale {
+			writer.write(2, 1)  // sRGB primaries
+		}
 		writer.write(1, 0)  // no gamma
 		writer.write(2, 2)  // transfer function selector bits (2 .. 17)
 		writer.write(4, transferFunction.enumValue - 2)

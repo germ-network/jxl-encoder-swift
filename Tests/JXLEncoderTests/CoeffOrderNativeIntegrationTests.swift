@@ -17,7 +17,6 @@
 				("scan_422_21", "scan_422_21"),
 				("scan_440_12", "scan_440_12"),
 				("scan_420_111_dqt_redefined", "scan_420_111_dqt_canonical"),
-				("hopper_gray_2x2_odd", "hopper_gray_2x2_odd"),
 			] {
 				let source = try JPEGParserTests.fixture(name)
 				let transcode = try JPEGTranscode(JPEGParser.parse(source))
@@ -63,10 +62,51 @@
 
 		@Test(
 			"Grayscale JPEG streams declare grayscale sRGB with YCbCr and preserve coefficients and quantizers",
-			.disabled(),
+			.enabled(if: harness != nil),
 			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [false, true])
 		func actualGrayscaleJPEGSerializationCrossCheck(name: String, optimize: Bool) throws
 		{
+			guard let harness = Self.harness else { return }
+			let source = try JPEGParserTests.fixture(name)
+			let transcode = try JPEGTranscode(JPEGParser.parse(source))
+			let codestream =
+				if optimize {
+					try #require(Encoder.recompressJPEG(source))
+				} else {
+					try Encoder.encodeJPEG(transcode, optimizeCodes: false)
+				}
+			let directory = FileManager.default.temporaryDirectory
+				.appendingPathComponent("jpeg-grayscale-\(UUID().uuidString)")
+			try FileManager.default.createDirectory(
+				at: directory, withIntermediateDirectories: true)
+			defer { try? FileManager.default.removeItem(at: directory) }
+			let sourceURL = directory.appendingPathComponent("source.jpg")
+			let codestreamURL = directory.appendingPathComponent("encoded.jxl")
+			try Data(source).write(to: sourceURL)
+			try Data(codestream).write(to: codestreamURL)
+			let process = Process()
+			process.executableURL = URL(fileURLWithPath: harness)
+			process.arguments = ["jpeg-witness", sourceURL.path, codestreamURL.path]
+			let output = Pipe()
+			let errors = Pipe()
+			process.standardOutput = output
+			process.standardError = errors
+			try process.run()
+			let data = output.fileHandleForReading.readDataToEndOfFile()
+			process.waitUntilExit()
+			let errorText = String(
+				decoding: errors.fileHandleForReading.readDataToEndOfFile(),
+				as: UTF8.self)
+			#expect(
+				process.terminationStatus == 0,
+				Comment(rawValue: "\(name): \(errorText)"))
+			guard process.terminationStatus == 0 else { return }
+			let witness = try SemanticDump(
+				parsing: String(decoding: data, as: UTF8.self))
+			#expect(
+				witness.fields["jpeg_gray.signaling"]
+					== .integers([1, 1, 1, 1, 1, 1, 1, 1]),
+				Comment(rawValue: name))
 		}
 
 		static let harness = ProcessInfo.processInfo.environment["JXL_HARNESS_PATH"]

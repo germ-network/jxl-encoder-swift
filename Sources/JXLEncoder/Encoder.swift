@@ -598,7 +598,8 @@ extension Encoder {
 		var writer = BitWriter()
 		try ImageHeader.write(
 			width: transcode.width, height: transcode.height,
-			transferFunction: .sRGB, xybEncoded: false, to: &writer)
+			transferFunction: .sRGB, xybEncoded: false,
+			isGrayscale: transcode.isGrayscale, to: &writer)
 		try encodeJPEGFrame(
 			transcode,
 			loopFilter: .init(gaborish: false, epfIterations: 0),
