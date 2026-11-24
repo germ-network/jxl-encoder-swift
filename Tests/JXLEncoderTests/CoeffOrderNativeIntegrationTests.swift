@@ -61,6 +61,14 @@
 			}
 		}
 
+		@Test(
+			"Grayscale JPEG streams declare grayscale sRGB with YCbCr and preserve coefficients and quantizers",
+			.disabled(),
+			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [false, true])
+		func actualGrayscaleJPEGSerializationCrossCheck(name: String, optimize: Bool) throws
+		{
+		}
+
 		static let harness = ProcessInfo.processInfo.environment["JXL_HARNESS_PATH"]
 		static var decoder: String? {
 			guard let harness else { return nil }

@@ -41,6 +41,19 @@ public enum ImageHeader {
 		xybEncoded: Bool = true,
 		to writer: inout BitWriter
 	) throws {
+		try write(
+			width: width, height: height, transferFunction: transferFunction,
+			xybEncoded: xybEncoded, isGrayscale: false, to: &writer)
+	}
+
+	static func write(
+		width: Int,
+		height: Int,
+		transferFunction: TransferFunction,
+		xybEncoded: Bool,
+		isGrayscale: Bool,
+		to writer: inout BitWriter
+	) throws {
 		guard width > 0, height > 0 else { throw EncoderError.emptyImage }
 		guard width <= maxDimension, height <= maxDimension else {
 			throw EncoderError.imageTooLarge(width: width, height: height)
