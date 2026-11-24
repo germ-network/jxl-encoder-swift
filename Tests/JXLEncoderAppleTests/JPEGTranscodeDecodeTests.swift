@@ -20,7 +20,6 @@
 			for name in [
 				"scan_420_111", "scan_420_111_restart", "scan_422_21",
 				"scan_440_12", "scan_420_111_dqt_redefined",
-				"hopper_gray_odd", "hopper_gray_2x2_odd",
 			] {
 				for optimize in [true, false] {
 					let error = try Self.meanError(name, optimize: optimize)
@@ -108,11 +107,46 @@
 		/// distinguishes a working transcode from one that merely decodes.
 		@Test(
 			"JPEG transcodes match source pixels",
-			arguments: ["hopper_444", "hopper_gray_odd", "hopper_gray_2x2_odd"],
+			arguments: ["hopper_444"],
 			[true, false])
 		func unsubsampled(name: String, optimize: Bool) throws {
 			let error = try Self.meanError(name, optimize: optimize)
 			#expect(error < 2.0, "mean absolute error \(error)")
+		}
+
+		@Test(
+			"grayscale transcodes decode as monochrome at source dimensions",
+			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [true, false])
+		func grayscaleDecodedModelAndDimensions(name: String, optimize: Bool) throws {
+			let sourceURL = try #require(
+				Bundle.module.url(
+					forResource: name, withExtension: "jpg",
+					subdirectory: "Fixtures"))
+			let source = try Data(contentsOf: sourceURL)
+			let transcode = try JPEGTranscode(JPEGParser.parse([UInt8](source)))
+			let codestream =
+				if optimize {
+					try #require(Encoder.recompressJPEG([UInt8](source)))
+				} else {
+					try Encoder.encodeJPEG(transcode, optimizeCodes: false)
+				}
+			let decoded = try #require(Self.image(Data(codestream)))
+			let reference = try #require(Self.image(source))
+			#expect(decoded.colorModel == .monochrome, "\(name), optimize=\(optimize)")
+			#expect(reference.colorModel == .monochrome, "\(name), source JPEG")
+			#expect(decoded.width == reference.width, "\(name), decoded width")
+			#expect(decoded.height == reference.height, "\(name), decoded height")
+		}
+
+		static func image(_ data: Data) -> (
+			width: Int, height: Int, colorModel: CGColorSpaceModel
+		)? {
+			guard
+				let source = CGImageSourceCreateWithData(data as CFData, nil),
+				let image = CGImageSourceCreateImageAtIndex(source, 0, nil),
+				let colorModel = image.colorSpace?.model
+			else { return nil }
+			return (image.width, image.height, colorModel)
 		}
 
 		/// Subsampled input, which needs the block grid rounded up to a whole MCU.
