@@ -443,6 +443,46 @@ struct ICCCodecTests {
 		#expect(tokens.prefix(129).allSatisfy { $0.context == 0 })
 	}
 
+	@Test("write codes the stream with the LZ77 method its size selects")
+	func writeUsesTheSizeSelectedLZ77Method() throws {
+		func coded(_ stream: [UInt8], _ method: LZ77.Method) -> BitWriter {
+			var writer = BitWriter()
+			writer.writeU64(UInt64(stream.count))
+			let prepared = EntropyCodeWriter.prepare(
+				ICCCodec.tokens(stream), contextCount: 41,
+				parameters: HistogramParameters(
+					lz77Method: method, forcesPrefixCodes: true))
+			EntropyCodeWriter.write(prepared.code, writer: &writer)
+			EntropyCodeWriter.writeTokens(
+				prepared.tokens, code: prepared.code, writer: &writer)
+			return writer
+		}
+		// kOptimal's parse is quadratic on repeated input, so the greedy case is
+		// only compared with its own method.
+		for (fixture, selected) in [
+			("p3_desc4_profile", LZ77.Method.optimal),
+			("p3_desc1000_profile_420", .lz77),
+		] {
+			let profile = try ICCProfile(validating: Self.profile(fixture))
+			let stream = ICCCodec.predict(profile.bytes)
+			var written = BitWriter()
+			#expect(ICCCodec.write(profile, to: &written))
+			var expected = coded(stream, selected)
+			#expect(written.bitsWritten == expected.bitsWritten, "\(fixture)")
+			written.zeroPadToByte()
+			expected.zeroPadToByte()
+			let writtenBytes = written.take()
+			#expect(writtenBytes == expected.take(), "\(fixture)")
+			if selected == .optimal {
+				var greedy = coded(stream, .lz77)
+				greedy.zeroPadToByte()
+				#expect(
+					writtenBytes != greedy.take(),
+					"\(fixture) differs from greedy")
+			}
+		}
+	}
+
 	/// The reader checks at multiples of 65,536 decoded bytes, so the edge is
 	/// 256 coded bytes there (icc_codec.cc:399-403).
 	@Test("the reader's 256:1 check passes at exactly 256 coded bytes")

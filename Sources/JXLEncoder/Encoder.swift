@@ -660,7 +660,8 @@ extension Encoder {
 	/// sources add the JPEG decoder's integer DC offset before coding; when q00
 	/// does not divide 1024, decoded RGB pixels can differ by the resulting
 	/// fractional source-unit offset. RGB is signalled without a color transform.
-	/// An admitted source profile is coded into the header in place of sRGB.
+	/// An admitted source profile is coded into the header in place of sRGB. Throws
+	/// `EncoderError.unsupportedICCProfile` for one libjxl's reader would reject.
 	public static func encodeJPEG(
 		_ transcode: JPEGTranscode,
 		optimizeCodes: Bool = true

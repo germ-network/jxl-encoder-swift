@@ -56,7 +56,9 @@ public enum ImageHeader {
 		/// its exact bytes; nil keeps the enumerated sRGB encoding. Requires
 		/// `isGrayscale == false`: an admitted profile is always RGB. Follows
 		/// libjxl encode.cc:816-829, which writes `WriteICC` before padding.
-		/// Any `xybEncoded` is allowed, as upstream permits both.
+		/// Any `xybEncoded` is allowed, as upstream permits both. Throws
+		/// `unsupportedICCProfile` when libjxl's reader would reject the coded
+		/// profile.
 		iccProfile: ICCProfile? = nil,
 		to writer: inout BitWriter
 	) throws {
@@ -110,11 +112,8 @@ public enum ImageHeader {
 		}
 		writer.write(2, 0)  // no extensions
 		writer.write(1, 1)  // all default transform data
-		if let iccProfile {
-			guard ICCCodec.write(iccProfile, to: &writer) else {
-				preconditionFailure(
-					"the profile's coded form is one libjxl's reader rejects")
-			}
+		if let iccProfile, !ICCCodec.write(iccProfile, to: &writer) {
+			throw EncoderError.unsupportedICCProfile
 		}
 		writer.zeroPadToByte()
 	}

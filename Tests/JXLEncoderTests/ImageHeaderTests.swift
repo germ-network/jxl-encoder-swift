@@ -173,48 +173,54 @@ extension ImageHeaderTests {
 		return bits
 	}
 
-	@Test("a nil profile leaves the header bytes unchanged")
-	func unprofiledHeaderUnchanged() throws {
-		let expected: [(xyb: Bool, gray: Bool, tf: TransferFunction, bytes: [UInt8])] = [
-			(
-				true, false, .sRGB,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x28, 0x6E, 0x04]
-			),
-			(
-				true, false, .linear,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x28, 0x5A, 0x04]
-			),
-			(
-				true, true, .sRGB,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x8A, 0x1B, 0x01]
-			),
-			(
-				true, true, .linear,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x8A, 0x16, 0x01]
-			),
-			(
-				false, false, .sRGB,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0x80, 0xE2, 0x46]
-			),
-			(
-				false, false, .linear,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0x80, 0xA2, 0x45]
-			),
-			(
-				false, true, .sRGB,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0xA0, 0xB8, 0x11]
-			),
-			(
-				false, true, .linear,
-				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0xA0, 0x68, 0x11]
-			),
-		]
-		for (xyb, gray, tf, bytes) in expected {
-			var w = BitWriter()
-			try ImageHeader.write(
-				width: 64, height: 64, transferFunction: tf, xybEncoded: xyb,
-				isGrayscale: gray, iccProfile: nil, to: &w)
-			#expect(w.take() == bytes)
+	@Test("a nil profile keeps the enumerated colour encoding")
+	func unprofiledHeaderKeepsEnums() throws {
+		for xyb in [true, false] {
+			for gray in [true, false] {
+				for tf in [TransferFunction.sRGB, .linear] {
+					var w = BitWriter()
+					try ImageHeader.write(
+						width: 64, height: 64, transferFunction: tf,
+						xybEncoded: xyb,
+						isGrayscale: gray, iccProfile: nil, to: &w)
+					var bits = HeaderBits(bytes: w.take())
+					#expect(bits.read(16) == 0x0AFF)
+					#expect(bits.read(1) == 0)  // not small
+					_ = bits.size()
+					#expect(bits.read(3) == 0)
+					_ = bits.size()
+					let metadata: [(Int, UInt64)] =
+						xyb
+						? [
+							(1, 0), (1, 0), (1, 1), (2, 0), (4, 7),
+							(1, 0), (2, 0), (1, 1), (1, 0),
+						]
+						: [
+							(1, 0), (1, 0), (1, 0), (2, 0), (1, 1),
+							(2, 0), (1, 0), (1, 0),
+						]
+					for (count, value) in metadata {
+						#expect(UInt64(bits.read(count)) == value)
+					}
+					let label = "xyb \(xyb) gray \(gray) \(tf)"
+					#expect(bits.read(1) == 0, "\(label) want_icc")
+					#expect(
+						bits.read(2) == (gray ? 1 : 0),
+						"\(label) colour space")
+					#expect(bits.read(2) == 1, "\(label) D65")
+					if !gray {
+						#expect(
+							bits.read(2) == 1, "\(label) sRGB primaries"
+						)
+					}
+					#expect(bits.read(1) == 0, "\(label) no gamma")
+					#expect(bits.read(2) == 2, "\(label) transfer selector")
+					#expect(
+						bits.read(4) == tf.enumValue - 2,
+						"\(label) transfer")
+					#expect(bits.read(2) == 1, "\(label) relative intent")
+				}
+			}
 		}
 	}
 

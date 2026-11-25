@@ -334,9 +334,9 @@ extension PortableJPEGRecompressionTests {
 			let jpeg = try JPEGParserTests.fixture(fixture)
 			let image = try JPEGParser.parse(jpeg)
 			#expect(try #require(image.iccProfile).count > 65_519, "\(fixture)")
-			#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation)
-			{
-				try JPEGTranscode(image)
+			let transcode = try JPEGTranscode(image)
+			#expect(throws: EncoderError.unsupportedICCProfile) {
+				try Encoder.encodeJPEG(transcode)
 			}
 			#expect(Encoder.recompressJPEG(jpeg) == nil, "\(fixture)")
 		}

@@ -50,10 +50,7 @@ public struct JPEGTranscode {
 	public init(_ image: JPEGImage) throws {
 		let count = image.components.count
 		if let bytes = image.iccProfile, !bytes.isEmpty {
-			var scratch = BitWriter()
-			guard count != 1, let profile = try? ICCProfile(validating: bytes),
-				ICCCodec.write(profile, to: &scratch)
-			else {
+			guard count != 1, let profile = try? ICCProfile(validating: bytes) else {
 				throw TranscodeError.unsupportedColorInterpretation
 			}
 			iccProfile = profile
