@@ -129,20 +129,23 @@ enum FrameAssembly {
 		}
 	}
 
-	static func writeDCGlobal(
-		params: DistanceParams,
-		dcGroupCount: Int,
-		code: EntropyCode,
-		modularTree: (tree: ContextTree.Prepared, code: EntropyCode)? = nil,
-		/// Per-channel DC quantization for a JPEG transcode, `255 * 8 / quant[0]`.
-		/// Nil on the pixel path, which uses the built-in values.
-		dcQuantization: [Float]? = nil,
-		/// Overrides the distance-derived scales, which a transcode does not use.
-		globalScale: Int? = nil,
-		quantDC: Int? = nil,
-		/// Non-nil writes the optimized pixel or JPEG-transcode block context
-		/// map in place of the fixed one below. Nil on static-table paths.
-		blockContextMap: JPEGBlockContextMap.Result? = nil,
+	/// The DC global section of a streaming frame: every DC group codes its
+	/// modular streams with local trees, so after the shared header fields the
+	/// section carries a single `0` (no global tree) and no global code
+	/// (enc_modular.cc:1290-1301).
+	static func writeStreamingDCGlobal(
+		params: DistanceParams, blockContextMap: JPEGBlockContextMap.Result,
+		writer: inout BitWriter
+	) throws {
+		try writeSharedDCFields(
+			params: params, dcQuantization: nil, globalScale: nil, quantDC: nil,
+			blockContextMap: blockContextMap, writer: &writer)
+		writer.write(1, 0)  // no global tree
+	}
+
+	private static func writeSharedDCFields(
+		params: DistanceParams, dcQuantization: [Float]?, globalScale: Int?,
+		quantDC: Int?, blockContextMap: JPEGBlockContextMap.Result?,
 		writer: inout BitWriter
 	) throws {
 		if let dcQuantization {
@@ -179,6 +182,28 @@ enum FrameAssembly {
 		}
 
 		try writeColorCorrelationDC(jpegCompatible: dcQuantization != nil, writer: &writer)
+	}
+
+	static func writeDCGlobal(
+		params: DistanceParams,
+		dcGroupCount: Int,
+		code: EntropyCode,
+		modularTree: (tree: ContextTree.Prepared, code: EntropyCode)? = nil,
+		/// Per-channel DC quantization for a JPEG transcode, `255 * 8 / quant[0]`.
+		/// Nil on the pixel path, which uses the built-in values.
+		dcQuantization: [Float]? = nil,
+		/// Overrides the distance-derived scales, which a transcode does not use.
+		globalScale: Int? = nil,
+		quantDC: Int? = nil,
+		/// Non-nil writes the optimized pixel or JPEG-transcode block context
+		/// map in place of the fixed one below. Nil on static-table paths.
+		blockContextMap: JPEGBlockContextMap.Result? = nil,
+		writer: inout BitWriter
+	) throws {
+		try writeSharedDCFields(
+			params: params, dcQuantization: dcQuantization,
+			globalScale: globalScale, quantDC: quantDC,
+			blockContextMap: blockContextMap, writer: &writer)
 		if let modularTree {
 			ContextTree.write(
 				modularTree.tree, code: modularTree.code, writer: &writer)

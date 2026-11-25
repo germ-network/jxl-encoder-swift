@@ -32,7 +32,7 @@ extension SemanticDump {
 					.flatMap { $0 }),
 			"ac_entropy.lz77_enabled": .integers([0]),
 			"ac_entropy_alphabet.ans_log_alpha_size": .integers(
-				code.ansInfoTables == nil ? [] : [6]),
+				code.ansInfoTables == nil ? [] : [Int64(code.logAlphabetSize)]),
 		]
 
 		if let ansTables = code.ansInfoTables {

@@ -68,7 +68,16 @@ JXL_CROSSCHECK_ELIGIBLE_INPUT="$OUT/pixel_lifecycle_2057x257.ppm" \
   swift test --skip-build --filter 'SemanticCrossCheckTests.write'
 "$HARNESS" dump "$OUT/swift_2057x257.jxl" entropy_layout \
   > "$OUT/swift_2057x257.layout.sem"
-swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/(harnessAgreesWithEmitters|mutationsDifferInMutatedFieldOnly|actualSwiftLayoutsDecode|decodedModularTreeCaptureUsesActualMultiDCStreams)'
+for name in reference_2057x257 swift_2057x257; do
+  "$HARNESS" dump "$OUT/$name.jxl" ac_entropy > "$OUT/$name.ac.sem"
+done
+"$HARNESS" dump "$OUT/swift_2057x521.jxl" coeff_order block_context \
+  > "$OUT/swift_2057x521.layout.sem"
+"$HARNESS" encode "$HERE/../Tests/JXLEncoderTests/Fixtures/semantic/pixel_lifecycle_2057x521.ppm" 1 \
+  "$OUT/reference_2057x521.jxl" 2
+"$HARNESS" dump "$OUT/reference_2057x521.jxl" coeff_order block_context \
+  > "$OUT/reference_2057x521.layout.sem"
+swift test --skip-build --filter '^JXLEncoderTests.SemanticCrossCheckTests/(harnessAgreesWithEmitters|mutationsDifferInMutatedFieldOnly|actualSwiftLayoutsDecode|decodedModularTreeCaptureUsesActualMultiDCStreams|streamingTreesAndHistogramsMatchReference2057x257|pixelLifecycle2057x521OrderAndBlockMapMatchReference)'
 swift test --skip-build --filter '^JXLEncoderTests.EntropyReferenceTests/(streamingLayoutMatchesReferenceAboveEightGroups|entropyMutationIsReportedByItsExactField)'
 JXL_ENTROPY_STREAM_EXPORT_DIR="$OUT" swift test --skip-build \
   --filter '^JXLEncoderTests.EntropyReferenceTests/smallFrameSharesOne(AC|Prefix)CodeAcrossIndependentGroupStreams'

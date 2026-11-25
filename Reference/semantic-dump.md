@@ -282,6 +282,8 @@ AC-global histogram count. It does not infer selectors from image group count.
 | `entropy_layout` | `group_grid`, `group_count`, `dc_group_count`, `pass_count`, `histogram_set_count`, `selector_bits` | decoded frame dimensions and actual AC histogram selection state |
 | `entropy_layout` | `section_ids`, `section_indices`, `section_offsets`, `section_sizes` | TOC logical IDs and physical stream order, with offsets/sizes in codestream bytes |
 | `entropy_layout` | `ac_selectors` | repeated pass, group, logical section ID, selector tuples read from each AC section |
+| `entropy_layout` | `ac.use_prefix_code`, `ac.histogram_count`, `ac.context_map` | AC global code: prefix or ANS, its histogram count, and the decoded context map over every histogram set |
+| `entropy_layout` | `dc_group.<n>.dc.*`, `dc_group.<n>.metadata.*` | per DC group section and modular stream: `local` (0 when it uses the global tree, leaving the rest empty), `tree_node_count`, `tree_nodes` (seven integers per node, as `modular_tree.nodes`) and `histogram_count` of the data code. Read by decoding the section bytes the way `ModularFrameDecoder` does |
 | `epf_sharpness` | `dimensions`, `values` | decoded `shared.epf_sharpness` width/height and every row-major block value; opt-in and omitted from the default dump |
 
 The opt-in `jxl-harness entropy-verify-streams <expected.sem>` consumer reads

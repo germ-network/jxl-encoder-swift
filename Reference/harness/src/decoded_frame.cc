@@ -124,6 +124,7 @@ jxl::Status Decode(const std::vector<uint8_t>& bytes, DecodedFrame* frame,
     offset = reader.TotalBitsConsumed()/8;
   }
   if (!closed || offset >= bytes.size()) return false;
+  frame->codestream = bytes;
   frame->state = std::make_unique<jxl::PassesDecoderState>(&manager);
   if (frame->metadata.m.color_encoding.IsGray()) {
     JXL_RETURN_IF_ERROR(

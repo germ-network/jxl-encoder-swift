@@ -141,7 +141,11 @@ public struct SectionWriter: Sendable {
 
 enum SectionOptimizer {
 	static func modularCode(
-		tokenStreams: [[Token]], contextCount: Int, extraDCPrecision: UInt8
+		tokenStreams: [[Token]], contextCount: Int, extraDCPrecision: UInt8,
+		/// A streaming DC group's local stream: libjxl `ChooseUintConfigs` keeps
+		/// the default uint config for every histogram and log_alpha 8
+		/// (enc_ans.cc:719-743).
+		streaming: Bool = false
 	) -> EntropyCode {
 		precondition(contextCount > 0)
 		let tokens = tokenStreams.flatMap { $0 }
@@ -176,7 +180,8 @@ enum SectionOptimizer {
 		let alphaForSignaling = ANSConstants.logAlphaSize
 		var configurations = [HybridUintConfiguration](
 			repeating: defaultConfiguration, count: initial.clusters.count)
-		for histogramIndex in initial.clusters.indices where extraDCPrecision != 0 {
+		for histogramIndex in initial.clusters.indices
+		where extraDCPrecision != 0 && !streaming {
 			var bestCost = Float.greatestFiniteMagnitude
 			for candidate in candidates {
 				var counts = Histogram()
@@ -228,9 +233,11 @@ enum SectionOptimizer {
 		let logAlpha =
 			usePrefix
 			? PrefixCodeWriter.prefixMaxBits
-			: (extraDCPrecision == 0
-				? 7
-				: min(8, max(5, ceilLog2Nonzero(Int(maxSymbol) + 1))))
+			: (streaming
+				? 8
+				: extraDCPrecision == 0
+					? 7
+					: min(8, max(5, ceilLog2Nonzero(Int(maxSymbol) + 1))))
 		let ansHistograms: [ANSEncodingHistogram]? =
 			usePrefix
 			? nil
@@ -254,6 +261,100 @@ enum SectionOptimizer {
 				logAlphabetSize: logAlpha)
 		}
 		return code
+	}
+
+	/// libjxl streaming AC histograms (EncodeGlobalACInfo enc_frame.cc:1252-1327,
+	/// BuildAndStoreEntropyCodes enc_ans.cc:915-1017, OutputAcGlobal 2003-2045).
+	/// Each histogram set (one per DC group, in order) clusters its own slice of
+	/// the context space under the cluster budget left by earlier sets, reusing
+	/// their already-encoded histograms. Set 0 alone decides prefix vs ANS and
+	/// prepends the fixed flat histogram. Unused histograms are dropped and the
+	/// rest renumbered by first use before every AC section is flushed.
+	static func optimizeStreaming(
+		sections: inout [SectionWriter], range: Range<Int>,
+		histogramSetCount: Int, contextsPerSet: Int
+	) -> EntropyCode {
+		var histograms = [Histogram](
+			repeating: Histogram(), count: histogramSetCount * contextsPerSet)
+		for index in range {
+			for record in sections[index].staged {
+				guard case .token(let context, let value) = record else {
+					preconditionFailure(
+						"streaming AC sections stage only tokens")
+				}
+				histograms[Int(context)].add(UintCoder.encode(value).token)
+			}
+		}
+
+		func slice(_ set: Int) -> [Histogram] {
+			Array(histograms[(set * contextsPerSet)..<((set + 1) * contextsPerSet)])
+		}
+		let first = slice(0)
+		let usePrefix = usesPrefixCode(
+			originalHistograms: first,
+			totalTokens: first.reduce(0) { $0 + $1.totalCount })
+
+		var encodedANS: [ANSEncodingHistogram] = []
+		var encodedPrefix: [PrefixCode] = []
+		var previous: [Histogram] = []
+		func append(_ clusters: [Histogram]) {
+			if usePrefix {
+				let codes = HistogramCluster.buildPrefixCodes(clusters)
+				encodedPrefix += codes
+				previous += codes.map { Histogram(encodedPrefix: $0) }
+			} else {
+				let encoded = clusters.map {
+					ANSEncodingHistogram.computeBest(
+						counts: $0.counts, strategy: .approximate)
+				}
+				encodedANS += encoded
+				previous += encoded.map { Histogram(encodedANS: $0) }
+			}
+		}
+		append([Histogram.flat(alphabetSize: ANSConstants.maxAlphabetSize)])
+
+		var contextMap: [UInt8] = []
+		for set in 0..<histogramSetCount {
+			let budget = min(
+				streamingClusterBudget(previousHistograms: previous.count),
+				contextsPerSet)
+			let (clusters, symbols) = HistogramCluster.fastCluster(
+				slice(set), maxHistograms: budget, previous: previous)
+			let reindexed = HistogramCluster.reindex(
+				symbols: symbols, clusters: clusters, previousCount: previous.count)
+			append(reindexed.clusters)
+			contextMap += reindexed.contextMap
+		}
+
+		// RemoveUnusedHistograms: histograms renumber by first use, and any
+		// that no context selects are dropped.
+		var order: [Int] = []
+		var renumbered: [UInt8: UInt8] = [:]
+		contextMap = contextMap.map { entry in
+			if let known = renumbered[entry] { return known }
+			let next = UInt8(order.count)
+			renumbered[entry] = next
+			order.append(Int(entry))
+			return next
+		}
+		let code: EntropyCode
+		if usePrefix {
+			code = EntropyCode(
+				contextMap: contextMap, prefixCodes: order.map { encodedPrefix[$0] }
+			)
+		} else {
+			code = EntropyCode(
+				contextMap: contextMap, prefixCodes: [],
+				ansHistograms: order.map { encodedANS[$0] }, logAlphabetSize: 8)
+		}
+		for index in range { sections[index].flush(code: code) }
+		return code
+	}
+
+	/// New clusters one streaming set may add (enc_frame.cc:1306-1311).
+	static func streamingClusterBudget(previousHistograms: Int) -> Int {
+		let remaining = max(0, clustersLimit - previousHistograms)
+		return remaining < 20 ? min(remaining, 4) : remaining / 4
 	}
 
 	/// libjxl's cluster limit (`kClustersLimit`, enc_context_map.h). Tiny's

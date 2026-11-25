@@ -60,7 +60,8 @@ enum EntropyCodeWriter {
 	}
 
 	static func writeContextMap(_ code: EntropyCode, writer: inout BitWriter) {
-		guard code.transmittedContextCount != 0 else { return }
+		// The decoder reads a map only for more than one context.
+		guard code.transmittedContextCount > 1 else { return }
 
 		// A re-clustered code composes with the map it was built from, so the
 		// decoder still sees an entry per original context.

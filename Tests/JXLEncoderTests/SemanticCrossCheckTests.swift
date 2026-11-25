@@ -60,6 +60,10 @@ struct SemanticCrossCheckTests {
 			let result = try SwiftSemanticEncoding.encode(image, distance: 1)
 			try Data(result.codestream).write(
 				to: directory.appendingPathComponent("swift_2057x257.jxl"))
+			let full = try SwiftSemanticEncoding.encode(
+				loadPPM(fixture: "pixel_lifecycle_2057x521"), distance: 1)
+			try Data(full.codestream).write(
+				to: directory.appendingPathComponent("swift_2057x521.jxl"))
 		}
 		for (flip, suffix) in [(true, "ctxflip"), (false, "orderswap")] {
 			let pair = try SemanticMutationTests.encodings(contextFlip: flip)
@@ -259,149 +263,108 @@ struct SemanticCrossCheckTests {
 		.enabled(if: directory != nil))
 	func decodedModularTreeCaptureUsesActualMultiDCStreams() throws {
 		let directory = try #require(Self.directory)
-		let referenceFixture = try EntropyReferenceFixture.load(
-			"tree_merged_multidc_2057x257")
-		func integers(_ dump: SemanticDump, _ field: String) throws -> [Int64] {
-			guard case .integers(let values)? = dump.fields[field] else {
-				throw SemanticDumpError.malformedEntropyFixture(
-					name: "2057x257", field: field)
-			}
-			return values
-		}
-		var capturedTrees: [[Int64]] = []
-		for (name, expectedNodeCount) in [
-			("reference_2057x257_buffered", 95),
-			("swift_2057x257", 89),
-		] {
-			let dump = try SemanticDump(
-				parsing: String(
-					contentsOf: directory.appendingPathComponent(
-						name + ".layout.sem"),
-					encoding: .utf8))
-			let groupCount = try integers(dump, "entropy_layout.group_count")
-			let dcGroupCount = try integers(dump, "entropy_layout.dc_group_count")
-			let sectionIDs = try integers(dump, "entropy_layout.section_ids")
-			let sectionIndices = try integers(dump, "entropy_layout.section_indices")
-			let histogramSetCount = try integers(
-				dump, "entropy_layout.histogram_set_count")
-			let selectors = try integers(dump, "entropy_layout.ac_selectors")
-			let nodeCount = try integers(
-				dump, "entropy_layout.modular_tree.node_count")
-			let nodes = try integers(dump, "entropy_layout.modular_tree.nodes")
-			#expect(groupCount == [18])
-			#expect(dcGroupCount == [2])
-			#expect(sectionIDs == Array(0...21).map(Int64.init))
-			#expect(sectionIndices == Array(0...21).map(Int64.init))
-			let streamsSwift = name == "swift_2057x257"
-			#expect(histogramSetCount == [streamsSwift ? 2 : 1])
-			var expectedSelectors: [Int64] = []
-			for group in 0..<18 {
-				expectedSelectors.append(contentsOf: [
-					0, Int64(group), Int64(group + 4),
-					streamsSwift && (group == 8 || group == 17) ? 1 : 0,
-				])
-			}
-			#expect(selectors == expectedSelectors)
-			#expect(nodeCount == [Int64(expectedNodeCount)])
-			#expect(nodes.count.isMultiple(of: 7))
-			#expect(nodes.count / 7 == Int(nodeCount[0]))
-			if name == "reference_2057x257_buffered" {
-				#expect(
-					groupCount
-						== (try referenceFixture.integers(
-							referenceFixture.expected,
-							"entropy.tree_merged.group_count"))
-				)
-				#expect(
-					dcGroupCount
-						== (try referenceFixture.integers(
-							referenceFixture.expected,
-							"entropy.tree_merged.dc_group_count"))
-				)
-				#expect(
-					nodeCount
-						== (try referenceFixture.integers(
-							referenceFixture.expected,
-							"entropy.tree_merged.node_count"))
-				)
-				#expect(
-					nodes
-						== (try referenceFixture.integers(
-							referenceFixture.expected,
-							"entropy.tree_merged.nodes"))
-				)
-			}
-			let tuples = stride(from: 0, to: nodes.count, by: 7).map {
-				Array(nodes[$0..<($0 + 7)])
-			}
-			#expect(tuples.allSatisfy { $0[0] >= -1 && $0[6] > 0 })
+		let reference = try Self.layout("reference_2057x257", in: directory)
+		let swift = try Self.layout("swift_2057x257", in: directory)
+		for dump in [reference, swift] {
+			#expect(try integers(dump, "entropy_layout.group_count") == [18])
+			#expect(try integers(dump, "entropy_layout.dc_group_count") == [2])
 			#expect(
-				tuples.filter { $0[0] >= 0 }.allSatisfy {
-					$0[2] > 0 && $0[2] < Int64(tuples.count)
-						&& $0[3] > 0 && $0[3] < Int64(tuples.count)
-				})
-			capturedTrees.append(nodes)
+				try integers(dump, "entropy_layout.section_ids")
+					== Array(0...21).map(Int64.init))
+			#expect(try integers(dump, "entropy_layout.histogram_set_count") == [2])
+			// Streaming codes every stream with its own tree: no global tree.
+			#expect(try integers(dump, "entropy_layout.modular_tree.node_count") == [0])
 		}
-		let native = stride(from: 0, to: capturedTrees[0].count, by: 7).map {
-			Array(capturedTrees[0][$0..<($0 + 7)])
-		}
-		let swift = stride(from: 0, to: capturedTrees[1].count, by: 7).map {
-			Array(capturedTrees[1][$0..<($0 + 7)])
-		}
-		#expect(native[0] == [1, 4, 1, 2, 0, 0, 1])
-		#expect(swift[0] == [1, 3, 1, 2, 0, 0, 1])
-		#expect(Set(native.filter { $0[0] == -1 }.map { $0[4] }) == [0, 1, 5, 6])
-		#expect(Set(swift.filter { $0[0] == -1 }.map { $0[4] }) == [0, 1, 5])
-		func routeStaticProperties(
-			_ nodes: [[Int64]], channel: Int64, groupID: Int64
-		) -> (Int, [Int64]) {
-			var index = 0
-			for _ in 0..<nodes.count {
-				let node = nodes[index]
-				guard node[0] == 0 || node[0] == 1 else {
-					return (index, node)
+		for group in 0..<2 {
+			for stream in ["dc", "metadata"] {
+				let prefix = "entropy_layout.dc_group.\(group).\(stream)."
+				#expect(try integers(swift, prefix + "local") == [1])
+				for field in ["tree_node_count", "tree_nodes", "histogram_count"] {
+					#expect(
+						try integers(swift, prefix + field)
+							== (try integers(reference, prefix + field)),
+						"\(prefix)\(field)")
 				}
-				let value = node[0] == 0 ? channel : groupID
-				index = Int(value > node[1] ? node[2] : node[3])
-			}
-			return (index, nodes[index])
-		}
-		for dcGroupID: Int64 in [1, 2] {
-			for channel: Int64 in 0...2 {
-				let nativeRoute = routeStaticProperties(
-					native, channel: channel, groupID: dcGroupID)
-				let swiftRoute = routeStaticProperties(
-					swift, channel: channel, groupID: dcGroupID)
-				#expect(nativeRoute.0 == 2)
-				#expect(swiftRoute.0 == 2)
-				#expect(nativeRoute.1[0] == 15)
-				#expect(swiftRoute.1[0] == 9)
-				#expect(nativeRoute.1[1] == swiftRoute.1[1])
-				#expect(nativeRoute.1[2] == swiftRoute.1[2])
-				#expect(nativeRoute.1[3] == swiftRoute.1[3])
 			}
 		}
-		for metadataGroupID: Int64 in [5, 6] {
-			for channel: Int64 in 0...1 {
-				let nativeRoute = routeStaticProperties(
-					native, channel: channel, groupID: metadataGroupID)
-				let swiftRoute = routeStaticProperties(
-					swift, channel: channel, groupID: metadataGroupID)
-				#expect(nativeRoute.1[0] == -1)
-				#expect(swiftRoute.1[0] == -1)
-				#expect(nativeRoute.1[4] == 5)
-				#expect(swiftRoute.1[4] == 5)
-				#expect(nativeRoute.1[5] == swiftRoute.1[5])
-				#expect(nativeRoute.1[6] == swiftRoute.1[6])
-			}
-			let nativeChromaRoute = routeStaticProperties(
-				native, channel: 2, groupID: metadataGroupID)
-			let swiftChromaRoute = routeStaticProperties(
-				swift, channel: 2, groupID: metadataGroupID)
-			#expect(nativeChromaRoute.1[0] == 2)
-			#expect(swiftChromaRoute.1[0] == 2)
-			#expect(nativeChromaRoute.1[1] == swiftChromaRoute.1[1])
+	}
+
+	@Test(
+		"streaming 2057x257 local trees and AC histograms match the reference",
+		.enabled(if: directory != nil))
+	func streamingTreesAndHistogramsMatchReference2057x257() throws {
+		let directory = try #require(Self.directory)
+		let reference = try Self.layout("reference_2057x257", in: directory)
+		let swift = try Self.layout("swift_2057x257", in: directory)
+		for field in [
+			"entropy_layout.ac.use_prefix_code", "entropy_layout.ac.histogram_count",
+		] {
+			#expect(
+				try integers(swift, field) == (try integers(reference, field)),
+				"\(field)")
 		}
+		// The encoded histograms are identical, so the same ANS tables and
+		// alphabet lengths are transmitted.
+		let referenceCode = try Self.layout(
+			"reference_2057x257", suffix: "ac", in: directory)
+		let swiftCode = try Self.layout("swift_2057x257", suffix: "ac", in: directory)
+		#expect(!referenceCode.fields.isEmpty)
+		#expect(referenceCode.fields == swiftCode.fields)
+		// Two contexts of DC group 0 (set 0 spans entries 0..<2970) differ from
+		// the reference. libjxl's streaming clustering run on Swift's own staged
+		// tokens reproduces Swift's whole map, and the quant field, coefficient
+		// order, block map and every ANS table match, so the difference is in
+		// the quantized AC tokens feeding clustering: lane 3's cropped AC
+		// computation or the quantizer skips. These indices stop differing
+		// when that lands.
+		let referenceMap = try integers(reference, "entropy_layout.ac.context_map")
+		let swiftMap = try integers(swift, "entropy_layout.ac.context_map")
+		#expect(referenceMap.count == swiftMap.count)
+		let differing = zip(referenceMap, swiftMap).enumerated().filter {
+			$0.element.0 != $0.element.1
+		}
+		.map(\.offset)
+		#expect(differing == [2922, 2966])
+		for group in 0..<2 {
+			for stream in ["dc", "metadata"] {
+				#expect(
+					try integers(
+						swift,
+						"entropy_layout.dc_group.\(group).\(stream).tree_nodes"
+					)
+						== (try integers(
+							reference,
+							"entropy_layout.dc_group.\(group).\(stream).tree_nodes"
+						)))
+			}
+		}
+	}
+
+	@Test(
+		"streaming 2057x521 coefficient order and block context map match the reference",
+		.enabled(if: directory != nil))
+	func pixelLifecycle2057x521OrderAndBlockMapMatchReference() throws {
+		let directory = try #require(Self.directory)
+		let reference = try Self.layout("reference_2057x521", in: directory)
+		let swift = try Self.layout("swift_2057x521", in: directory)
+		let fields = reference.fields.keys.filter {
+			$0.hasPrefix("coeff_order.") || $0.hasPrefix("block_context.")
+		}
+		#expect(!fields.isEmpty)
+		for field in fields {
+			#expect(swift.fields[field] == reference.fields[field], "\(field)")
+		}
+		#expect(Set(swift.fields.keys) == Set(reference.fields.keys))
+	}
+
+	static func layout(
+		_ name: String, suffix: String = "layout", in directory: URL
+	) throws -> SemanticDump {
+		try SemanticDump(
+			parsing: String(
+				contentsOf: directory.appendingPathComponent(
+					name + "." + suffix + ".sem"),
+				encoding: .utf8))
 	}
 
 	private func integers(_ dump: SemanticDump, _ field: String) throws -> [Int64] {
