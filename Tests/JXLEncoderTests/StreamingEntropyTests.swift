@@ -12,9 +12,23 @@ struct StreamingEntropyTests {
 	// MARK: One-context codes
 
 	@Test(
-		"a code with one context transmits no context map",
-		.disabled("pending implementation"))
-	func oneContextCodeWritesNoContextMap() throws {}
+		"a code with one context transmits no context map")
+	func oneContextCodeWritesNoContextMap() throws {
+		let tokens = (0..<40).map { Token(context: 0, value: UInt32($0 % 5)) }
+		let one = SectionOptimizer.modularCode(
+			tokenStreams: [tokens], contextCount: 1, extraDCPrecision: 0)
+		#expect(one.transmittedContextCount == 1)
+		var writer = BitWriter()
+		EntropyCodeWriter.writeContextMap(one, writer: &writer)
+		#expect(writer.bitsWritten == 0)
+
+		let two = SectionOptimizer.modularCode(
+			tokenStreams: [tokens + [Token(context: 1, value: 3)]],
+			contextCount: 2, extraDCPrecision: 0)
+		var twoWriter = BitWriter()
+		EntropyCodeWriter.writeContextMap(two, writer: &twoWriter)
+		#expect(twoWriter.bitsWritten > 0)
+	}
 
 	@Test(
 		"a single-leaf modular stream decodes in the native decoder",
