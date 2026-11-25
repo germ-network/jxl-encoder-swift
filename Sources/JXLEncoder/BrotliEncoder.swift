@@ -25,7 +25,16 @@ enum BrotliEncoder {
 
 	/// A stream that decodes to exactly `input`, including the empty input.
 	static func compress(_ input: [UInt8]) -> [UInt8] {
-		fatalError("unimplemented")
+		var writer = BitWriter()
+		BrotliMetaBlock.writeStreamHeader(to: &writer)
+		var start = 0
+		while start < input.count {
+			let end = min(start + maxMetaBlockLength, input.count)
+			BrotliMetaBlock.writeUncompressed(input[start..<end], to: &writer)
+			start = end
+		}
+		BrotliMetaBlock.writeEmptyLast(to: &writer)
+		return writer.take()
 	}
 }
 
@@ -125,13 +134,22 @@ enum BrotliPrefixCode {
 /// Stream header and meta-block serialization (RFC 7932 §9).
 enum BrotliMetaBlock {
 	static func writeStreamHeader(to writer: inout BitWriter) {
-		fatalError("unimplemented")
+		// §9.1 lists WBITS 22 as bit pattern "1011", "parsed from right to left".
+		writer.write(4, 0b1011)
 	}
 
-	/// A non-last meta-block holding `bytes` verbatim. §9.2 allows
-	/// ISUNCOMPRESSED "only if the ISLAST bit is not set".
+	/// A non-last meta-block holding `bytes` verbatim. §9.2 says ISUNCOMPRESSED
+	/// is "only present if the ISLAST bit is not set".
 	static func writeUncompressed(_ bytes: ArraySlice<UInt8>, to writer: inout BitWriter) {
-		fatalError("unimplemented")
+		precondition(
+			(1...BrotliEncoder.maxMetaBlockLength).contains(bytes.count),
+			"meta-block length \(bytes.count) out of range")
+		writer.write(1, 0)  // ISLAST
+		writer.write(2, 0)  // MNIBBLES = 4
+		writer.write(16, UInt64(bytes.count - 1))
+		writer.write(1, 1)  // ISUNCOMPRESSED
+		writer.zeroPadToByte()
+		for byte in bytes { writer.write(8, UInt64(byte)) }
 	}
 
 	/// A compressed meta-block for `input[range]` built from `commands`, with one
@@ -158,6 +176,7 @@ enum BrotliMetaBlock {
 
 	/// The empty last meta-block: ISLAST = 1, ISLASTEMPTY = 1, zero fill.
 	static func writeEmptyLast(to writer: inout BitWriter) {
-		fatalError("unimplemented")
+		writer.write(2, 0b11)
+		writer.zeroPadToByte()
 	}
 }
