@@ -81,32 +81,53 @@ struct StreamingEntropyTests {
 
 	/// Groups whose content differs between the first eight (DC group 0) and
 	/// the last, so a frame-wide statistic differs from DC group 0's.
-	static func syntheticComputes(dim: ImageDim) -> [Encoder.ACGroupCompute] {
-		(0..<dim.groupCount).map { index in
-			let groupX = index % dim.widthInGroups
-			let groupY = index / dim.widthInGroups
-			let blocks = 32 * 32
-			let inLaterDCGroup = groupX >= 8
-			let coefficients = (0..<3).map { channel in
-				(0..<blocks * 64).map { offset -> Int32 in
-					let position = offset % 64
-					let block = offset / 64
-					if inLaterDCGroup {
-						return position >= 40 && (block + channel) % 3 != 0
-							? 1 : 0
-					}
-					return position < 12 && (block + position) % 2 == 0 ? 1 : 0
-				}
+	static func syntheticCoefficients(
+		channel: Int, blocks: Int, inLaterDCGroup: Bool
+	) -> [Int32] {
+		var values = [Int32](repeating: 0, count: blocks * 64)
+		for offset in 0..<values.count {
+			let position: Int = offset % 64
+			let block: Int = offset / 64
+			var nonzero = false
+			if inLaterDCGroup {
+				nonzero = position >= 40 && (block + channel) % 3 != 0
+			} else {
+				nonzero = position < 12 && (block + position) % 2 == 0
 			}
-			return Encoder.ACGroupCompute(
-				groupX: groupX, groupY: groupY, widthInBlocks: 32,
-				heightInBlocks: 32,
-				coefficients: coefficients,
-				rawDC: (0..<3).map { _ in [Float](repeating: 0, count: blocks) },
-				quantField: (0..<blocks).map {
-					inLaterDCGroup ? UInt8(1 + $0 % 40) : UInt8(1 + $0 % 3)
-				})
+			if nonzero { values[offset] = 1 }
 		}
+		return values
+	}
+
+	static func syntheticComputes(dim: ImageDim) -> [Encoder.ACGroupCompute] {
+		let blocks = 32 * 32
+		var computes: [Encoder.ACGroupCompute] = []
+		for index in 0..<dim.groupCount {
+			let groupX: Int = index % dim.widthInGroups
+			let groupY: Int = index / dim.widthInGroups
+			let inLaterDCGroup: Bool = groupX >= 8
+			var coefficients: [[Int32]] = []
+			for channel in 0..<3 {
+				coefficients.append(
+					syntheticCoefficients(
+						channel: channel, blocks: blocks,
+						inLaterDCGroup: inLaterDCGroup))
+			}
+			let rawDC: [[Float]] = [[Float]](
+				repeating: [Float](repeating: 0, count: blocks), count: 3)
+			var quantField = [UInt8](repeating: 0, count: blocks)
+			for block in 0..<blocks {
+				let value: Int = inLaterDCGroup ? 1 + block % 40 : 1 + block % 3
+				quantField[block] = UInt8(value)
+			}
+			computes.append(
+				Encoder.ACGroupCompute(
+					groupX: groupX, groupY: groupY, widthInBlocks: 32,
+					heightInBlocks: 32, coefficients: coefficients,
+					rawDC: rawDC,
+					quantField: quantField))
+		}
+		return computes
 	}
 
 	/// One staged AC section per histogram set, tokens placed in the set's
