@@ -199,7 +199,7 @@ until they agree.
 existing parser fixtures plus a flat prefix-code input and 513×267 flower
 inputs at 4:2:2, 4:4:0 and 4:2:0. The 4:2:2 input reuses the already committed
 `ac_entropy_jpeg_2x1.jpg`. New JPEG inputs are generated with the pinned
-libjpeg-turbo 3.2.0 `cjpeg` tool. The full libjxl reference is pinned by
+libjpeg-turbo 3.2.1 `cjpeg` tool. The full libjxl reference is pinned by
 `Reference/libjxl.pin` and built for arm64 NEON.
 
 Each input is encoded both by the harness's `JxlEncoderAddJPEGFrame` command
