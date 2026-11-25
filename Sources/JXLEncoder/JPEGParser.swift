@@ -186,7 +186,7 @@ private struct JPEGSegmentParser {
 	var planes: [[Int32]]?
 	var hasAPP0 = false
 	var adobeTransform: UInt8?
-	var iccProfile: [UInt8]?
+	var iccChunks: [ArraySlice<UInt8>] = []
 
 	mutating func run() throws -> JPEGImage {
 		guard data.count >= 2, data[0] == 0xFF, data[1] == 0xD8 else {
@@ -274,7 +274,7 @@ private struct JPEGSegmentParser {
 			quantTables: (0..<highestTable).map { boundQuantTables[$0] ?? [] },
 			restartInterval: restartInterval)
 		image.sourceIsRGB = sourceIsRGB
-		image.iccProfile = iccProfile
+		image.iccProfile = Self.assembleICCProfile(iccChunks)
 		return image
 	}
 
@@ -353,9 +353,29 @@ private struct JPEGSegmentParser {
 		if end - index >= signature.count,
 			data[index..<(index + signature.count)].elementsEqual(signature)
 		{
-			iccProfile = iccProfile ?? []
+			iccChunks.append(data[(index + signature.count)..<end])
 		}
 		index = end
+	}
+
+	/// Concatenates APP2 chunk payloads (each starting with a 1-based index and
+	/// the chunk count) the way libjxl `ParseChunkedMarker` does. Any
+	/// irregularity, or an empty result, yields nil.
+	static func assembleICCProfile(_ chunks: [ArraySlice<UInt8>]) -> [UInt8]? {
+		var profile: [UInt8] = []
+		var total: UInt8?
+		for (ordinal, chunk) in chunks.enumerated() {
+			guard chunk.count >= 2 else { return nil }
+			let index = chunk[chunk.startIndex]
+			let count = chunk[chunk.startIndex + 1]
+			guard Int(index) == ordinal + 1, total == nil || total == count else {
+				return nil
+			}
+			total = count
+			profile += chunk.dropFirst(2)
+		}
+		guard let total, chunks.count == Int(total), !profile.isEmpty else { return nil }
+		return profile
 	}
 
 	private mutating func readFrameHeader(marker: UInt8) throws {

@@ -62,7 +62,7 @@ struct PortableJPEGRecompressionTests {
 		let rgb = try JPEGParserTests.fixture("rgb_color")
 		let profile = try JPEGParserTests.fixture("display_p3_profile")
 		let rgbWithProfile = JPEGParserTests.withMarker(
-			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1], in: rgb)
+			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1, 0xAB], in: rgb)
 		#expect(Encoder.recompressJPEG(rgb) != nil)
 		#expect(Encoder.recompressJPEG(profile) == nil)
 		#expect(Encoder.recompressJPEG(rgbWithProfile) == nil)
