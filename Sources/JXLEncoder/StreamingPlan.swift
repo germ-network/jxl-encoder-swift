@@ -77,7 +77,7 @@ enum FramePlan: Equatable, Sendable {
 
 /// One DC group's pass through EncodeFrameStreaming: the pixels it owns and
 /// the bordered patch it is processed from (enc_frame.cc:1563-1567,
-/// 1633-1634).
+/// 1634-1635).
 struct DCGroupLifecycle: Equatable, Sendable {
 	/// Raster index, which is also its histogram set.
 	let index: Int
