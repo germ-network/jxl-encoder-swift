@@ -127,8 +127,6 @@ private struct BitReader {
 		}
 		return value
 	}
-
-	mutating func alignToByte() { position = (position + 7) / 8 * 8 }
 }
 
 /// Brotli streams must be RFC 7932-conformant and decode to their input byte
@@ -383,6 +381,61 @@ struct BrotliEncoderTests {
 			}
 			#expect(longCount > 4000)
 		}
+	}
+
+	/// The insert-and-copy symbols of a one-meta-block stream whose literal
+	/// and distance codes are simple, plus whether the distance code costs bits.
+	private static func commandSymbols(
+		for commands: [BrotliCommand]
+	) -> (symbols: [Int], distanceCodeIsDegenerate: Bool) {
+		var input = [UInt8]()
+		var noise = pseudoRandomBytes(200, seed: 71).map { $0 % 4 }[...]
+		for command in commands {
+			for _ in 0..<command.insertLength { input.append(noise.removeFirst()) }
+			for _ in 0..<command.copyLength {
+				input.append(input[input.count - command.distance])
+			}
+		}
+		var ring = BrotliDistanceRing()
+		var writer = BitWriter()
+		BrotliMetaBlock.writeCompressed(
+			input: input, range: 0..<input.count, commands: commands, isLast: true,
+			ring: &ring, to: &writer)
+		writer.zeroPadToByte()
+		var reader = BitReader(bytes: writer.take())
+		_ = reader.read(1 + 1 + 2 + 16 + 3 + 2 + 4 + 2 + 2)
+		func readSimpleCode(symbolBits: Int) -> [Int] {
+			#expect(reader.read(2) == 1)
+			let count = reader.read(2) + 1
+			let symbols = (0..<count).map { _ in reader.read(symbolBits) }
+			if count == 4 { _ = reader.read(1) }
+			return symbols
+		}
+		_ = readSimpleCode(symbolBits: 8)
+		let symbols = readSimpleCode(symbolBits: 10)
+		let distances = readSimpleCode(symbolBits: 6)
+		return (symbols, distances.count == 1)
+	}
+
+	@Test(
+		"a copy at the last distance is written implicitly when insert code < 8 and copy code < 16"
+	)
+	func implicitLastDistance() {
+		let implicit = Self.commandSymbols(for: [
+			BrotliCommand(insertLength: 6, copyLength: 54, distance: 4),
+			BrotliCommand(insertLength: 9, copyLength: 10, distance: 4),
+			BrotliCommand(insertLength: 3, copyLength: 0, distance: 0),
+		])
+		#expect(implicit.symbols.filter { $0 < 128 }.sorted() == [119, 120])
+		#expect(implicit.symbols.filter { $0 >= 128 }.count == 1)
+		#expect(implicit.distanceCodeIsDegenerate)
+
+		// Insert code 8 has no implicit form, so symbol 0 is written explicitly.
+		let explicit = Self.commandSymbols(for: [
+			BrotliCommand(insertLength: 10, copyLength: 8, distance: 4),
+			BrotliCommand(insertLength: 3, copyLength: 0, distance: 0),
+		])
+		#expect(explicit.symbols.allSatisfy { $0 >= 128 })
 	}
 
 	@Suite("prefix codes")
@@ -748,6 +801,34 @@ struct BrotliEncoderTests {
 				let reference = try #require(
 					ExternalDecoder.binary(variable: "BROTLI_REFERENCE"))
 				let peer = ExternalDecoder.binary(variable: "BROTLI_PEER_DECODER")
+				for input in corpus where !input.bytes.isEmpty {
+					// The same input with every meta-block compressed, so each simple-code
+					// shape is decoded whatever the size comparison chooses.
+					var writer = BitWriter()
+					BrotliMetaBlock.writeStreamHeader(to: &writer)
+					var finder = BrotliMatchFinder(
+						input: input.bytes,
+						windowSize: BrotliEncoder.windowSize)
+					var ring = BrotliDistanceRing()
+					var start = 0
+					while start < input.bytes.count {
+						let end = min(
+							start + BrotliEncoder.maxMetaBlockLength,
+							input.bytes.count)
+						BrotliMetaBlock.writeCompressed(
+							input: input.bytes, range: start..<end,
+							commands: finder.commands(for: start..<end),
+							isLast: end == input.bytes.count,
+							ring: &ring, to: &writer)
+						start = end
+					}
+					writer.zeroPadToByte()
+					let forced = try ExternalDecoder.referenceDecode(
+						writer.take(), binary: reference)
+					#expect(
+						forced == input.bytes,
+						"forced compressed: \(input.name)")
+				}
 				for input in corpus {
 					let stream = BrotliEncoder.compress(input.bytes)
 					let decoded = try ExternalDecoder.referenceDecode(
