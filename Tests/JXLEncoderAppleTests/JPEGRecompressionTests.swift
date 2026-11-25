@@ -19,7 +19,7 @@
 	@Suite("JPEG recompression through the shim")
 	struct JPEGRecompressionTests {
 
-		@Test("RGB coefficient path and profiled fallback preserve decoded colors")
+		@Test("RGB and profiled coefficient paths preserve decoded colors")
 		func colorFallbackMatchesDecodedSource() throws {
 			for name in ["rgb_color", "display_p3_profile"] {
 				let source = try Self.fixture(name)
@@ -31,7 +31,7 @@
 		}
 
 		@Test(
-			"concurrent RGB coefficient path and profiled fallback preserve decoded colors"
+			"concurrent RGB and profiled coefficient paths preserve decoded colors"
 		)
 		func concurrentColorFallbackMatchesDecodedSource() async throws {
 			for name in ["rgb_color", "display_p3_profile"] {
@@ -129,7 +129,7 @@
 			"hopper_444", "hopper_422", "hopper_420_restart", "hopper_420_odd",
 			"hopper_420_sof1", "hopper_gray_odd", "small_444", "small_422",
 			"rgb_color",
-			"small_440",
+			"small_440", "display_p3_profile", "rgb_p3_profile",
 		]
 		/// Everything it should decline, with the reason.
 		///
@@ -138,7 +138,6 @@
 		/// entropy coders the parser does not implement.
 		static let mustFallBack = [
 			"hopper_411", "reject_progressive", "reject_arithmetic",
-			"display_p3_profile",
 		]
 
 		static func fixture(_ name: String) throws -> Data {
@@ -149,7 +148,10 @@
 			return try Data(contentsOf: url)
 		}
 
-		static func samples(_ data: Data) -> (width: Int, height: Int, rgb: [UInt8])? {
+		static func samples(
+			_ data: Data,
+			in space: CGColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+		) -> (width: Int, height: Int, rgb: [UInt8])? {
 			guard
 				let source = CGImageSourceCreateWithData(data as CFData, nil),
 				let image = CGImageSourceCreateImageAtIndex(source, 0, nil)
@@ -161,7 +163,7 @@
 				let context = CGContext(
 					data: buffer.baseAddress, width: w, height: h,
 					bitsPerComponent: 8, bytesPerRow: w * 4,
-					space: CGColorSpace(name: CGColorSpace.sRGB)!,
+					space: space,
 					bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)!
 				context.draw(image, in: CGRect(x: 0, y: 0, width: w, height: h))
 			}
@@ -174,9 +176,12 @@
 			return (w, h, rgb)
 		}
 
-		static func meanError(_ encoded: Data, against source: Data) throws -> Double {
-			let ours = try #require(Self.samples(encoded))
-			let reference = try #require(Self.samples(source))
+		static func meanError(
+			_ encoded: Data, against source: Data,
+			in space: CGColorSpace = CGColorSpace(name: CGColorSpace.sRGB)!
+		) throws -> Double {
+			let ours = try #require(Self.samples(encoded, in: space))
+			let reference = try #require(Self.samples(source, in: space))
 			try #require(ours.width == reference.width)
 			try #require(ours.height == reference.height)
 			let total = zip(ours.rgb, reference.rgb).reduce(0.0) {
@@ -552,15 +557,35 @@
 	}
 
 	extension JPEGRecompressionTests {
+		static let profiled = ["display_p3_profile", "rgb_p3_profile"]
+		static let displayP3 = CGColorSpace(name: CGColorSpace.displayP3)!
+
 		@Test(
 			"profiled output decodes to the colour-managed source pixels",
-			.disabled("pending implementation"))
-		func profiledDecodeMatchesColorManagedSource() {}
+			arguments: profiled)
+		func profiledDecodeMatchesColorManagedSource(name: String) throws {
+			let source = try Self.fixture(name)
+			let output = try #require(JXLEncoderApple.recompressedJPEG(source))
+			let error = try Self.meanError(output, against: source, in: Self.displayP3)
+			#expect(error < 2.5, "\(name): mean absolute error \(error)")
+		}
 
 		@Test(
 			"the ICC-stripped control decodes measurably differently",
-			.disabled("pending implementation"))
-		func strippedControlIsDistinguishable() {}
+			arguments: profiled)
+		func strippedControlIsDistinguishable(name: String) throws {
+			let source = try Self.fixture(name)
+			let stripped = Self.withoutICC(source)
+			#expect(stripped != source)
+			let output = try #require(JXLEncoderApple.recompressedJPEG(source))
+			let control = try #require(JXLEncoderApple.recompressedJPEG(stripped))
+			let error = try Self.meanError(output, against: source, in: Self.displayP3)
+			let controlError = try Self.meanError(
+				control, against: source, in: Self.displayP3)
+			#expect(
+				controlError > 1 && controlError > 2 * error,
+				"\(name): \(controlError) vs \(error)")
+		}
 	}
 
 #endif  // canImport(ImageIO)

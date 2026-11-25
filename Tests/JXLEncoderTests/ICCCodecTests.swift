@@ -267,6 +267,7 @@ struct ICCCodecTests {
 		}
 		let libjxlSizes = [
 			"display_p3_profile": 390, "p3_desc4_profile": 450,
+			"p3_desc1000_profile_420": 20_378, "p3_random40000_profile_420": 80_378,
 			"p3_desc3300_profile_420": 66_378,
 		]
 		for (fixture, transformedSize) in libjxlSizes {
@@ -404,7 +405,7 @@ struct ICCCodecTests {
 	func writeEnablesLZ77WithForcedPrefixMinSymbol() throws {
 		for (fixture, method) in [
 			("p3_desc4_profile", LZ77.Method.optimal),
-			("p3_desc3300_profile_420", .lz77),
+			("p3_desc1000_profile_420", .lz77),
 		] {
 			let profile = try ICCProfile(validating: Self.profile(fixture))
 			let size = ICCCodec.predict(profile.bytes).count
@@ -417,6 +418,31 @@ struct ICCCodecTests {
 			#expect(bits.read(1) == 1, "\(fixture) LZ77 enabled")
 			#expect(bits.read(2) == 1, "\(fixture) min_symbol 512")
 			#expect(bits.read(2) == 0, "\(fixture) min_length 3")
+		}
+	}
+
+	/// The reader checks at multiples of 65,536 decoded bytes, so the edge is
+	/// 256 coded bytes there (icc_codec.cc:399-403).
+	@Test("the reader's 256:1 check passes at exactly 256 coded bytes")
+	func readerAcceptanceBoundary() {
+		#expect(ICCCodec.readerAccepts(symbols: 65_536, bits: 2_048))
+		#expect(!ICCCodec.readerAccepts(symbols: 65_536, bits: 2_047))
+		#expect(ICCCodec.readerAccepts(symbols: 131_072, bits: 4_096))
+		#expect(!ICCCodec.readerAccepts(symbols: 131_072, bits: 4_095))
+	}
+
+	@Test("write declines a stream the reader rejects and leaves the writer untouched")
+	func writeDeclinesOvercompressedProfile() throws {
+		let declined = try ICCProfile(validating: Self.profile("p3_desc3300_profile_420"))
+		var writer = BitWriter()
+		writer.write(3, 5)
+		#expect(!ICCCodec.write(declined, to: &writer))
+		#expect(writer.bitsWritten == 3)
+		for fixture in ["p3_random40000_profile_420", "p3_desc1000_profile_420"] {
+			let accepted = try ICCProfile(validating: Self.profile(fixture))
+			var fresh = BitWriter()
+			#expect(ICCCodec.write(accepted, to: &fresh), "\(fixture)")
+			#expect(fresh.bitsWritten > 0)
 		}
 	}
 }

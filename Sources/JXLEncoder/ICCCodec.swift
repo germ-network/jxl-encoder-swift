@@ -237,12 +237,26 @@ enum ICCCodec {
 		transformedSize < 16_384 ? .optimal : .lz77
 	}
 
+	/// Whether libjxl's ICC reader accepts a stream that has decoded `symbols`
+	/// transformed bytes (a multiple of 65,536) from `bits` coded bits since
+	/// the length field. It fails any stream coded more than 256:1 at such a
+	/// point (icc_codec.cc:399-403), in float arithmetic.
+	static func readerAccepts(symbols: Int, bits: Int) -> Bool {
+		!(Float(symbols) > Float(bits) / 8 * 256)
+	}
+
 	/// Writes U64(transformed length) then the transformed bytes as
 	/// forced-prefix tokens over `contextCount` contexts, with LZ77 chosen by
 	/// `lz77Method(transformedSize:)`. Ports `WriteICC` (enc_icc_codec.cc).
-	static func write(_ profile: ICCProfile, to writer: inout BitWriter) {
+	///
+	/// libjxl emits streams its own reader rejects when they compress past
+	/// 256:1; this returns false, leaving `writer` untouched, for those.
+	@discardableResult
+	static func write(_ profile: ICCProfile, to writer: inout BitWriter) -> Bool {
 		let stream = predict(profile.bytes)
-		writer.writeU64(UInt64(stream.count))
+		var coded = writer
+		let base = coded.bitsWritten
+		coded.writeU64(UInt64(stream.count))
 		let tokens = stream.indices.map { i in
 			Token(
 				context: UInt32(
@@ -256,9 +270,45 @@ enum ICCCodec {
 			parameters: HistogramParameters(
 				lz77Method: lz77Method(transformedSize: stream.count),
 				forcesPrefixCodes: true))
-		EntropyCodeWriter.write(prepared.code, writer: &writer)
-		EntropyCodeWriter.writeTokens(prepared.tokens, code: prepared.code, writer: &writer)
+		EntropyCodeWriter.write(prepared.code, writer: &coded)
+
+		// A length token and its distance are read together, so the reader has
+		// consumed both by the time it has produced any byte of the copy.
+		let encoded = prepared.tokens
+		var segmentStart = 0
+		var index = 0
+		var decoded = 0
+		var boundary = readerCheckInterval
+		while index < encoded.count {
+			if encoded[index].isLength {
+				decoded += Int(encoded[index].token.value + LZ77.minLength)
+				index += 2
+			} else {
+				decoded += 1
+				index += 1
+			}
+			guard decoded >= boundary else { continue }
+			EntropyCodeWriter.writeTokens(
+				Array(encoded[segmentStart..<index]), code: prepared.code,
+				writer: &coded)
+			segmentStart = index
+			while boundary <= decoded {
+				if boundary < stream.count,
+					!readerAccepts(
+						symbols: boundary, bits: coded.bitsWritten - base)
+				{
+					return false
+				}
+				boundary += readerCheckInterval
+			}
+		}
+		EntropyCodeWriter.writeTokens(
+			Array(encoded[segmentStart...]), code: prepared.code, writer: &coded)
+		writer = coded
+		return true
 	}
+
+	private static let readerCheckInterval = 65_536
 
 	private static let headerSize = 128
 	private static let sizeLimit = Int(UInt32.max >> 2)

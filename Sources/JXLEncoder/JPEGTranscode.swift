@@ -48,11 +48,18 @@ public struct JPEGTranscode {
 	}
 
 	public init(_ image: JPEGImage) throws {
-		guard image.iccProfile == nil else {
-			throw TranscodeError.unsupportedColorInterpretation
-		}
-		iccProfile = nil
 		let count = image.components.count
+		if let bytes = image.iccProfile, !bytes.isEmpty {
+			var scratch = BitWriter()
+			guard count != 1, let profile = try? ICCProfile(validating: bytes),
+				ICCCodec.write(profile, to: &scratch)
+			else {
+				throw TranscodeError.unsupportedColorInterpretation
+			}
+			iccProfile = profile
+		} else {
+			iccProfile = nil
+		}
 		switch count {
 		case 1:
 			// Grey. Only channel 1 reads the component; libjxl zero-fills the

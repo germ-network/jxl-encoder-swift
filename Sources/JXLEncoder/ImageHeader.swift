@@ -110,7 +110,12 @@ public enum ImageHeader {
 		}
 		writer.write(2, 0)  // no extensions
 		writer.write(1, 1)  // all default transform data
-		if let iccProfile { ICCCodec.write(iccProfile, to: &writer) }
+		if let iccProfile {
+			guard ICCCodec.write(iccProfile, to: &writer) else {
+				preconditionFailure(
+					"the profile's coded form is one libjxl's reader rejects")
+			}
+		}
 		writer.zeroPadToByte()
 	}
 

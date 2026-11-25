@@ -124,10 +124,16 @@ cjpeg -rgb -qtables "$WORK/rgb-witness.qtables" -qslots 0,1,2 \
 cjpeg -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/display_p3_profile.jpg" "$WORK/colors.ppm"
 cjpeg -rgb -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/rgb_p3_profile.jpg" "$WORK/colors.ppm"
 # Repeated-desc rebuilds of Display-P3.icc (make_desc_icc.py): N=4 is the
-# smallest that enables LZ77 in the coded ICC, N=3300 exceeds one APP2 chunk
-# and the 16,384-byte kLZ77 switch.
+# smallest that enables LZ77 in the coded ICC, N=1000 passes the 16,384-byte
+# kLZ77 switch. N=3300 spans several APP2 chunks and compresses past the
+# ratio libjxl's ICC reader accepts, so it must decline. The seeded profile
+# has 40,000 incompressible desc characters over two APP2 chunks.
 python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 4 "$HERE/fixtures/Display-P3-desc4.icc"
 python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 3300 "$HERE/fixtures/Display-P3-desc3300.icc"
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 1000 "$HERE/fixtures/Display-P3-desc1000.icc"
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 40000 "$HERE/fixtures/Display-P3-random40000.icc" 1
+cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-desc1000.icc" -outfile "$CORE/p3_desc1000_profile_420.jpg" "$WORK/colors.ppm"
+cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-random40000.icc" -outfile "$CORE/p3_random40000_profile_420.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-desc4.icc" -outfile "$CORE/p3_desc4_profile.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-desc3300.icc" -outfile "$CORE/p3_desc3300_profile_420.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 4x1 -outfile "$CORE/small_411.jpg" "$WORK/small.ppm"
