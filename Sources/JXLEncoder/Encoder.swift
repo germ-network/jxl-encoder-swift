@@ -91,6 +91,17 @@ public enum Encoder {
 		let coeffOrder: CoeffOrder.Result
 		let blockContextMap: JPEGBlockContextMap.Result?
 		let acCode: EntropyCode
+		let plan: FramePlan
+
+		/// Contexts in one histogram set: every set has the block model's AC
+		/// contexts (libjxl `NumACContexts`).
+		var acContextsPerSet: Int {
+			blockContextMap.map(Self.contextsPerSet) ?? ACContext.totalCount
+		}
+
+		static func contextsPerSet(_ map: JPEGBlockContextMap.Result) -> Int {
+			map.numContexts * (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)
+		}
 	}
 
 	/// Computes one AC group's coefficients: forward DCT and quantization.
@@ -188,11 +199,18 @@ public enum Encoder {
 	/// Tokenizes one already-computed AC group using the frame-global
 	/// coefficient order.
 	static func tokenizeACGroup(
-		_ compute: ACGroupCompute, order: [[Int]], mode: SectionWriter.Mode,
-		blockContextMap: JPEGBlockContextMap.Result? = nil
+		_ compute: ACGroupCompute, analysis: PixelFrameAnalysis,
+		mode: SectionWriter.Mode
 	) -> ACGroupOutput {
-		var writer = SectionWriter(mode: mode)
-		if let blockContextMap {
+		let set = analysis.plan.histogramIndex(
+			groupX: compute.groupX, groupY: compute.groupY)
+		var writer = SectionWriter(
+			mode: mode, contextOffset: UInt32(set * analysis.acContextsPerSet))
+		if analysis.plan.selectorBits > 0 {
+			writer.writeUnstaged(analysis.plan.selectorBits, UInt64(set))
+		}
+		let order = analysis.coeffOrder.orders
+		if let blockContextMap = analysis.blockContextMap {
 			ACGroupEncoder.tokenizeGroup(
 				coefficients: compute.coefficients,
 				widthInBlocks: compute.widthInBlocks,
@@ -326,23 +344,31 @@ public enum Encoder {
 		computes: [ACGroupCompute], dim: ImageDim, params: DistanceParams,
 		optimizeCodes: Bool
 	) -> PixelFrameAnalysis {
+		let plan = FramePlan(dim: dim, upsampling: params.upsampling)
 		var acCode = EntropyCode.staticAC
 		let coeffOrder: CoeffOrder.Result =
 			optimizeCodes ? computeCoeffOrder(computes, dim: dim) : .identity
 		let blockContextMap =
 			optimizeCodes ? computeBlockContextMap(computes, params: params) : nil
+		let sets = plan.histogramSetCount
 		if let blockContextMap {
 			acCode = EntropyCode(
 				contextMap: [UInt8](
 					repeating: 0,
-					count: blockContextMap.numContexts
-						* (ACContext.nonZeroBuckets
-							+ ACContext.zeroDensityCount)),
+					count: sets
+						* PixelFrameAnalysis.contextsPerSet(blockContextMap)
+				),
 				prefixCodes: [])
+		} else if sets > 1 {
+			acCode = EntropyCode(
+				contextMap: Array(
+					[[UInt8]](repeating: acCode.contextMap, count: sets)
+						.joined()),
+				prefixCodes: acCode.prefixCodes)
 		}
 		return PixelFrameAnalysis(
 			coeffOrder: coeffOrder, blockContextMap: blockContextMap,
-			acCode: acCode)
+			acCode: acCode, plan: plan)
 	}
 
 	static func finishPixelFrame(
@@ -399,7 +425,8 @@ public enum Encoder {
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode,
-			coeffOrder: analysis.coeffOrder, writer: &acGlobal)
+			coeffOrder: analysis.coeffOrder,
+			histogramSetCount: analysis.plan.histogramSetCount, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 
 		FrameAssembly.writeFrameHeader(
@@ -460,9 +487,7 @@ public enum Encoder {
 		while !computes.isEmpty {
 			let compute = computes.removeLast()
 			outputs.append(
-				tokenizeACGroup(
-					compute, order: analysis.coeffOrder.orders, mode: acMode,
-					blockContextMap: analysis.blockContextMap))
+				tokenizeACGroup(compute, analysis: analysis, mode: acMode))
 		}
 		try finishPixelFrame(
 			outputs: outputs, dim: dim, params: params,
@@ -563,10 +588,7 @@ extension Encoder {
 		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
 			for compute in computes {
 				group.addTask {
-					tokenizeACGroup(
-						compute, order: analysis.coeffOrder.orders,
-						mode: acMode,
-						blockContextMap: analysis.blockContextMap)
+					tokenizeACGroup(compute, analysis: analysis, mode: acMode)
 				}
 			}
 			var collected: [ACGroupOutput] = []

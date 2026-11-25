@@ -37,9 +37,18 @@ public struct SectionWriter: Sendable {
 	var mode: Mode
 	var writer = BitWriter()
 	var staged: [StagedRecord] = []
+	/// Added to every token's context, so an AC group's tokens land in its
+	/// histogram set's slice of the context space (libjxl `context_offset`,
+	/// enc_group.cc:543-561).
+	let contextOffset: UInt32
 
 	public init(mode: Mode) {
+		self.init(mode: mode, contextOffset: 0)
+	}
+
+	init(mode: Mode, contextOffset: UInt32) {
 		self.mode = mode
+		self.contextOffset = contextOffset
 	}
 
 	/// Wraps bits produced elsewhere, for sections written directly rather than
@@ -47,11 +56,13 @@ public struct SectionWriter: Sendable {
 	init(prewritten: BitWriter) {
 		mode = .direct(.staticAC)
 		writer = prewritten
+		contextOffset = 0
 	}
 
 	public var bitsWritten: Int { writer.bitsWritten }
 
 	mutating func write(token: Token) {
+		let token = Token(context: token.context + contextOffset, value: token.value)
 		switch mode {
 		case .direct(let code):
 			writer.write(token: token, code: code)
@@ -69,6 +80,16 @@ public struct SectionWriter: Sendable {
 		case .staging:
 			staged.append(.rawBits(value: value, count: UInt8(count)))
 		}
+	}
+
+	/// Bits that open an empty section, ahead of its entropy-coded stream in
+	/// either mode — unlike `writeRaw`, which stages them and so rules out
+	/// ANS for the whole frame. Only valid before anything else is written.
+	mutating func writeUnstaged(_ count: Int, _ value: UInt64) {
+		precondition(
+			staged.isEmpty && writer.bitsWritten == 0,
+			"unstaged bits must open the section")
+		writer.write(count, value)
 	}
 
 	/// Replays staged records through a finished code, whose context map must

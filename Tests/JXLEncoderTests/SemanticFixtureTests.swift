@@ -482,7 +482,11 @@ struct SemanticMutationTests {
 			let used = Set(
 				groups.flatMap {
 					Encoder.tokenizeACGroup(
-						$0, order: baseline.decisions.coeffOrder.orders,
+						$0,
+						analysis: Encoder.PixelFrameAnalysis(
+							coeffOrder: baseline.decisions.coeffOrder,
+							blockContextMap: nil, acCode: .staticAC,
+							plan: .oneShot),
 						mode: .staging(.staticAC)
 					).section.staged.compactMap { record -> Int? in
 						if case .token(let context, _) = record {
