@@ -2,13 +2,14 @@
 //  BrotliEncoder.swift
 //  JXLEncoder
 //
-//  RFC 7932 Brotli compression for the JPEG reconstruction box. libjxl selects
-//  quality 5 there at effort 4; this encoder does not reproduce libbrotli's
-//  output. It
-//  writes one block type and one prefix tree per category, with no block
-//  splitting, literal context modeling or static-dictionary references, so its
-//  compression ratio is lower than libbrotli's at that quality. Every stream it
-//  writes is RFC 7932-conformant and decodes back to the input byte for byte.
+//  RFC 7932 Brotli at P-1 scope, for the JPEG reconstruction box. libjxl uses
+//  quality 9 through cjxl (brotli_effort defaults to 9) and quality 5 through
+//  the API default at effort 4; this encoder does not reproduce libbrotli's
+//  output. It writes one block type and one prefix tree per category, with no
+//  block splitting, literal context modeling or static-dictionary references,
+//  so its compression ratio is lower than libbrotli's at those qualities.
+//  Every stream it writes is RFC 7932-conformant and decodes back to the input
+//  byte for byte.
 //
 
 /// Compresses bytes into a complete RFC 7932 Brotli stream.
