@@ -53,6 +53,25 @@ struct Histogram {
 	}
 }
 
+extension Histogram {
+	/// libjxl `Histogram::Flat(alphabetSize, 4096)`: the fixed histogram a
+	/// streaming frame's first DC group prepends (enc_ans.cc:1187-1213).
+	static func flat(alphabetSize: Int) -> Histogram {
+		preconditionFailure("not implemented")
+	}
+
+	/// libjxl `HistogramFromSymbolInfo` (enc_ans.cc ~692-707): what an
+	/// already-encoded histogram looks like to later clustering — ANS
+	/// normalized frequencies, or `2^(15 - depth)` per prefix-coded symbol.
+	init(encodedANS histogram: ANSEncodingHistogram) {
+		preconditionFailure("not implemented")
+	}
+
+	init(encodedPrefix code: PrefixCode) {
+		preconditionFailure("not implemented")
+	}
+}
+
 enum HistogramCluster {
 	/// Merging two contexts costs the difference between the combined code and
 	/// the two separate ones.
@@ -118,6 +137,27 @@ enum HistogramCluster {
 			symbols[i] = UInt32(best)
 		}
 		return (output, symbols)
+	}
+
+	/// libjxl `FastClusterHistograms` with `prev_histograms` (enc_cluster.cc:136-210):
+	/// streaming DC groups extend the clusters earlier DC groups already
+	/// encoded. Symbols index `previous` first, then the new clusters; only
+	/// new clusters absorb counts, since earlier ones are already transmitted.
+	/// The returned `clusters` are the new ones only. Costs sum left to right,
+	/// as `computeBitCost` does, not libjxl's lane-wise order.
+	static func fastCluster(
+		_ input: [Histogram], maxHistograms: Int, previous: [Histogram]
+	) -> (clusters: [Histogram], symbols: [UInt32]) {
+		guard !previous.isEmpty else {
+			return fastCluster(input, maxHistograms: maxHistograms)
+		}
+		preconditionFailure("not implemented")
+	}
+
+	/// libjxl `HistogramKLDivergence` (enc_cluster.cc:108-133): bits lost coding
+	/// `actual` with a code already fitted to `coding`.
+	static func klDivergence(_ actual: Histogram, coding: Histogram) -> Float {
+		preconditionFailure("not implemented")
 	}
 
 	static func clusterBest(_ histograms: [Histogram]) -> (

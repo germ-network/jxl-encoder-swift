@@ -76,6 +76,12 @@ enum ContextTree {
 		return flatten(merged, dcGroupCount: groups.count)
 	}
 
+	/// A streaming DC group's local trees (enc_encoding.cc:72-102, 495-549),
+	/// each sized by that group's own pixels rather than the frame's.
+	static func prepareLocal(group: DCGroupData) -> (dc: Prepared, metadata: Prepared) {
+		preconditionFailure("not implemented")
+	}
+
 	private indirect enum Draft {
 		case split(property: Int, threshold: Int32, greater: Draft, notGreater: Draft)
 		case leaf(Predictor)

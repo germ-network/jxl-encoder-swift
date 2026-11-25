@@ -255,6 +255,16 @@ struct SemanticCrossCheckTests {
 	}
 
 	@Test(
+		"streaming 2057x521 coefficient order and block context map match the reference",
+		.disabled("pending implementation"))
+	func pixelLifecycle2057x521OrderAndBlockMapMatchReference() throws {}
+
+	@Test(
+		"streaming 2057x257 local trees and AC histograms match the reference",
+		.disabled("pending implementation"))
+	func streamingTreesAndHistogramsMatchReference2057x257() throws {}
+
+	@Test(
 		"captures modular trees from native and Swift multi-DC streams",
 		.enabled(if: directory != nil))
 	func decodedModularTreeCaptureUsesActualMultiDCStreams() throws {

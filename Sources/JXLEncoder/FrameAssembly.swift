@@ -129,6 +129,17 @@ enum FrameAssembly {
 		}
 	}
 
+	/// The DC global section of a streaming frame: every DC group codes its
+	/// modular streams with local trees, so after the shared header fields the
+	/// section carries a single `0` (no global tree) and no global code
+	/// (enc_modular.cc:1290-1301).
+	static func writeStreamingDCGlobal(
+		params: DistanceParams, blockContextMap: JPEGBlockContextMap.Result,
+		writer: inout BitWriter
+	) throws {
+		preconditionFailure("not implemented")
+	}
+
 	static func writeDCGlobal(
 		params: DistanceParams,
 		dcGroupCount: Int,

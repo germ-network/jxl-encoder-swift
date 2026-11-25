@@ -141,7 +141,11 @@ public struct SectionWriter: Sendable {
 
 enum SectionOptimizer {
 	static func modularCode(
-		tokenStreams: [[Token]], contextCount: Int, extraDCPrecision: UInt8
+		tokenStreams: [[Token]], contextCount: Int, extraDCPrecision: UInt8,
+		/// A streaming DC group's local stream: libjxl `ChooseUintConfigs` keeps
+		/// the default uint config for every histogram and log_alpha 8
+		/// (enc_ans.cc:719-743).
+		streaming: Bool = false
 	) -> EntropyCode {
 		precondition(contextCount > 0)
 		let tokens = tokenStreams.flatMap { $0 }
@@ -254,6 +258,28 @@ enum SectionOptimizer {
 				logAlphabetSize: logAlpha)
 		}
 		return code
+	}
+
+	/// libjxl streaming AC histograms (EncodeGlobalACInfo enc_frame.cc:1252-1327,
+	/// BuildAndStoreEntropyCodes enc_ans.cc:915-1017, OutputAcGlobal 2003-2045).
+	/// Each histogram set (one per DC group, in order) clusters its own slice of
+	/// the context space under the cluster budget left by earlier sets, reusing
+	/// their already-encoded histograms. Set 0 alone decides prefix vs ANS and
+	/// prepends the fixed flat histogram. Unused histograms are dropped and the
+	/// rest renumbered by first use before every AC section is flushed.
+	static func optimizeStreaming(
+		sections: inout [SectionWriter], range: Range<Int>,
+		histogramSetCount: Int, contextsPerSet: Int
+	) -> EntropyCode {
+		preconditionFailure("not implemented")
+	}
+
+	/// libjxl `kNumFixedHistograms` (enc_ans.h:79).
+	static let fixedHistogramCount = 1
+
+	/// New clusters one streaming set may add (enc_frame.cc:1306-1311).
+	static func streamingClusterBudget(previousHistograms: Int) -> Int {
+		preconditionFailure("not implemented")
 	}
 
 	/// libjxl's cluster limit (`kClustersLimit`, enc_context_map.h). Tiny's

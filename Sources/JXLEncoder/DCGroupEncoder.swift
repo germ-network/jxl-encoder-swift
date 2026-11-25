@@ -389,6 +389,31 @@ public enum DCGroupEncoder {
 		writeACMetadataTokens(data: data, writer: &writer)
 	}
 
+	/// One streaming DC group's two modular streams, each with its own tree,
+	/// tree code and data code (libjxl groupwise, enc_modular.cc:702).
+	struct LocalStreams {
+		struct Stream {
+			let tree: ContextTree.Prepared
+			let treeCode: EntropyCode
+			let code: EntropyCode
+			let tokens: [Token]
+		}
+		let dc: Stream
+		let metadata: Stream
+	}
+
+	static func localStreams(data: DCGroupData) throws -> LocalStreams {
+		preconditionFailure("not implemented")
+	}
+
+	/// Writes each stream with GroupHeader `use_global_tree = 0` followed by its
+	/// own tree and codes.
+	static func write(
+		data: DCGroupData, local: LocalStreams, writer: inout BitWriter
+	) throws {
+		preconditionFailure("not implemented")
+	}
+
 	static func write(
 		data: DCGroupData, streams: (dc: [Token], metadata: [Token]),
 		code: EntropyCode, writer: inout BitWriter
