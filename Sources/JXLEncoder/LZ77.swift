@@ -39,9 +39,10 @@ enum LZ77 {
 	}
 
 	/// A token after LZ77: a literal, a length, or the distance after a length.
-	/// The struct moves here from `ContextMapEntropy` when that type is
-	/// replaced by `EntropyCodeWriter.prepare`.
-	typealias EncodedToken = ContextMapEntropy.EncodedToken
+	struct EncodedToken: Equatable, Sendable {
+		let token: Token
+		let isLength: Bool
+	}
 
 	struct Result {
 		/// Nil when LZ77 did not pay for itself.
@@ -59,6 +60,102 @@ enum LZ77 {
 	static func apply(
 		_ tokens: [Token], contextCount: Int, parameters: HistogramParameters
 	) -> Result {
-		fatalError("unimplemented")
+		precondition(
+			contextCount > 0 && tokens.allSatisfy { Int($0.context) < contextCount })
+		let lz77 = Parameters(
+			minSymbol: parameters.lz77MinSymbol, distanceContext: contextCount)
+		let (transformed, bitDecrease) =
+			switch parameters.lz77Method {
+			case .rle:
+				rle(
+					tokens, lz77: lz77,
+					symbolCosts: symbolCosts(
+						tokens, contextCount: contextCount, parameters))
+			case .lz77, .optimal: fatalError("unimplemented")
+			}
+		guard Double(bitDecrease) > Double(tokens.count) * 0.2 + 16 else {
+			return Result(
+				parameters: nil,
+				tokens: tokens.map { EncodedToken(token: $0, isLength: false) })
+		}
+		return Result(parameters: lz77, tokens: transformed)
+	}
+
+	/// `SymbolCostEstimator`'s per-context symbol costs over literal tokens
+	/// (enc_lz77.cc:30-74).
+	private static func symbolCosts(
+		_ tokens: [Token], contextCount: Int, _ parameters: HistogramParameters
+	) -> [[Float]] {
+		var histograms = [Histogram](repeating: Histogram(), count: contextCount)
+		for token in tokens {
+			histograms[Int(token.context)].add(
+				literalConfiguration.encode(token.value).symbol)
+		}
+		return histograms.map { histogram in
+			let inverseTotal = 1.0 / (Float(histogram.totalCount) + 1e-8)
+			return histogram.counts.map { count in
+				guard count != 0 else { return Float(ANSConstants.logTabSize) }
+				guard Int(count) != histogram.totalCount else { return 0 }
+				let cost = -FastMath.log2(Float(count) * inverseTotal)
+				return parameters.forcesPrefixCodes ? cost.rounded(.up) : cost
+			}
+		}
+	}
+
+	private static let literalConfiguration = HybridUintConfiguration(
+		splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+
+	/// `ApplyLZ77_RLE` (enc_lz77.cc:97-169) without image-width distances.
+	private static func rle(
+		_ tokens: [Token], lz77: Parameters, symbolCosts: [[Float]]
+	) -> ([EncodedToken], Float) {
+		var cumulative = [Float](repeating: 0, count: tokens.count + 1)
+		for (index, token) in tokens.enumerated() {
+			let encoded = literalConfiguration.encode(token.value)
+			cumulative[index + 1] =
+				symbolCosts[Int(token.context)][Int(encoded.symbol)]
+				+ Float(encoded.bitCount) + cumulative[index]
+		}
+		var transformed: [EncodedToken] = []
+		transformed.reserveCapacity(tokens.count)
+		var bitDecrease: Float = 0
+		var index = 0
+		while index < tokens.count {
+			var copyCount = 0
+			if index > 0 {
+				while index + copyCount < tokens.count,
+					tokens[index + copyCount].value == tokens[index - 1].value
+				{
+					copyCount += 1
+				}
+			}
+			let cost = cumulative[index + copyCount] - cumulative[index]
+			let length = copyCount - Int(minLength)
+			let lengthCost =
+				copyCount >= Int(minLength)
+				? Float(ceilLog2Nonzero(length + 1) + 1) : 0
+			if copyCount < Int(minLength) || cost <= lengthCost {
+				let end = index + max(copyCount, 1)
+				transformed += tokens[index..<end].map {
+					EncodedToken(token: $0, isLength: false)
+				}
+				index = end
+				continue
+			}
+			transformed.append(
+				EncodedToken(
+					token: Token(
+						context: tokens[index].context,
+						value: UInt32(length)),
+					isLength: true))
+			transformed.append(
+				EncodedToken(
+					token: Token(
+						context: UInt32(lz77.distanceContext), value: 0),
+					isLength: false))
+			bitDecrease += cost - lengthCost
+			index += copyCount
+		}
+		return (transformed, bitDecrease)
 	}
 }

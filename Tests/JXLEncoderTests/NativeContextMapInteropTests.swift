@@ -293,7 +293,7 @@ struct NativeContextMapInteropTests {
 				if name == "context_mtf_ans" {
 					#expect(prepared.representation == .moveToFront)
 				}
-				let selectedEntropy: ContextMapEntropy.Prepared?
+				let selectedEntropy: EntropyCodeWriter.Prepared?
 				switch prepared.representation {
 				case .simple(let entryBits):
 					representations.insert("simple")
@@ -310,10 +310,10 @@ struct NativeContextMapInteropTests {
 					entropyModes.insert(
 						selectedEntropy.usesPrefixCode ? "prefix" : "ans")
 					hasRunLength =
-						hasRunLength || selectedEntropy.runLength.enabled
+						hasRunLength || selectedEntropy.code.lz77 != nil
 					if name == "context_raw_rle" {
 						#expect(selectedEntropy.usesPrefixCode)
-						#expect(selectedEntropy.runLength.enabled)
+						#expect(selectedEntropy.code.lz77 != nil)
 					}
 					if name == "context_mtf_ans" {
 						#expect(!selectedEntropy.usesPrefixCode)

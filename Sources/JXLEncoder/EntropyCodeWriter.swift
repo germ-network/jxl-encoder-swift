@@ -12,10 +12,9 @@
 
 enum EntropyCodeWriter {
 	static func writeTokens(
-		_ tokens: [ContextMapEntropy.EncodedToken], code: EntropyCode,
-		lengthConfiguration: HybridUintConfiguration, lengthSymbolOffset: UInt32,
-		writer: inout BitWriter
+		_ tokens: [LZ77.EncodedToken], code: EntropyCode, writer: inout BitWriter
 	) {
+		let lengthSymbolOffset = code.lz77?.minSymbol ?? 0
 		if let tables = code.ansInfoTables {
 			ANSTokenWriter.write(
 				contextMapTokens: tokens, contextMap: code.contextMap,
@@ -25,7 +24,6 @@ enum EntropyCodeWriter {
 						repeating: HybridUintConfiguration(
 							splitExponent: 4, msbInToken: 2,
 							lsbInToken: 0), count: tables.count),
-				lengthConfiguration: lengthConfiguration,
 				lengthSymbolOffset: lengthSymbolOffset, writer: &writer)
 			return
 		}
@@ -34,7 +32,7 @@ enum EntropyCodeWriter {
 			let histogram = Int(code.contextMap[Int(token.context)])
 			let configuration =
 				encoded.isLength
-				? lengthConfiguration
+				? LZ77.lengthConfiguration
 				: code.uintConfigurations?[histogram]
 					?? HybridUintConfiguration(
 						splitExponent: 4, msbInToken: 2, lsbInToken: 0)
@@ -51,12 +49,8 @@ enum EntropyCodeWriter {
 
 	static func writeTokens(_ tokens: [Token], code: EntropyCode, writer: inout BitWriter) {
 		writeTokens(
-			tokens.map {
-				ContextMapEntropy.EncodedToken(token: $0, isLength: false)
-			}, code: code,
-			lengthConfiguration: HybridUintConfiguration(
-				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
-			lengthSymbolOffset: 0, writer: &writer)
+			tokens.map { LZ77.EncodedToken(token: $0, isLength: false) }, code: code,
+			writer: &writer)
 	}
 
 	static func writeContextMap(_ code: EntropyCode, writer: inout BitWriter) {
@@ -87,6 +81,13 @@ enum EntropyCodeWriter {
 	}
 
 	static func write(_ code: EntropyCode, writer: inout BitWriter) {
+		writeLZ77Header(code.lz77, writer: &writer)
+		writeHistograms(code, writer: &writer)
+	}
+
+	/// Everything after the LZ77 header: context map, coder choice, uint
+	/// configurations and per-histogram codes.
+	static func writeHistograms(_ code: EntropyCode, writer: inout BitWriter) {
 		writeContextMap(code, writer: &writer)
 		let numHistograms =
 			code.ansHistograms?.count
@@ -152,395 +153,6 @@ struct HybridUintConfiguration: Equatable, Sendable {
 	}
 }
 
-enum ContextMapEntropy {
-	static func runLengthEncode(_ tokens: [Token], contextCount: Int) -> RunLengthResult {
-		precondition(
-			contextCount > 0 && tokens.allSatisfy { Int($0.context) < contextCount })
-		let dataConfiguration = HybridUintConfiguration(
-			splitExponent: 4, msbInToken: 2, lsbInToken: 0)
-		var histograms = [Histogram](repeating: Histogram(), count: contextCount)
-		for token in tokens {
-			histograms[Int(token.context)].add(
-				dataConfiguration.encode(token.value).symbol)
-		}
-		let symbolCosts = histograms.map { histogram -> [Float] in
-			let inverseTotal = 1.0 / (Float(histogram.totalCount) + 1e-8)
-			return histogram.counts.map { count in
-				if count > 0 && Int(count) != histogram.totalCount {
-					return -FastMath.log2(Float(count) * inverseTotal)
-				}
-				return count == 0 ? 12 : 0
-			}
-		}
-		var cumulative = [Float](repeating: 0, count: tokens.count + 1)
-		for index in tokens.indices {
-			let encoded = dataConfiguration.encode(tokens[index].value)
-			cumulative[index + 1] =
-				symbolCosts[Int(tokens[index].context)][Int(encoded.symbol)]
-				+ Float(encoded.bitCount) + cumulative[index]
-		}
-		var transformed: [EncodedToken] = []
-		transformed.reserveCapacity(tokens.count)
-		var bitDecrease: Float = 0
-		var index = 0
-		while index < tokens.count {
-			var repeatCount = 0
-			if index > 0 {
-				while index + repeatCount < tokens.count,
-					tokens[index + repeatCount].value == tokens[index - 1].value
-				{
-					repeatCount += 1
-				}
-			}
-			if repeatCount == 0 {
-				transformed.append(
-					EncodedToken(token: tokens[index], isLength: false))
-				index += 1
-				continue
-			}
-			let repeatedCost = cumulative[index + repeatCount] - cumulative[index]
-			let encodedLength = repeatCount - 3
-			let lengthCost =
-				repeatCount >= 3
-				? Float(ceilLog2Nonzero(encodedLength + 1) + 1) : 0
-			if repeatCount < 3 || repeatedCost <= lengthCost {
-				for token in tokens[index..<(index + repeatCount)] {
-					transformed.append(
-						EncodedToken(token: token, isLength: false))
-				}
-				index += repeatCount
-				continue
-			}
-			transformed.append(
-				EncodedToken(
-					token: Token(
-						context: tokens[index].context,
-						value: UInt32(encodedLength)),
-					isLength: true))
-			transformed.append(
-				EncodedToken(
-					token: Token(context: UInt32(contextCount), value: 0),
-					isLength: false))
-			bitDecrease += repeatedCost - lengthCost
-			index += repeatCount
-		}
-		guard Double(bitDecrease) > Double(tokens.count) * 0.2 + 16 else {
-			return RunLengthResult(
-				enabled: false,
-				tokens: tokens.map { EncodedToken(token: $0, isLength: false) })
-		}
-		return RunLengthResult(enabled: true, tokens: transformed)
-	}
-
-	struct EncodedToken: Equatable, Sendable {
-		let token: Token
-		let isLength: Bool
-	}
-
-	struct RunLengthResult {
-		let enabled: Bool
-		let tokens: [EncodedToken]
-	}
-
-	struct Prepared {
-		let runLength: RunLengthResult
-		let contextMap: [UInt8]
-		let histograms: [Histogram]
-		let uintConfigurations: [HybridUintConfiguration]
-		let usesPrefixCode: Bool
-		let logAlphabetSize: Int
-		let prefixCodes: [PrefixCode]
-		let ansHistograms: [ANSEncodingHistogram]
-		let estimatedCost: Int
-	}
-
-	static func runLengthEncode(_ entries: [UInt8]) -> RunLengthResult {
-		let dataConfig = HybridUintConfiguration(
-			splitExponent: 4, msbInToken: 2, lsbInToken: 0)
-		let minLength = 3
-		var histogram = Histogram()
-		for entry in entries {
-			histogram.add(dataConfig.encode(UInt32(entry)).symbol)
-		}
-		var symbolCosts = [Float](repeating: 0, count: histogram.counts.count)
-		let inverseTotal = 1.0 / Float(max(histogram.totalCount, 1))
-		for index in histogram.counts.indices {
-			let count = histogram.counts[index]
-			if count > 0 && Int(count) != histogram.totalCount {
-				symbolCosts[index] = -FastMath.log2(Float(count) * inverseTotal)
-			} else if count == 0 {
-				symbolCosts[index] = 12
-			}
-		}
-		var cumulativeBitCosts = [Float](repeating: 0, count: entries.count + 1)
-		for index in entries.indices {
-			let encoded = dataConfig.encode(UInt32(entries[index]))
-			cumulativeBitCosts[index + 1] =
-				symbolCosts[Int(encoded.symbol)] + Float(encoded.bitCount)
-				+ cumulativeBitCosts[index]
-		}
-
-		var transformed: [EncodedToken] = []
-		transformed.reserveCapacity(entries.count)
-		var bitDecrease: Float = 0
-		var index = 0
-		while index < entries.count {
-			var repeatCount = 0
-			if index > 0 {
-				while index + repeatCount < entries.count,
-					entries[index + repeatCount] == entries[index - 1]
-				{
-					repeatCount += 1
-				}
-			}
-			if repeatCount == 0 {
-				transformed.append(
-					EncodedToken(
-						token: Token(
-							context: 0, value: UInt32(entries[index])),
-						isLength: false))
-				index += 1
-				continue
-			}
-
-			let repeatedCost =
-				cumulativeBitCosts[index + repeatCount] - cumulativeBitCosts[index]
-			let encodedLength = repeatCount - minLength
-			let lengthCost =
-				repeatCount >= minLength
-				? Float(ceilLog2Nonzero(encodedLength + 1) + 1) : 0
-			if repeatCount < minLength || repeatedCost <= lengthCost {
-				for offset in 0..<repeatCount {
-					transformed.append(
-						EncodedToken(
-							token: Token(
-								context: 0,
-								value: UInt32(
-									entries[index + offset])),
-							isLength: false))
-				}
-				index += repeatCount
-				continue
-			}
-
-			transformed.append(
-				EncodedToken(
-					token: Token(context: 0, value: UInt32(encodedLength)),
-					isLength: true))
-			transformed.append(
-				EncodedToken(token: Token(context: 1, value: 0), isLength: false))
-			bitDecrease += repeatedCost - lengthCost
-			index += repeatCount
-		}
-
-		guard Double(bitDecrease) > Double(entries.count) * 0.2 + 16 else {
-			return RunLengthResult(
-				enabled: false,
-				tokens: entries.map {
-					EncodedToken(
-						token: Token(context: 0, value: UInt32($0)),
-						isLength: false)
-				})
-		}
-		return RunLengthResult(enabled: true, tokens: transformed)
-	}
-
-	static func cluster(_ histograms: [Histogram]) -> (
-		histograms: [Histogram], contextMap: [UInt8]
-	) {
-		precondition((1...2).contains(histograms.count))
-		if histograms.count == 1 {
-			return (histograms, [0])
-		}
-		var (clusters, symbols) = HistogramCluster.fastCluster(
-			histograms, maxHistograms: histograms.count)
-		if clusters.count == 2 {
-			let firstCost = ANSEncodingHistogram.computeBest(
-				counts: clusters[0].counts, strategy: .fast
-			).cost
-			let secondCost = ANSEncodingHistogram.computeBest(
-				counts: clusters[1].counts, strategy: .fast
-			).cost
-			var combined = clusters[0]
-			combined.add(clusters[1])
-			let mergedCost = ANSEncodingHistogram.computeBest(
-				counts: combined.counts, strategy: .fast
-			).cost
-			if mergedCost < firstCost + secondCost {
-				clusters = [combined]
-				symbols = [0, 0]
-			}
-		}
-		let result = HistogramCluster.reindex(symbols: symbols, clusters: clusters)
-		return (result.clusters, result.contextMap)
-	}
-
-	static func prepare(_ entries: [UInt8]) -> Prepared {
-		precondition(!entries.isEmpty)
-		let runLength = runLengthEncode(entries)
-		let contextCount = runLength.enabled ? 2 : 1
-		var sourceHistograms = [Histogram](
-			repeating: Histogram(), count: contextCount)
-		let dataConfiguration = HybridUintConfiguration(
-			splitExponent: 2, msbInToken: 0, lsbInToken: 1)
-		let lengthConfiguration = HybridUintConfiguration(
-			splitExponent: 0, msbInToken: 0, lsbInToken: 0)
-		let minLengthSymbol: UInt32 = 224
-		for encoded in runLength.tokens {
-			let configuration =
-				encoded.isLength ? lengthConfiguration : dataConfiguration
-			let symbol = configuration.encode(encoded.token.value).symbol
-			let histogramSymbol = symbol + (encoded.isLength ? minLengthSymbol : 0)
-			sourceHistograms[Int(encoded.token.context)].add(histogramSymbol)
-		}
-		var costHistograms = sourceHistograms
-		for index in costHistograms.indices { costHistograms[index].computeBitCost() }
-		let (histograms, contextMap) = cluster(sourceHistograms)
-		let usesPrefixCode = shouldUsePrefixCode(
-			tokenCount: runLength.tokens.count, histograms: costHistograms)
-		let logAlphabetSize =
-			usesPrefixCode
-			? PrefixCodeWriter.prefixMaxBits
-			: (runLength.enabled ? 8 : 7)
-		let uintConfigurations = [HybridUintConfiguration](
-			repeating: dataConfiguration, count: histograms.count)
-		let prefixCodes = HistogramCluster.buildPrefixCodes(histograms)
-		let ansHistograms = histograms.map {
-			ANSEncodingHistogram.computeBest(counts: $0.counts, strategy: .precise)
-		}
-
-		var costWriter = BitWriter()
-		costWriter.write(1, runLength.enabled ? 1 : 0)
-		if runLength.enabled {
-			costWriter.write(2, 0)
-			costWriter.write(2, 0)
-			PrefixCodeWriter.writeUintConfigs(
-				[lengthConfiguration], logAlphaSize: 8, writer: &costWriter)
-		}
-		costWriter.write(1, usesPrefixCode ? 1 : 0)
-		if !usesPrefixCode { costWriter.write(2, UInt64(logAlphabetSize - 5)) }
-		PrefixCodeWriter.writeUintConfigs(
-			uintConfigurations, logAlphaSize: logAlphabetSize, writer: &costWriter)
-		if usesPrefixCode {
-			for histogram in histograms {
-				let alphabetSize = max(
-					1,
-					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
-				PrefixCodeWriter.storeVarLenUInt16(
-					alphabetSize - 1, writer: &costWriter)
-			}
-			for (histogram, code) in zip(histograms, prefixCodes) {
-				let alphabetSize = max(
-					1,
-					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
-				if alphabetSize > 1 {
-					PrefixCodeWriter.writePrefixCode(code, writer: &costWriter)
-				}
-			}
-		}
-		var estimatedCost = costWriter.bitsWritten
-		if usesPrefixCode {
-			for (histogram, code) in zip(histograms, prefixCodes) {
-				for symbol in histogram.counts.indices {
-					estimatedCost +=
-						Int(histogram.counts[symbol])
-						* (code.isDegenerate ? 0 : Int(code.depths[symbol]))
-				}
-			}
-		} else {
-			for histogram in ansHistograms {
-				estimatedCost += Int(histogram.cost.rounded(.up))
-			}
-		}
-		return Prepared(
-			runLength: runLength, contextMap: contextMap,
-			histograms: histograms, uintConfigurations: uintConfigurations,
-			usesPrefixCode: usesPrefixCode, logAlphabetSize: logAlphabetSize,
-			prefixCodes: prefixCodes, ansHistograms: ansHistograms,
-			estimatedCost: estimatedCost)
-	}
-
-	static func shouldUsePrefixCode(tokenCount: Int, histograms: [Histogram]) -> Bool {
-		tokenCount < 100 || histograms.allSatisfy { $0.bitCost < 1e-5 }
-	}
-
-	static func write(_ prepared: Prepared, to writer: inout BitWriter) {
-		writer.write(1, prepared.runLength.enabled ? 1 : 0)
-		if prepared.runLength.enabled {
-			writer.write(2, 0)
-			writer.write(2, 0)
-			PrefixCodeWriter.writeUintConfigs(
-				[
-					HybridUintConfiguration(
-						splitExponent: 0, msbInToken: 0, lsbInToken: 0)
-				],
-				logAlphaSize: 8, writer: &writer)
-		}
-		if prepared.runLength.enabled {
-			ContextMapEncoding.write(
-				ContextMapEncoding.prepare(
-					prepared.contextMap,
-					numHistograms: prepared.histograms.count),
-				to: &writer)
-		}
-		writer.write(1, prepared.usesPrefixCode ? 1 : 0)
-		if !prepared.usesPrefixCode {
-			writer.write(2, UInt64(prepared.logAlphabetSize - 5))
-		}
-		PrefixCodeWriter.writeUintConfigs(
-			prepared.uintConfigurations, logAlphaSize: prepared.logAlphabetSize,
-			writer: &writer)
-		if prepared.usesPrefixCode {
-			for histogram in prepared.histograms {
-				let alphabetSize = max(
-					1,
-					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
-				PrefixCodeWriter.storeVarLenUInt16(
-					alphabetSize - 1, writer: &writer)
-			}
-			for (histogram, code) in zip(prepared.histograms, prepared.prefixCodes) {
-				let alphabetSize = max(
-					1,
-					(histogram.counts.lastIndex(where: { $0 != 0 }) ?? -1) + 1)
-				if alphabetSize > 1 {
-					PrefixCodeWriter.writePrefixCode(code, writer: &writer)
-				}
-			}
-			for encoded in prepared.runLength.tokens {
-				let histogram = Int(prepared.contextMap[Int(encoded.token.context)])
-				let configuration =
-					encoded.isLength
-					? HybridUintConfiguration(
-						splitExponent: 0, msbInToken: 0, lsbInToken: 0)
-					: prepared.uintConfigurations[histogram]
-				let (baseSymbol, bitCount, bits) = configuration.encode(
-					encoded.token.value)
-				let symbol = Int(baseSymbol + (encoded.isLength ? 224 : 0))
-				let code = prepared.prefixCodes[histogram]
-				let depth = code.isDegenerate ? 0 : Int(code.depths[symbol])
-				let symbolBits = code.isDegenerate ? 0 : UInt64(code.bits[symbol])
-				writer.write(depth, symbolBits)
-				writer.write(Int(bitCount), UInt64(bits))
-			}
-		} else {
-			for histogram in prepared.ansHistograms { histogram.write(to: &writer) }
-			let tables = prepared.ansHistograms.map { ans in
-				ANSInfoTable.build(
-					distribution: ans.normalizedCounts,
-					alphabetSize: ans.alphabetSize,
-					logAlphaSize: prepared.logAlphabetSize)
-			}
-			ANSTokenWriter.write(
-				contextMapTokens: prepared.runLength.tokens,
-				contextMap: prepared.contextMap, infoTables: tables,
-				uintConfigurations: prepared.uintConfigurations,
-				lengthConfiguration: HybridUintConfiguration(
-					splitExponent: 0, msbInToken: 0, lsbInToken: 0),
-				lengthSymbolOffset: 224, writer: &writer)
-		}
-	}
-}
-
 /// The `HistogramParams` (enc_ans_params.h) fields this encoder's callers set;
 /// clustering is always `kBest`, the only value they use.
 struct HistogramParameters: Sendable {
@@ -574,13 +186,181 @@ extension EntropyCodeWriter {
 	}
 
 	/// LZ77, `kBest` clustering, uint configurations and the prefix-or-ANS
-	/// choice for `contextCount` contexts, so that `write(_:writer:)` followed
-	/// by `writeTokens(_:code:writer:)` is what a decoder reads back as
-	/// `tokens`. Ports `BuildAndEncodeHistograms` (enc_ans.cc:1060-1180).
+	/// choice for `contextCount` contexts, so that writing the result is what a
+	/// decoder reads back as `tokens`. Ports `BuildAndEncodeHistograms`
+	/// (enc_ans.cc:1060-1180) and `ChooseUintConfigs` (enc_ans.cc:732-895).
 	static func prepare(
 		_ tokens: [Token], contextCount: Int, parameters: HistogramParameters
 	) -> Prepared {
-		fatalError("unimplemented")
+		let lz77 = LZ77.apply(tokens, contextCount: contextCount, parameters: parameters)
+		let lengthSymbolOffset = lz77.parameters?.minSymbol ?? 0
+		let defaultConfiguration =
+			parameters.uintMethod == .contextMap
+			? HybridUintConfiguration(splitExponent: 2, msbInToken: 0, lsbInToken: 1)
+			: HybridUintConfiguration(splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+		func symbol(_ encoded: LZ77.EncodedToken, _ configuration: HybridUintConfiguration)
+			-> UInt32
+		{
+			encoded.isLength
+				? LZ77.lengthConfiguration.encode(encoded.token.value).symbol
+					+ lengthSymbolOffset
+				: configuration.encode(encoded.token.value).symbol
+		}
+		var histograms = [Histogram](
+			repeating: Histogram(),
+			count: contextCount + (lz77.parameters == nil ? 0 : 1))
+		for encoded in lz77.tokens {
+			histograms[Int(encoded.token.context)].add(
+				symbol(encoded, defaultConfiguration))
+		}
+		for index in histograms.indices { histograms[index].computeBitCost() }
+		let usesPrefixCode =
+			parameters.forcesPrefixCodes
+			|| shouldUsePrefixCode(
+				tokenCount: lz77.tokens.count, histograms: histograms)
+		let (clusters, contextMap) = HistogramCluster.clusterBest(histograms)
+		var configurations = [HybridUintConfiguration](
+			repeating: defaultConfiguration, count: clusters.count)
+		var logAlphabetSize =
+			usesPrefixCode
+			? PrefixCodeWriter.prefixMaxBits : (lz77.parameters == nil ? 7 : 8)
+		histograms = clusters
+		if parameters.uintMethod == .best {
+			let symbolLimit = min(256, lz77.parameters?.minSymbol ?? 256)
+			for cluster in clusters.indices {
+				let values = lz77.tokens.filter {
+					!$0.isLength
+						&& Int(contextMap[Int($0.token.context)]) == cluster
+				}
+				(configurations[cluster], histograms[cluster]) = bestConfiguration(
+					values, symbolLimit: symbolLimit)
+			}
+			for encoded in lz77.tokens where encoded.isLength {
+				histograms[Int(contextMap[Int(encoded.token.context)])].add(
+					symbol(encoded, defaultConfiguration))
+			}
+			let maximumSymbol =
+				histograms.compactMap {
+					$0.counts.lastIndex(where: { $0 != 0 })
+				}.max() ?? 0
+			logAlphabetSize = 5
+			while maximumSymbol >= 1 << logAlphabetSize { logAlphabetSize += 1 }
+			if usesPrefixCode {
+				logAlphabetSize = PrefixCodeWriter.prefixMaxBits
+			} else {
+				precondition(logAlphabetSize <= 8)
+			}
+		}
+		let prefixCodes = HistogramCluster.buildPrefixCodes(histograms)
+		var code =
+			usesPrefixCode
+			? EntropyCode(
+				contextMap: contextMap, prefixCodes: prefixCodes,
+				uintConfigurations: configurations, logAlphabetSize: logAlphabetSize
+			)
+			: EntropyCode(
+				contextMap: contextMap, prefixCodes: prefixCodes,
+				ansHistograms: histograms.map {
+					ANSEncodingHistogram.computeBest(
+						counts: $0.counts, strategy: .precise)
+				}, uintConfigurations: configurations,
+				logAlphabetSize: logAlphabetSize)
+		code.lz77 = lz77.parameters
+
+		var header = BitWriter()
+		writeLZ77Header(code.lz77, writer: &header)
+		header.write(1, usesPrefixCode ? 1 : 0)
+		var estimatedCost = 0
+		if usesPrefixCode {
+			PrefixCodeWriter.writePrefixCodes(
+				prefixCodes, uintConfigurations: configurations, writer: &header)
+			for (histogram, prefix) in zip(histograms, prefixCodes)
+			where !prefix.isDegenerate {
+				for (symbol, count) in histogram.counts.enumerated() {
+					estimatedCost += Int(count) * Int(prefix.depths[symbol])
+				}
+			}
+		} else {
+			header.write(2, UInt64(logAlphabetSize - 5))
+			PrefixCodeWriter.writeUintConfigs(
+				configurations, logAlphaSize: logAlphabetSize, writer: &header)
+			for histogram in code.ansHistograms ?? [] {
+				estimatedCost += Int(histogram.cost.rounded(.up))
+			}
+		}
+		return Prepared(
+			tokens: lz77.tokens, code: code,
+			estimatedCost: header.bitsWritten + estimatedCost)
+	}
+
+	/// The `kBest` candidate with the lowest ANS population cost plus extra and
+	/// signalling bits whose largest symbol stays below `symbolLimit`
+	/// (enc_ans.cc:771-863).
+	private static func bestConfiguration(
+		_ values: [LZ77.EncodedToken], symbolLimit: UInt32
+	) -> (HybridUintConfiguration, Histogram) {
+		var best = (
+			cost: Float.greatestFiniteMagnitude,
+			configuration: bestCandidates[0], histogram: Histogram()
+		)
+		for configuration in bestCandidates {
+			var histogram = Histogram()
+			var extraBits = 0
+			var maximumSymbol: UInt32 = 0
+			for encoded in values {
+				let result = configuration.encode(encoded.token.value)
+				maximumSymbol = max(
+					maximumSymbol,
+					result.symbol | ((1 << configuration.lsbInToken) - 1))
+				extraBits += Int(result.bitCount)
+				histogram.add(result.symbol)
+			}
+			guard maximumSymbol < symbolLimit else { continue }
+			let cost =
+				ANSEncodingHistogram.computeBest(
+					counts: histogram.counts, strategy: .fast
+				).cost
+				+ Float(extraBits)
+				+ Float(ceilLog2Nonzero(configuration.splitExponent + 1))
+				+ Float(
+					ceilLog2Nonzero(
+						configuration.splitExponent
+							- configuration.msbInToken + 1))
+			if cost < best.cost { best = (cost, configuration, histogram) }
+		}
+		return (best.configuration, best.histogram)
+	}
+
+	private static let bestCandidates = [
+		(4, 2, 0), (4, 1, 0), (4, 2, 1), (4, 2, 2), (4, 1, 2),
+		(5, 2, 0), (5, 1, 0), (5, 2, 1), (5, 2, 2), (5, 1, 2),
+		(3, 2, 0), (3, 1, 0), (3, 2, 1), (3, 1, 2),
+		(4, 1, 3), (5, 1, 4), (5, 2, 3), (6, 1, 5), (6, 2, 4), (6, 0, 0),
+		(0, 0, 0), (2, 0, 1), (7, 0, 0), (8, 0, 0), (9, 0, 0),
+		(10, 0, 0), (11, 0, 0), (12, 0, 0),
+	].map { HybridUintConfiguration(splitExponent: $0.0, msbInToken: $0.1, lsbInToken: $0.2) }
+
+	/// `use_prefix_code` short of `force_huffman`: under 100 tokens, or every
+	/// context below 1e-5 bits of entropy (enc_ans.cc:1150-1163).
+	static func shouldUsePrefixCode(tokenCount: Int, histograms: [Histogram]) -> Bool {
+		tokenCount < 100 || histograms.allSatisfy { $0.bitCost < 1e-5 }
+	}
+
+	/// `LZ77Params` (dec_ans.cc:304-315) and the length configuration.
+	static func writeLZ77Header(_ lz77: LZ77.Parameters?, writer: inout BitWriter) {
+		writer.write(1, lz77 == nil ? 0 : 1)
+		guard let lz77 else { return }
+		precondition(lz77.minSymbol == 224)
+		writer.write(2, 0)
+		writer.write(2, 0)
+		PrefixCodeWriter.writeUintConfigs(
+			[LZ77.lengthConfiguration], logAlphaSize: 8, writer: &writer)
+	}
+
+	/// The code, then the tokens.
+	static func write(_ prepared: Prepared, writer: inout BitWriter) {
+		write(prepared.code, writer: &writer)
+		writeTokens(prepared.tokens, code: prepared.code, writer: &writer)
 	}
 }
 
@@ -595,8 +375,8 @@ enum ContextMapEncoding {
 		let entries: [UInt8]
 		let numHistograms: Int
 		let transformedEntries: [UInt8]
-		let raw: ContextMapEntropy.Prepared?
-		let moveToFront: ContextMapEntropy.Prepared?
+		let raw: EntropyCodeWriter.Prepared?
+		let moveToFront: EntropyCodeWriter.Prepared?
 		let representation: Representation
 	}
 
@@ -618,8 +398,14 @@ enum ContextMapEncoding {
 				transformedEntries: transformedEntries, raw: nil,
 				moveToFront: nil, representation: .simple(entryBits: 0))
 		}
-		let raw = ContextMapEntropy.prepare(entries)
-		let moveToFront = ContextMapEntropy.prepare(transformedEntries)
+		func prepare(_ entries: [UInt8]) -> EntropyCodeWriter.Prepared {
+			EntropyCodeWriter.prepare(
+				entries.map { Token(context: 0, value: UInt32($0)) },
+				contextCount: 1,
+				parameters: HistogramParameters(uintMethod: .contextMap))
+		}
+		let raw = prepare(entries)
+		let moveToFront = prepare(transformedEntries)
 		let simpleCost = entryBits * entries.count
 		let representation: Representation
 		if entryBits < 4 && simpleCost < raw.estimatedCost
@@ -651,7 +437,7 @@ enum ContextMapEncoding {
 		case .raw, .moveToFront:
 			writer.write(1, 0)
 			let useMTF: Bool
-			let entropy: ContextMapEntropy.Prepared
+			let entropy: EntropyCodeWriter.Prepared
 			switch prepared.representation {
 			case .raw:
 				useMTF = false
@@ -663,7 +449,7 @@ enum ContextMapEncoding {
 				preconditionFailure("handled above")
 			}
 			writer.write(1, useMTF ? 1 : 0)
-			ContextMapEntropy.write(entropy, to: &writer)
+			EntropyCodeWriter.write(entropy, writer: &writer)
 		}
 	}
 }

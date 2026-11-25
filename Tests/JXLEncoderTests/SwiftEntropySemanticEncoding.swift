@@ -170,7 +170,7 @@ enum SwiftEntropySemanticEncoding {
 		let simple: Bool
 		let entryBits: Int
 		let useMTF: Bool
-		let selected: ContextMapEntropy.Prepared?
+		let selected: EntropyCodeWriter.Prepared?
 		switch prepared.representation {
 		case .simple(let bits):
 			simple = true
@@ -196,7 +196,7 @@ enum SwiftEntropySemanticEncoding {
 		dump.record(
 			"entropy.context_map.token_count",
 			.integers([
-				Int64(selected?.runLength.tokens.count ?? -1)
+				Int64(selected?.tokens.count ?? -1)
 			]))
 		dump.record(
 			"entropy.context_map.token_count_status",
@@ -219,10 +219,10 @@ enum SwiftEntropySemanticEncoding {
 				.integers([Int64(mtf.estimatedCost)]))
 			dump.record(
 				"entropy.context_map.raw_token_count",
-				.integers([Int64(raw.runLength.tokens.count)]))
+				.integers([Int64(raw.tokens.count)]))
 			dump.record(
 				"entropy.context_map.mtf_token_count",
-				.integers([Int64(mtf.runLength.tokens.count)]))
+				.integers([Int64(mtf.tokens.count)]))
 		}
 		dump.record("entropy.context_map.bit_count", .integers([Int64(writer.bitsWritten)]))
 		dump.record("entropy.context_map.bytes", .integers(writer.bytes.map(Int64.init)))
@@ -316,13 +316,12 @@ enum SwiftEntropySemanticEncoding {
 				EntropyCode(contextMap: $0, prefixCodes: optimizedCode.prefixCodes)
 			} ?? optimizedCode
 		var codeWriter = BitWriter()
-		EntropyCodeWriter.write(code, writer: &codeWriter)
+		EntropyCodeWriter.writeHistograms(code, writer: &codeWriter)
 		var streamWriter = BitWriter()
-		EntropyCodeWriter.write(code, writer: &streamWriter)
+		EntropyCodeWriter.writeHistograms(code, writer: &streamWriter)
 		for token in tokens { streamWriter.write(token: token, code: code) }
 		var fullWriter = BitWriter()
 		fullWriter.write(1, 1)
-		fullWriter.write(1, 0)
 		EntropyCodeWriter.write(code, writer: &fullWriter)
 		for token in tokens { fullWriter.write(token: token, code: code) }
 		var dump = SemanticDump()
@@ -428,7 +427,6 @@ enum SwiftEntropySemanticEncoding {
 		var bitCounts: [Int64] = []
 		var bytes: [Int64] = []
 		var codeWriter = BitWriter()
-		codeWriter.write(1, 0)  // disabled LZ77 field in the transmitted code
 		EntropyCodeWriter.write(code, writer: &codeWriter)
 		for (index, stream) in tokens.enumerated() {
 			lengths.append(Int64(stream.count))

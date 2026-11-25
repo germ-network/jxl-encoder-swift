@@ -19,22 +19,19 @@ enum ANSTokenWriter {
 	) {
 		write(
 			contextMapTokens: tokens.map {
-				ContextMapEntropy.EncodedToken(token: $0, isLength: false)
+				LZ77.EncodedToken(token: $0, isLength: false)
 			}, contextMap: contextMap, infoTables: infoTables,
 			uintConfigurations: [HybridUintConfiguration](
 				repeating: HybridUintConfiguration(
 					splitExponent: 4, msbInToken: 2, lsbInToken: 0),
 				count: infoTables.count),
-			lengthConfiguration: HybridUintConfiguration(
-				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
 			lengthSymbolOffset: 0, writer: &writer)
 	}
 
 	static func write(
-		contextMapTokens tokens: [ContextMapEntropy.EncodedToken],
+		contextMapTokens tokens: [LZ77.EncodedToken],
 		contextMap: [UInt8], infoTables: [[ANSEncSymbolInfo]],
-		uintConfigurations: [HybridUintConfiguration],
-		lengthConfiguration: HybridUintConfiguration, lengthSymbolOffset: UInt32,
+		uintConfigurations: [HybridUintConfiguration], lengthSymbolOffset: UInt32,
 		writer: inout BitWriter
 	) {
 		var out: [(bits: UInt64, nbits: Int)] = []
@@ -57,7 +54,7 @@ enum ANSTokenWriter {
 			let histo = Int(contextMap[Int(token.context)])
 			let configuration =
 				encoded.isLength
-				? lengthConfiguration : uintConfigurations[histo]
+				? LZ77.lengthConfiguration : uintConfigurations[histo]
 			let (baseSymbol, extraBitCount, extraBits) = configuration.encode(
 				token.value)
 			let symbol = baseSymbol + (encoded.isLength ? lengthSymbolOffset : 0)
