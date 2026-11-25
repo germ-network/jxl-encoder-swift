@@ -119,33 +119,53 @@ enum SwiftSemanticEncoding {
 		let dcData = try Encoder.assemble(
 			outputs: outputs, dim: dim, params: params,
 			optimizeCodes: true, sections: &sections)
-		let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
-		let streams = try dcData.enumerated().map {
-			try DCGroupEncoder.tokenStreams(
-				data: $0.element, groupIndex: $0.offset, tree: tree)
-		}
-		let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
-		dcCode = SectionOptimizer.modularCode(
-			tokenStreams: [payloadTokens], contextCount: tree.contextCount,
-			extraDCPrecision: 1)
-		let treeCode = SectionOptimizer.modularCode(
-			tokenStreams: [tree.tokens],
-			contextCount: ContextTree.treeContextCount, extraDCPrecision: 1)
-		for index in dcData.indices {
-			var section = BitWriter()
-			try DCGroupEncoder.write(
-				data: dcData[index], streams: streams[index],
-				code: dcCode, writer: &section)
-			sections[1 + index] = SectionWriter(prewritten: section)
+		let isStreaming: Bool
+		if case .streaming = plan { isStreaming = true } else { isStreaming = false }
+		var modularTree: (tree: ContextTree.Prepared, code: EntropyCode)?
+		if isStreaming {
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index],
+					local: DCGroupEncoder.localStreams(data: dcData[index]),
+					writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+		} else {
+			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
+			let streams = try dcData.enumerated().map {
+				try DCGroupEncoder.tokenStreams(
+					data: $0.element, groupIndex: $0.offset, tree: tree)
+			}
+			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+			dcCode = SectionOptimizer.modularCode(
+				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+				extraDCPrecision: 1)
+			let treeCode = SectionOptimizer.modularCode(
+				tokenStreams: [tree.tokens],
+				contextCount: ContextTree.treeContextCount, extraDCPrecision: 1)
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index], streams: streams[index],
+					code: dcCode, writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			modularTree = (tree: tree, code: treeCode)
 		}
 		acCode = SectionOptimizer.optimize(
 			sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
 		altering.acCode(&acCode)
 		var dcGlobal = BitWriter()
-		try FrameAssembly.writeDCGlobal(
-			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			modularTree: (tree: tree, code: treeCode),
-			blockContextMap: blockContextMap, writer: &dcGlobal)
+		if isStreaming {
+			try FrameAssembly.writeStreamingDCGlobal(
+				params: params, blockContextMap: blockContextMap, writer: &dcGlobal)
+		} else {
+			try FrameAssembly.writeDCGlobal(
+				params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+				modularTree: modularTree,
+				blockContextMap: blockContextMap, writer: &dcGlobal)
+		}
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(

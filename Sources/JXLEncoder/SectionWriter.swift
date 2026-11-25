@@ -180,7 +180,8 @@ enum SectionOptimizer {
 		let alphaForSignaling = ANSConstants.logAlphaSize
 		var configurations = [HybridUintConfiguration](
 			repeating: defaultConfiguration, count: initial.clusters.count)
-		for histogramIndex in initial.clusters.indices where extraDCPrecision != 0 {
+		for histogramIndex in initial.clusters.indices
+		where extraDCPrecision != 0 && !streaming {
 			var bestCost = Float.greatestFiniteMagnitude
 			for candidate in candidates {
 				var counts = Histogram()
@@ -232,9 +233,11 @@ enum SectionOptimizer {
 		let logAlpha =
 			usePrefix
 			? PrefixCodeWriter.prefixMaxBits
-			: (extraDCPrecision == 0
-				? 7
-				: min(8, max(5, ceilLog2Nonzero(Int(maxSymbol) + 1))))
+			: (streaming
+				? 8
+				: extraDCPrecision == 0
+					? 7
+					: min(8, max(5, ceilLog2Nonzero(Int(maxSymbol) + 1))))
 		let ansHistograms: [ANSEncodingHistogram]? =
 			usePrefix
 			? nil

@@ -3,12 +3,82 @@ import Testing
 
 @testable import JXLEncoder
 
+#if canImport(ImageIO)
+	import ImageIO
+#endif
+
 /// Frames above eight groups are coded the way libjxl streams them: histograms,
 /// coefficient order, block model and modular trees are built DC group by DC
 /// group rather than over the whole frame. Frames at or below eight groups keep
 /// the one-shot coding, which the existing byte-equality tests pin.
 @Suite("Streaming entropy")
 struct StreamingEntropyTests {
+	static func groupData(widthInBlocks: Int, heightInBlocks: Int) -> DCGroupData {
+		var data = DCGroupData(
+			widthInBlocks: widthInBlocks, heightInBlocks: heightInBlocks)
+		data.extraDCPrecision = 1
+		for channel in data.quantDC.indices {
+			for index in data.quantDC[channel].indices {
+				data.quantDC[channel][index] =
+					Int32((index * 7 + channel * 3) % 23) - 11
+			}
+		}
+		for index in data.rawQuantField.indices {
+			data.rawQuantField[index] = UInt8(1 + index % 5)
+		}
+		return data
+	}
+
+	static func gradient(width: Int, height: Int) throws -> ImageBuffer {
+		var samples = [UInt8](repeating: 0, count: width * height * 3)
+		for y in 0..<height {
+			for x in 0..<width {
+				let i = (y * width + x) * 3
+				samples[i] = UInt8((x * 255) / width)
+				samples[i + 1] = UInt8((y * 255) / height)
+				samples[i + 2] = UInt8(((x + y) * 255) / (width + height))
+			}
+		}
+		return try ImageBuffer(width: width, height: height, samples: samples)
+	}
+
+	/// Decodes with ImageIO where it is available. Elsewhere the semantic
+	/// cross-check against the reference decoder covers this.
+	static func expectDecodes(_ bytes: [UInt8], width: Int, height: Int) throws {
+		#if canImport(ImageIO)
+			let source = try #require(
+				CGImageSourceCreateWithData(Data(bytes) as CFData, nil))
+			let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+			#expect(image.width == width)
+			#expect(image.height == height)
+			let colorSpace = try #require(CGColorSpace(name: CGColorSpace.sRGB))
+			let context = try #require(
+				CGContext(
+					data: nil, width: width, height: height,
+					bitsPerComponent: 8,
+					bytesPerRow: width * 4, space: colorSpace,
+					bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue))
+			context.draw(image, in: CGRect(x: 0, y: 0, width: width, height: height))
+			let raw = try #require(context.data).bindMemory(
+				to: UInt8.self, capacity: width * height * 4)
+			var total = 0
+			for y in 0..<height {
+				for x in 0..<width {
+					let expected = [
+						(x * 255) / width, (y * 255) / height,
+						((x + y) * 255) / (width + height),
+					]
+					for c in 0..<3 {
+						total += abs(
+							expected[c]
+								- Int(raw[(y * width + x) * 4 + c]))
+					}
+				}
+			}
+			#expect(Double(total) / Double(width * height * 3) < 4.0)
+		#endif
+	}
+
 	static func histogram(_ counts: [Int: UInt32]) -> Histogram {
 		var histogram = Histogram()
 		for (symbol, count) in counts {
@@ -39,9 +109,19 @@ struct StreamingEntropyTests {
 	}
 
 	@Test(
-		"a single-leaf modular stream decodes in the native decoder",
-		.disabled("pending implementation"))
-	func oneContextCodeRoundTripsThroughNativeDecoder() throws {}
+		"a single-leaf modular stream decodes in the native decoder")
+	func oneContextCodeRoundTripsThroughNativeDecoder() throws {
+		// 2057x257's second DC group is two blocks wide: its local DC and
+		// metadata trees are single leaves, so both payload codes have one
+		// context and must carry no context map.
+		let image = try Self.gradient(width: 2057, height: 257)
+		let local = try DCGroupEncoder.localStreams(
+			data: Self.groupData(widthInBlocks: 2, heightInBlocks: 33))
+		#expect(local.dc.code.contextCount == 1)
+		#expect(local.metadata.code.contextCount == 1)
+		try Self.expectDecodes(
+			Encoder.encode(image, distance: 1), width: 2057, height: 257)
+	}
 
 	// MARK: Clustering against earlier DC groups
 
@@ -152,29 +232,122 @@ struct StreamingEntropyTests {
 	// MARK: Local DC modular streams
 
 	@Test(
-		"each DC group's local trees are sized by that group's own pixels",
-		.disabled("pending implementation"))
-	func localTreesUseEachDCGroupsOwnPixelCount() throws {}
+		"each DC group's local trees are sized by that group's own pixels")
+	func localTreesUseEachDCGroupsOwnPixelCount() throws {
+		let large = DCGroupData(widthInBlocks: 32, heightInBlocks: 32)
+		let small = DCGroupData(widthInBlocks: 9, heightInBlocks: 3)
+		let largeTrees = ContextTree.prepareLocal(group: large)
+		let smallTrees = ContextTree.prepareLocal(group: small)
+		// A small group's DC image is too short for a gap-8 split chain, and
+		// its control fields too short for the metadata tree.
+		#expect(smallTrees.dc.contextCount == 1)
+		#expect(smallTrees.metadata.contextCount == 1)
+		#expect(largeTrees.dc.contextCount > 1)
+		#expect(largeTrees.metadata.contextCount > 1)
+		#expect(largeTrees.dc.dcGroupCount == 1)
+	}
 
 	@Test(
-		"a streaming DC global section carries no modular tree",
-		.disabled("pending implementation"))
-	func streamingDCGlobalWritesNoTree() throws {}
+		"a streaming DC global section carries no modular tree")
+	func streamingDCGlobalWritesNoTree() throws {
+		let params = try DistanceParams(distance: 1)
+		let map = JPEGBlockContextMap.Result.pixelDefault
+		var streaming = BitWriter()
+		try FrameAssembly.writeStreamingDCGlobal(
+			params: params, blockContextMap: map, writer: &streaming)
+		var global = BitWriter()
+		try FrameAssembly.writeDCGlobal(
+			params: params, dcGroupCount: 2, code: .staticDC,
+			blockContextMap: map, writer: &global)
+		let sharedBits = streaming.bitsWritten - 1
+		var padded = streaming
+		padded.zeroPadToByte()
+		func bit(_ writer: BitWriter, _ index: Int) -> UInt8 {
+			(writer.bytes[index / 8] >> UInt8(index % 8)) & 1
+		}
+		var copy = global
+		copy.zeroPadToByte()
+		#expect(global.bitsWritten > streaming.bitsWritten + 64)
+		for index in 0..<sharedBits {
+			#expect(bit(padded, index) == bit(copy, index), "bit \(index)")
+		}
+		#expect(bit(padded, sharedBits) == 0)
+	}
 
 	@Test(
-		"each local stream writes GroupHeader without the global tree and its own no-lz77 codes",
-		.disabled("pending implementation"))
-	func localStreamsWriteOwnHeaderAndCodes() throws {}
+		"each local stream writes GroupHeader without the global tree and its own no-lz77 codes"
+	)
+	func localStreamsWriteOwnHeaderAndCodes() throws {
+		let data = Self.groupData(widthInBlocks: 32, heightInBlocks: 32)
+		let local = try DCGroupEncoder.localStreams(data: data)
+		#expect(local.dc.treeCode.contextCount == ContextTree.treeContextCount)
+		#expect(local.dc.code.contextCount == local.dc.tree.contextCount)
+		#expect(local.metadata.code.contextCount == local.metadata.tree.contextCount)
+		var writer = BitWriter()
+		try DCGroupEncoder.write(data: data, local: local, writer: &writer)
+		writer.zeroPadToByte()
+		let bytes = writer.bytes
+		#expect(bytes[0] & 0b11 == 1)  // extra_dc_precision
+		#expect((bytes[0] >> 2) & 0b1111 == 2)  // use_global_tree = 0
+		#expect((bytes[0] >> 6) & 1 == 0)  // tree histograms: no lz77
+
+		var expected = BitWriter()
+		expected.write(2, 1)
+		for stream in [local.dc, local.metadata] {
+			expected.write(4, 2)
+			expected.write(1, 0)
+			EntropyCodeWriter.write(stream.treeCode, writer: &expected)
+			EntropyCodeWriter.writeTokens(
+				stream.tree.tokens, code: stream.treeCode, writer: &expected)
+			expected.write(1, 0)
+			EntropyCodeWriter.write(stream.code, writer: &expected)
+			EntropyCodeWriter.writeTokens(
+				stream.tokens, code: stream.code, writer: &expected)
+			if stream.tokens.count == local.dc.tokens.count {
+				let blocks = data.widthInBlocks * data.heightInBlocks
+				expected.write(
+					Int.bitWidth - (blocks - 1).leadingZeroBitCount,
+					UInt64(blocks - 1))
+			}
+		}
+		expected.zeroPadToByte()
+		#expect(bytes == expected.bytes)
+	}
 
 	@Test(
-		"local stream codes keep the default uint config and log_alpha 8",
-		.disabled("pending implementation"))
-	func streamingModularCodeUsesDefaultUintAndLogAlpha8() throws {}
+		"local stream codes keep the default uint config and log_alpha 8")
+	func streamingModularCodeUsesDefaultUintAndLogAlpha8() throws {
+		var tokens: [Token] = []
+		for i in 0..<400 {
+			tokens.append(Token(context: 0, value: UInt32(300 + (i * 37) % 700)))
+			tokens.append(Token(context: 1, value: UInt32(i % 7)))
+		}
+		let searched = SectionOptimizer.modularCode(
+			tokenStreams: [tokens], contextCount: 2, extraDCPrecision: 1)
+		let streaming = SectionOptimizer.modularCode(
+			tokenStreams: [tokens], contextCount: 2, extraDCPrecision: 1,
+			streaming: true)
+		let defaultConfiguration = HybridUintConfiguration(
+			splitExponent: 4, msbInToken: 2, lsbInToken: 0)
+		#expect(
+			(searched.uintConfigurations ?? []).contains { $0 != defaultConfiguration })
+		#expect(
+			(streaming.uintConfigurations ?? []).allSatisfy {
+				$0 == defaultConfiguration
+			})
+		#expect(streaming.ansHistograms != nil)
+		#expect(streaming.logAlphabetSize == 8)
+	}
 
 	@Test(
-		"streaming output above eight groups decodes independently",
-		.disabled("pending implementation"))
-	func streamingOutputAboveEightGroupsDecodes() throws {}
+		"streaming output above eight groups decodes independently")
+	func streamingOutputAboveEightGroupsDecodes() throws {
+		for (width, height) in [(2304, 256), (2057, 257)] {
+			let image = try Self.gradient(width: width, height: height)
+			try Self.expectDecodes(
+				Encoder.encode(image, distance: 1), width: width, height: height)
+		}
+	}
 
 	// MARK: DC group 0 heuristics
 

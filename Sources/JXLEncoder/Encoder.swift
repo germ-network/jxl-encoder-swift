@@ -385,7 +385,25 @@ public enum Encoder {
 		var modularTree: ContextTree.Prepared?
 		var modularTreeCode: EntropyCode?
 
-		if optimizeCodes {
+		let isStreaming: Bool
+		if case .streaming = analysis.plan {
+			isStreaming = true
+		} else {
+			isStreaming = false
+		}
+		if optimizeCodes && isStreaming {
+			for index in dcData.indices {
+				var section = BitWriter()
+				try DCGroupEncoder.write(
+					data: dcData[index],
+					local: DCGroupEncoder.localStreams(data: dcData[index]),
+					writer: &section)
+				sections[1 + index] = SectionWriter(prewritten: section)
+			}
+			acCode = SectionOptimizer.optimize(
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
+		} else if optimizeCodes {
 			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
 			let streams = try dcData.enumerated().map {
 				try DCGroupEncoder.tokenStreams(
@@ -414,12 +432,19 @@ public enum Encoder {
 		}
 
 		var dcGlobal = BitWriter()
-		try FrameAssembly.writeDCGlobal(
-			params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
-			modularTree: modularTree.flatMap { tree in
-				modularTreeCode.map { (tree: tree, code: $0) }
-			},
-			blockContextMap: analysis.blockContextMap, writer: &dcGlobal)
+		if optimizeCodes && isStreaming {
+			try FrameAssembly.writeStreamingDCGlobal(
+				params: params,
+				blockContextMap: analysis.blockContextMap!,
+				writer: &dcGlobal)
+		} else {
+			try FrameAssembly.writeDCGlobal(
+				params: params, dcGroupCount: dim.dcGroupCount, code: dcCode,
+				modularTree: modularTree.flatMap { tree in
+					modularTreeCode.map { (tree: tree, code: $0) }
+				},
+				blockContextMap: analysis.blockContextMap, writer: &dcGlobal)
+		}
 		sections[0] = SectionWriter(prewritten: dcGlobal)
 
 		var acGlobal = BitWriter()

@@ -157,6 +157,17 @@ public enum DCGroupEncoder {
 	static func tokenStreams(
 		data: DCGroupData, groupIndex: Int, tree: ContextTree.Prepared
 	) throws -> (dc: [Token], metadata: [Token]) {
+		(
+			try dcTokenStream(data: data, groupIndex: groupIndex, tree: tree),
+			try metadataTokenStream(
+				data: data, streamID: 1 + 2 * tree.dcGroupCount + groupIndex,
+				tree: tree)
+		)
+	}
+
+	static func dcTokenStream(
+		data: DCGroupData, groupIndex: Int, tree: ContextTree.Prepared
+	) throws -> [Token] {
 		var dcTokens: [Token] = []
 		for (channel, storageChannel) in ACTokenizer.channelOrder.enumerated() {
 			let values = data.quantDC[storageChannel]
@@ -202,8 +213,13 @@ public enum DCGroupEncoder {
 			}
 		}
 
+		return dcTokens
+	}
+
+	static func metadataTokenStream(
+		data: DCGroupData, streamID metadataStreamID: Int, tree: ContextTree.Prepared
+	) throws -> [Token] {
 		var metadataTokens: [Token] = []
-		let metadataStreamID = 1 + 2 * tree.dcGroupCount + groupIndex
 		func appendPlane(
 			values: (Int, Int) -> Int32, width: Int, height: Int, channel: Int
 		) throws {
@@ -260,7 +276,7 @@ public enum DCGroupEncoder {
 		try appendPlane(
 			values: { x, y in Int32(data.epfSharpness) },
 			width: data.widthInBlocks, height: data.heightInBlocks, channel: 3)
-		return (dcTokens, metadataTokens)
+		return metadataTokens
 	}
 
 	/// Gradient-predicts one plane and emits the residuals.
@@ -403,7 +419,28 @@ public enum DCGroupEncoder {
 	}
 
 	static func localStreams(data: DCGroupData) throws -> LocalStreams {
-		preconditionFailure("not implemented")
+		let trees = ContextTree.prepareLocal(group: data)
+		func stream(_ tree: ContextTree.Prepared, _ tokens: [Token]) -> LocalStreams.Stream
+		{
+			LocalStreams.Stream(
+				tree: tree,
+				treeCode: SectionOptimizer.modularCode(
+					tokenStreams: [tree.tokens],
+					contextCount: ContextTree.treeContextCount,
+					extraDCPrecision: 1, streaming: true),
+				code: SectionOptimizer.modularCode(
+					tokenStreams: [tokens], contextCount: tree.contextCount,
+					extraDCPrecision: 1, streaming: true),
+				tokens: tokens)
+		}
+		return LocalStreams(
+			dc: stream(
+				trees.dc,
+				try dcTokenStream(data: data, groupIndex: 0, tree: trees.dc)),
+			metadata: stream(
+				trees.metadata,
+				try metadataTokenStream(
+					data: data, streamID: 0, tree: trees.metadata)))
 	}
 
 	/// Writes each stream with GroupHeader `use_global_tree = 0` followed by its
@@ -411,7 +448,24 @@ public enum DCGroupEncoder {
 	static func write(
 		data: DCGroupData, local: LocalStreams, writer: inout BitWriter
 	) throws {
-		preconditionFailure("not implemented")
+		func writeStream(_ stream: LocalStreams.Stream) {
+			writer.write(4, 2)  // own tree, default weighted predictor, no transforms
+			writer.write(1, 0)  // no lz77
+			EntropyCodeWriter.write(stream.treeCode, writer: &writer)
+			EntropyCodeWriter.writeTokens(
+				stream.tree.tokens, code: stream.treeCode, writer: &writer)
+			writer.write(1, 0)  // no lz77
+			EntropyCodeWriter.write(stream.code, writer: &writer)
+			EntropyCodeWriter.writeTokens(
+				stream.tokens, code: stream.code, writer: &writer)
+		}
+		writer.write(2, UInt64(data.extraDCPrecision))
+		writeStream(local.dc)
+		let blockCount = data.widthInBlocks * data.heightInBlocks
+		let bitCount =
+			blockCount <= 1 ? 0 : Int.bitWidth - (blockCount - 1).leadingZeroBitCount
+		if bitCount != 0 { writer.write(bitCount, UInt64(blockCount - 1)) }
+		writeStream(local.metadata)
 	}
 
 	static func write(
