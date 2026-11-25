@@ -388,19 +388,112 @@ struct BrotliEncoderTests {
 	@Suite("prefix codes")
 	struct PrefixCodes {
 		@Test(
-			"code lengths stay within 15 bits and fill the code space exactly",
-			.disabled())
-		func depthLimitAndCompleteness() {}
+			"code lengths stay within 15 bits and fill the code space exactly")
+		func depthLimitAndCompleteness() {
+			var fibonacci = [UInt32](repeating: 0, count: 704)
+			var (a, b): (UInt32, UInt32) = (1, 1)
+			for index in 0..<40 {
+				fibonacci[index * 3] = a
+				(a, b) = (b, a &+ b)
+			}
+			var random = [UInt32](repeating: 0, count: 256)
+			for (index, byte) in pseudoRandomBytes(256, seed: 6).enumerated() {
+				random[index] = UInt32(byte) + 1
+			}
+			var uniform = [UInt32](repeating: 7, count: 64)
+			uniform[3] = 0
+			for counts in [fibonacci, random, uniform, [5, 9, 1, 0, 3]] {
+				let code = BrotliPrefixCode.build(counts: counts)
+				#expect(code.depths.count == counts.count)
+				#expect(code.depths.max()! <= 15)
+				var space = 0
+				for (symbol, depth) in code.depths.enumerated() {
+					#expect((depth != 0) == (counts[symbol] != 0))
+					if depth != 0 { space += 1 << (15 - Int(depth)) }
+				}
+				#expect(space == 1 << 15)
+			}
+			let skewed = BrotliPrefixCode.build(counts: fibonacci)
+			#expect(skewed.depths.max()! > 10)
+		}
 
 		@Test(
-			"simple-code symbols use the bit width of the whole alphabet, not the largest symbol",
-			.disabled())
-		func simpleCodeSymbolWidth() {}
+			"simple-code symbols use the bit width of the whole alphabet, not the largest symbol"
+		)
+		func simpleCodeSymbolWidth() {
+			for (alphabetSize, width) in [(256, 8), (704, 10), (64, 6)] {
+				for used in [[1, 2], [1, 2, 3], [1, 2, 3, 4]] {
+					var counts = [UInt32](repeating: 0, count: alphabetSize)
+					for (rank, symbol) in used.enumerated() {
+						counts[symbol] = UInt32(10 + rank)
+					}
+					let code = BrotliPrefixCode.build(counts: counts)
+					var writer = BitWriter()
+					BrotliPrefixCode.write(
+						code, alphabetSize: alphabetSize, to: &writer)
+					let treeSelect = used.count == 4 ? 1 : 0
+					#expect(
+						writer.bitsWritten == 4 + used.count * width
+							+ treeSelect)
+					writer.zeroPadToByte()
+					var reader = BitReader(bytes: writer.take())
+					#expect(reader.read(2) == 1)
+					#expect(reader.read(2) == used.count - 1)
+					var decoded = [Int]()
+					for _ in used { decoded.append(reader.read(width)) }
+					#expect(Set(decoded) == Set(used))
+					if used.count == 3 {
+						// §3.4: lengths "1, 2, 2 in the order they appear", so the most
+						// frequent symbol comes first.
+						#expect(decoded[0] == used[2])
+					}
+				}
+			}
+		}
+
+		@Test("a code over more than four symbols is written as a complex code")
+		func complexCodeIsWritten() {
+			var counts = [UInt32](repeating: 0, count: 256)
+			for (index, byte) in pseudoRandomBytes(256, seed: 6).enumerated() {
+				counts[index] = UInt32(byte) + 1
+			}
+			let code = BrotliPrefixCode.build(counts: counts)
+			var writer = BitWriter()
+			BrotliPrefixCode.write(code, alphabetSize: 256, to: &writer)
+			let bits = writer.bitsWritten
+			writer.zeroPadToByte()
+			var reader = BitReader(bytes: writer.take())
+			#expect([0, 2, 3].contains(reader.read(2)))  // HSKIP, never 1
+			#expect(bits > 256)
+			var truncated = BitWriter()
+			counts[255] = 0
+			let shorter = BrotliPrefixCode.build(counts: counts)
+			BrotliPrefixCode.write(shorter, alphabetSize: 256, to: &truncated)
+			#expect(truncated.bitsWritten != bits)
+		}
 
 		@Test(
-			"an empty or one-symbol histogram gives a degenerate code that costs no bits per symbol",
-			.disabled())
-		func degenerateCodes() {}
+			"an empty or one-symbol histogram gives a degenerate code that costs no bits per symbol"
+		)
+		func degenerateCodes() {
+			var counts = [UInt32](repeating: 0, count: 704)
+			let empty = BrotliPrefixCode.build(counts: counts)
+			#expect(empty.isDegenerate)
+			counts[300] = 12
+			let single = BrotliPrefixCode.build(counts: counts)
+			#expect(single.isDegenerate)
+			#expect(single.depths[300] != 0)
+			for (code, symbol) in [(empty, 0), (single, 300)] {
+				var writer = BitWriter()
+				BrotliPrefixCode.write(code, alphabetSize: 704, to: &writer)
+				#expect(writer.bitsWritten == 4 + 10)
+				writer.zeroPadToByte()
+				var reader = BitReader(bytes: writer.take())
+				#expect(reader.read(2) == 1)
+				#expect(reader.read(2) == 0)
+				#expect(reader.read(10) == symbol)
+			}
+		}
 	}
 
 	@Suite("backward references")

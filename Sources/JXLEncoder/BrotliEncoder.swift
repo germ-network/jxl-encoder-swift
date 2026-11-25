@@ -185,11 +185,38 @@ enum BrotliPrefixCode {
 	/// symbol, or none (every category needs a code even when unused), the code
 	/// is degenerate: its single symbol costs no bits in the data.
 	static func build(counts: [UInt32]) -> PrefixCode {
-		fatalError("unimplemented")
+		let used = counts.reduce(0) { $0 + ($1 == 0 ? 0 : 1) }
+		var depths: [UInt8]
+		if used == 0 {
+			depths = [UInt8](repeating: 0, count: counts.count)
+			depths[0] = 1
+		} else {
+			depths = HuffmanTree.createTree(
+				counts: counts, length: counts.count, treeLimit: maxCodeLength)
+		}
+		let bits = HuffmanTree.convertBitDepthsToSymbols(
+			depth: depths, length: counts.count)
+		return PrefixCode(depths: depths, bits: bits)
 	}
 
+	/// Longest code §3.5 can describe: code lengths are "0..15".
+	private static let maxCodeLength = 15
+
 	static func write(_ code: PrefixCode, alphabetSize: Int, to writer: inout BitWriter) {
-		fatalError("unimplemented")
+		precondition(
+			code.depths.count == alphabetSize, "depth table must span the alphabet")
+		let symbols = code.depths.indices.filter { code.depths[$0] != 0 }
+		if symbols.count <= 4 {
+			// §3.4: ALPHABET_BITS is "the smallest number of bits that can represent
+			// all symbols in the alphabet".
+			let alphabetBits = Int.bitWidth - (alphabetSize - 1).leadingZeroBitCount
+			PrefixCodeWriter.storeSimpleHuffmanTree(
+				depths: code.depths, symbols: symbols, count: symbols.count,
+				maxBits: alphabetBits, writer: &writer)
+		} else {
+			PrefixCodeWriter.storeHuffmanTree(
+				depth: code.depths, length: alphabetSize, writer: &writer)
+		}
 	}
 }
 
