@@ -59,8 +59,6 @@ struct SemanticCorpusEntry: CustomTestStringConvertible, Sendable {
 			name: "flower_1024", input: .srgb8(file: "flower_1024"), distance: 1,
 			knownIssues: [
 				"ac_entropy": ["GER-3386"],
-				"ac_entropy_alphabet": ["GER-3386"],
-				"context_map": ["GER-3387", "GER-3419"],
 				"image_sample_format": ["GER-3387"],
 				"inverse_quant_matrix": ["GER-3387"],
 			]),
@@ -327,7 +325,6 @@ struct SemanticFixtureTests {
 					!issues.isEmpty
 						&& issues.isSubset(of: [
 							"GER-3386", "GER-3387", "GER-3388",
-							"GER-3419",
 						]))
 			}
 		}
@@ -336,7 +333,7 @@ struct SemanticFixtureTests {
 			#expect(!reference.restricted(to: [comparison.category]).fields.isEmpty)
 			#expect(
 				comparison.knownIssues.isSubset(of: [
-					"GER-3386", "GER-3387", "GER-3388", "GER-3419",
+					"GER-3386", "GER-3387", "GER-3388",
 				]))
 		}
 		#expect(

@@ -35,21 +35,25 @@ struct Histogram {
 		totalCount += other.totalCount
 	}
 
-	/// Shannon entropy, accumulated left to right in Swift `Float`.
-	mutating func computeBitCost() {
+	/// Shannon entropy. `lanes` accumulates in the four lanes libjxl's vector
+	/// loop uses, so near-tied distances break the same way; otherwise the sum
+	/// runs left to right.
+	mutating func computeBitCost(lanes useLanes: Bool = false) {
 		bitCost = 0
 		guard totalCount != 0 else { return }
 		let total = Float(totalCount)
 		let inverseTotal = 1.0 / total
 		var cost: Float = 0
+		var lanes = SIMD4<Float>(repeating: 0)
 		for i in counts.indices {
 			let count = counts[i]
 			precondition(count <= UInt32(Int32.max))
 			let value = Float(count)
 			if count == 0 || value == total { continue }
-			cost += -(value * FastMath.log2(inverseTotal * value))
+			let term = -(value * FastMath.log2(inverseTotal * value))
+			if useLanes { lanes[i & 3] += term } else { cost += term }
 		}
-		bitCost = cost
+		bitCost = useLanes ? (lanes[0] + lanes[1]) + (lanes[2] + lanes[3]) : cost
 	}
 }
 
@@ -88,12 +92,12 @@ extension Histogram {
 enum HistogramCluster {
 	/// Merging two contexts costs the difference between the combined code and
 	/// the two separate ones.
-	static func distance(_ a: Histogram, _ b: Histogram) -> Float {
+	static func distance(_ a: Histogram, _ b: Histogram, lanes: Bool = false) -> Float {
 		guard a.totalCount != 0, b.totalCount != 0 else { return 0 }
 		var combined = Histogram()
 		combined.add(a)
 		combined.add(b)
-		combined.computeBitCost()
+		combined.computeBitCost(lanes: lanes)
 		return Float(combined.bitCost - a.bitCost - b.bitCost)
 	}
 
@@ -156,8 +160,7 @@ enum HistogramCluster {
 	/// streaming DC groups extend the clusters earlier DC groups already
 	/// encoded. Symbols index `previous` first, then the new clusters; only
 	/// new clusters absorb counts, since earlier ones are already transmitted.
-	/// The returned `clusters` are the new ones only. Costs sum left to right,
-	/// as `computeBitCost` does, not libjxl's lane-wise order.
+	/// The returned `clusters` are the new ones only.
 	static func fastCluster(
 		_ input: [Histogram], maxHistograms: Int, previous: [Histogram]
 	) -> (clusters: [Histogram], symbols: [UInt32]) {
@@ -166,7 +169,7 @@ enum HistogramCluster {
 		}
 		var input = input
 		var previous = previous
-		for i in previous.indices { previous[i].computeBitCost() }
+		for i in previous.indices { previous[i].computeBitCost(lanes: true) }
 		let unassigned = UInt32.max
 		var output: [Histogram] = []
 		var symbols = [UInt32](repeating: unassigned, count: input.count)
@@ -179,7 +182,7 @@ enum HistogramCluster {
 				dists[i] = 0
 				continue
 			}
-			input[i].computeBitCost()
+			input[i].computeBitCost(lanes: true)
 			if input[i].totalCount > input[largest].totalCount { largest = i }
 		}
 		for i in 0..<input.count where dists[i] != 0 {
@@ -199,7 +202,7 @@ enum HistogramCluster {
 			dists[largest] = 0
 			largest = 0
 			for i in 0..<input.count where dists[i] != 0 {
-				let d = distance(input[i], output[output.count - 1])
+				let d = distance(input[i], output[output.count - 1], lanes: true)
 				dists[i] = min(d, dists[i])
 				if dists[i] > dists[largest] { largest = i }
 			}
@@ -213,7 +216,8 @@ enum HistogramCluster {
 				let d =
 					j < previous.count
 					? klDivergence(input[i], coding: previous[j])
-					: distance(input[i], output[j - previous.count])
+					: distance(
+						input[i], output[j - previous.count], lanes: true)
 				if d < bestDistance {
 					best = j
 					bestDistance = d
@@ -221,7 +225,7 @@ enum HistogramCluster {
 			}
 			if best >= previous.count {
 				output[best - previous.count].add(input[i])
-				output[best - previous.count].computeBitCost()
+				output[best - previous.count].computeBitCost(lanes: true)
 			}
 			symbols[i] = UInt32(best)
 		}
@@ -234,16 +238,17 @@ enum HistogramCluster {
 		guard actual.totalCount != 0 else { return 0 }
 		guard coding.totalCount != 0 else { return .infinity }
 		var actual = actual
-		actual.computeBitCost()
+		actual.computeBitCost(lanes: true)
 		let inverseTotal = 1.0 / Float(coding.totalCount)
-		var cost: Float = 0
+		var lanes = SIMD4<Float>(repeating: 0)
 		for i in actual.counts.indices where actual.counts[i] != 0 {
 			let codingCount = i < coding.counts.count ? coding.counts[i] : 0
 			if codingCount == 0 { return .infinity }
-			cost +=
-				-(Float(actual.counts[i])
-				* FastMath.log2(Float(codingCount) * inverseTotal))
+			lanes[i & 3] = lanes[i & 3].addingProduct(
+				-Float(actual.counts[i]),
+				FastMath.log2(Float(codingCount) * inverseTotal))
 		}
+		let cost = (lanes[0] + lanes[1]) + (lanes[2] + lanes[3])
 		return cost - actual.bitCost
 	}
 

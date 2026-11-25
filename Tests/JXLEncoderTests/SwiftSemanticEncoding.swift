@@ -154,8 +154,16 @@ enum SwiftSemanticEncoding {
 			}
 			modularTree = (tree: tree, code: treeCode)
 		}
-		acCode = SectionOptimizer.optimize(
-			sections: &sections, range: acRange, baseCode: acCode, allowANS: true)
+		if isStreaming {
+			acCode = SectionOptimizer.optimizeStreaming(
+				sections: &sections, range: acRange,
+				histogramSetCount: plan.histogramSetCount,
+				contextsPerSet: analysis.acContextsPerSet)
+		} else {
+			acCode = SectionOptimizer.optimize(
+				sections: &sections, range: acRange, baseCode: acCode,
+				allowANS: true)
+		}
 		altering.acCode(&acCode)
 		var dcGlobal = BitWriter()
 		if isStreaming {

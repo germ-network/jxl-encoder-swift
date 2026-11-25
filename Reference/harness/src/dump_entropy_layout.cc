@@ -1,6 +1,12 @@
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
+#include <utility>
 #include <vector>
 
+#include <string>
+
+#include "capture_dc_group_streams.h"
 #include "decoded_frame.h"
 #include "registry.h"
 
@@ -50,6 +56,41 @@ void DumpEntropyLayout(const DecodedFrame &frame, SemanticDumpWriter &out) {
                       static_cast<int64_t>(selector.value)});
   }
   out.Integers("entropy_layout.ac_selectors", selectors);
+
+  // The AC global code: its histogram count, prefix/ANS and the context map
+  // over every histogram set.
+  const auto &ac_code = frame.state->code[0];
+  const auto &ac_map = frame.state->context_map[0];
+  out.Integers("entropy_layout.ac.use_prefix_code",
+               {ac_code.use_prefix_code ? 1 : 0});
+  out.Integers("entropy_layout.ac.histogram_count",
+               {static_cast<int64_t>(ac_code.use_prefix_code
+                                         ? ac_code.huffman_data.size()
+                                         : ac_code.uint_config.size())});
+  out.Integers("entropy_layout.ac.context_map",
+               std::vector<int64_t>(ac_map.begin(), ac_map.end()));
+
+  // Local modular trees and data-code histogram counts, per DC group.
+  std::vector<DCGroupStreams> streams;
+  if (!CaptureDCGroupStreams(frame, &streams)) {
+    std::fprintf(stderr, "dump entropy_layout: DC group streams do not parse\n");
+    std::exit(1);
+  }
+  for (size_t group = 0; group < streams.size(); ++group) {
+    const std::string prefix =
+        "entropy_layout.dc_group." + std::to_string(group) + ".";
+    const std::pair<const char *, const LocalModularStream *> kinds[] = {
+        {"dc", &streams[group].dc}, {"metadata", &streams[group].metadata}};
+    for (const auto &kind : kinds) {
+      const std::string name = prefix + kind.first;
+      out.Integers(name + ".local", {kind.second->local ? 1 : 0});
+      out.Integers(name + ".tree_node_count",
+                   {static_cast<int64_t>(kind.second->tree_node_count)});
+      out.Integers(name + ".tree_nodes", kind.second->tree_nodes);
+      out.Integers(name + ".histogram_count",
+                   {static_cast<int64_t>(kind.second->histogram_count)});
+    }
+  }
 }
 
 const RegisterDumpCategory kRegister({"entropy_layout", DumpEntropyLayout});

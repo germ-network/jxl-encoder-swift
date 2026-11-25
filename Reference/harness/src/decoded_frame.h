@@ -49,6 +49,8 @@ struct DecodedFrame {
   jxl::FrameHeader header{&metadata};
   std::unique_ptr<jxl::PassesDecoderState> state;
   EntropyLayout entropy_layout;
+  // The bare codestream the section offsets index into.
+  std::vector<uint8_t> codestream;
 };
 
 // Decodes the bare codestream's first frame. Returns false with a message on
