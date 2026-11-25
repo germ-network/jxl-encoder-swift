@@ -498,21 +498,134 @@ struct BrotliEncoderTests {
 
 	@Suite("backward references")
 	struct References {
-		@Test("replaying the commands reproduces the input range", .disabled())
-		func commandsReplay() {}
+		/// Reproduces `range` of `input` from the commands alone.
+		private static func replay(
+			_ commands: [BrotliCommand], input: [UInt8], from start: Int
+		) -> [UInt8] {
+			var output = Array(input[..<start])
+			var position = start
+			for command in commands {
+				output += input[position..<position + command.insertLength]
+				position += command.insertLength
+				if command.copyLength > 0 {
+					for _ in 0..<command.copyLength {
+						output.append(
+							output[output.count - command.distance])
+					}
+					position += command.copyLength
+				}
+			}
+			return output
+		}
+
+		private static let repetitiveText: [UInt8] = {
+			let sentence = Array("a stitch in time saves nine; ".utf8)
+			return (0..<50).flatMap { round in
+				sentence + pseudoRandomBytes(3 + round % 5, seed: UInt64(round))
+			}
+		}()
+
+		@Test("replaying the commands reproduces the input range")
+		func commandsReplay() {
+			for input in corpus.map(\.bytes) where !input.isEmpty {
+				var finder = BrotliMatchFinder(
+					input: input, windowSize: BrotliEncoder.windowSize)
+				let commands = finder.commands(for: 0..<input.count)
+				#expect(Self.replay(commands, input: input, from: 0) == input)
+			}
+			let input = Self.repetitiveText
+			var finder = BrotliMatchFinder(
+				input: input, windowSize: BrotliEncoder.windowSize)
+			let commands = finder.commands(for: 0..<input.count)
+			#expect(commands.contains { $0.copyLength > 0 })
+		}
 
 		@Test(
-			"no copy reaches beyond the window or before the input start, and every copy is at least 2 bytes",
-			.disabled())
-		func copiesStayInWindow() {}
+			"no copy reaches beyond the window or before the input start, and every copy is at least 2 bytes"
+		)
+		func copiesStayInWindow() {
+			let chunk = pseudoRandomBytes(40, seed: 21)
+			let input = chunk + pseudoRandomBytes(300, seed: 22) + chunk + chunk
+			for windowSize in [64, 200, 1000] {
+				var finder = BrotliMatchFinder(input: input, windowSize: windowSize)
+				let commands = finder.commands(for: 0..<input.count)
+				var position = 0
+				var copies = 0
+				for command in commands {
+					position += command.insertLength
+					if command.copyLength > 0 {
+						copies += 1
+						#expect(command.copyLength >= 2)
+						#expect(command.distance >= 1)
+						#expect(command.distance <= position)
+						#expect(command.distance <= windowSize)
+						position += command.copyLength
+					}
+				}
+				#expect(position == input.count)
+				#expect(copies >= 1)
+				#expect(Self.replay(commands, input: input, from: 0) == input)
+			}
+			// The distant first chunk is out of reach of the small windows only.
+			var small = BrotliMatchFinder(input: input, windowSize: 64)
+			#expect(
+				!small.commands(for: 0..<input.count).contains {
+					$0.copyLength >= 40 && $0.distance > 300
+				})
+			var large = BrotliMatchFinder(input: input, windowSize: 1000)
+			#expect(
+				large.commands(for: 0..<input.count).contains {
+					$0.copyLength >= 40 && $0.distance > 300
+				})
+		}
 
-		@Test("copies may reach back into earlier meta-blocks", .disabled())
-		func crossMetaBlockCopies() {}
+		@Test("copies may reach back into earlier meta-blocks")
+		func crossMetaBlockCopies() {
+			let block = pseudoRandomBytes(1000, seed: 31)
+			let input = block + block
+			var finder = BrotliMatchFinder(
+				input: input, windowSize: BrotliEncoder.windowSize)
+			let first = finder.commands(for: 0..<1500)
+			let second = finder.commands(for: 1500..<2000)
+			#expect(first.reduce(0) { $0 + $1.insertLength + $1.copyLength } == 1500)
+			#expect(first.contains { $0.distance == 1000 && $0.copyLength == 500 })
+			#expect(second.reduce(0) { $0 + $1.insertLength + $1.copyLength } == 500)
+			#expect(second.contains { $0.distance == 1000 && $0.copyLength >= 400 })
+			#expect(Self.replay(second, input: input, from: 1500) == input)
+		}
 
-		@Test(
-			"a short match is deferred when the next position starts a much longer one",
-			.disabled())
-		func lazyMatching() {}
+		@Test("a copy may use exactly the window size as its distance, and no more")
+		func windowBoundary() {
+			let chunk = pseudoRandomBytes(40, seed: 51)
+			let input = chunk + pseudoRandomBytes(60, seed: 52) + chunk
+			var exact = BrotliMatchFinder(input: input, windowSize: 100)
+			#expect(
+				exact.commands(for: 0..<input.count).contains { $0.distance == 100 }
+			)
+			var short = BrotliMatchFinder(input: input, windowSize: 99)
+			#expect(
+				short.commands(for: 0..<input.count).allSatisfy {
+					$0.copyLength == 0
+				})
+		}
+
+		@Test("a short match is deferred when the next position starts a much longer one")
+		func lazyMatching() {
+			let long = pseudoRandomBytes(40, seed: 41)
+			let marker: UInt8 = 0xFE
+			var decoy = [marker] + long[0..<3]
+			decoy.append(long[3] &+ 1)
+			let input = long + decoy + [marker] + long
+			var finder = BrotliMatchFinder(
+				input: input, windowSize: BrotliEncoder.windowSize)
+			let commands = finder.commands(for: 0..<input.count)
+			let copies = commands.filter { $0.copyLength > 0 }
+			#expect(copies.map(\.copyLength) == [40])
+			#expect(copies.first?.distance == input.count - 40)
+			#expect(
+				commands.reduce(0) { $0 + $1.insertLength + $1.copyLength }
+					== input.count)
+		}
 	}
 
 	@Suite("size bound")
@@ -527,8 +640,12 @@ struct BrotliEncoderTests {
 			.disabled())
 		func rejectedTrialKeepsRing() {}
 
-		@Test("repetitive input compresses below a tenth of its size", .disabled())
-		func repetitiveInputCompresses() {}
+		@Test("repetitive input compresses below a tenth of its size")
+		func repetitiveInputCompresses() {
+			let sentence = Array("a stitch in time saves nine; ".utf8)
+			let input = (0..<3000).flatMap { _ in sentence }
+			#expect(BrotliEncoder.compress(input).count * 10 < input.count)
+		}
 	}
 
 	@Suite("reference decoder")

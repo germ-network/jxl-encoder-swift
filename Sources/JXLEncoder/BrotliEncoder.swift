@@ -27,14 +27,14 @@ enum BrotliEncoder {
 	static func compress(_ input: [UInt8]) -> [UInt8] {
 		var writer = BitWriter()
 		BrotliMetaBlock.writeStreamHeader(to: &writer)
+		var finder = BrotliMatchFinder(input: input, windowSize: windowSize)
 		var ring = BrotliDistanceRing()
 		var start = 0
 		while start < input.count {
 			let end = min(start + maxMetaBlockLength, input.count)
-			let literals = BrotliCommand(
-				insertLength: end - start, copyLength: 0, distance: 0)
+			let commands = finder.commands(for: start..<end)
 			BrotliMetaBlock.writeCompressed(
-				input: input, range: start..<end, commands: [literals],
+				input: input, range: start..<end, commands: commands,
 				isLast: end == input.count, ring: &ring, to: &writer)
 			start = end
 		}
@@ -57,15 +57,112 @@ struct BrotliCommand: Equatable, Sendable {
 
 /// Finds backward references in one input. Its hash chains span the whole
 /// input, so copies may reach into earlier meta-blocks within the window.
+///
+/// The search parameters are this encoder's choices, not RFC 7932 requirements:
+/// 4-byte hashing, a bounded chain and lazy matching that keeps deferring
+/// while the next position gains enough, in the spirit of a mid-quality
+/// libbrotli hasher.
 struct BrotliMatchFinder {
+	private static let hashBits = 15
+	private static let minimumMatch = 4
+	private static let maximumChainLength = 16
+	/// A match at the next position must beat the current one by this much to
+	/// defer it; the deferred byte costs a literal.
+	private static let lazyGain = 2
+
+	private let input: [UInt8]
+	private let windowSize: Int
+	private var heads = [Int32](repeating: -1, count: 1 << hashBits)
+	private var previous: [Int32]
+	private var nextToHash = 0
+
 	init(input: [UInt8], windowSize: Int) {
-		fatalError("unimplemented")
+		precondition(input.count < Int(Int32.max), "input too large for 32-bit chains")
+		self.input = input
+		self.windowSize = windowSize
+		previous = [Int32](repeating: -1, count: input.count)
+	}
+
+	private func hash(at position: Int) -> Int {
+		let word =
+			UInt32(input[position]) | UInt32(input[position + 1]) << 8
+			| UInt32(input[position + 2]) << 16 | UInt32(input[position + 3]) << 24
+		return Int((word &* 0x1E35_A7BD) >> UInt32(32 - Self.hashBits))
+	}
+
+	private mutating func hashPositions(before limit: Int) {
+		while nextToHash < limit {
+			if nextToHash + Self.minimumMatch <= input.count {
+				let slot = hash(at: nextToHash)
+				previous[nextToHash] = heads[slot]
+				heads[slot] = Int32(nextToHash)
+			}
+			nextToHash += 1
+		}
+	}
+
+	private func matchLength(_ position: Int, _ distance: Int, limit: Int) -> Int {
+		var length = 0
+		while position + length < limit
+			&& input[position + length] == input[position + length - distance]
+		{
+			length += 1
+		}
+		return length
+	}
+
+	/// The longest match at `position` that ends by `limit`, or length 0.
+	private func bestMatch(at position: Int, limit: Int) -> (length: Int, distance: Int) {
+		guard position + Self.minimumMatch <= limit else { return (0, 0) }
+		var best = (length: 0, distance: 0)
+		var candidate = Int(heads[hash(at: position)])
+		var steps = 0
+		while candidate >= 0 && steps < Self.maximumChainLength {
+			let distance = position - candidate
+			if distance > windowSize { break }
+			let length = matchLength(position, distance, limit: limit)
+			if length > best.length { best = (length, distance) }
+			candidate = Int(previous[candidate])
+			steps += 1
+		}
+		return best.length >= Self.minimumMatch ? best : (0, 0)
 	}
 
 	/// Commands covering exactly `range`, whose copies never reach before the
 	/// start of the input or further back than the window.
 	mutating func commands(for range: Range<Int>) -> [BrotliCommand] {
-		fatalError("unimplemented")
+		var commands = [BrotliCommand]()
+		var position = range.lowerBound
+		var literalStart = position
+		while position < range.upperBound {
+			hashPositions(before: position)
+			var match = bestMatch(at: position, limit: range.upperBound)
+			guard match.length > 0 else {
+				position += 1
+				continue
+			}
+			while position + 1 < range.upperBound {
+				hashPositions(before: position + 1)
+				let next = bestMatch(at: position + 1, limit: range.upperBound)
+				guard next.length >= match.length + Self.lazyGain else { break }
+				position += 1
+				match = next
+			}
+			commands.append(
+				BrotliCommand(
+					insertLength: position - literalStart,
+					copyLength: match.length,
+					distance: match.distance))
+			position += match.length
+			literalStart = position
+		}
+		if literalStart < range.upperBound {
+			commands.append(
+				BrotliCommand(
+					insertLength: range.upperBound - literalStart,
+					copyLength: 0, distance: 0))
+		}
+		return commands
 	}
 }
 
