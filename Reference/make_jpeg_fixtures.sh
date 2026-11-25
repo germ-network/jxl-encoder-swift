@@ -122,6 +122,14 @@ PY
 cjpeg -rgb -qtables "$WORK/rgb-witness.qtables" -qslots 0,1,2 \
 	-outfile "$CORE/rgb_coded_dc.jpg" "$WORK/rgb-witness.ppm"
 cjpeg -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/display_p3_profile.jpg" "$WORK/colors.ppm"
+cjpeg -rgb -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/rgb_p3_profile.jpg" "$WORK/colors.ppm"
+# Repeated-desc rebuilds of Display-P3.icc (make_desc_icc.py): N=4 is the
+# smallest that enables LZ77 in the coded ICC, N=3300 exceeds one APP2 chunk
+# and the 16,384-byte kLZ77 switch.
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 4 "$HERE/fixtures/Display-P3-desc4.icc"
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 3300 "$HERE/fixtures/Display-P3-desc3300.icc"
+cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-desc4.icc" -outfile "$CORE/p3_desc4_profile.jpg" "$WORK/colors.ppm"
+cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-desc3300.icc" -outfile "$CORE/p3_desc3300_profile_420.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 4x1 -outfile "$CORE/small_411.jpg" "$WORK/small.ppm"
 cjpeg -quality 85 -sample 2x2 -restart 3 -outfile "$CORE/hopper_420_odd.jpg" "$WORK/odd.ppm"
 cjpeg -quality 85 -grayscale -outfile "$CORE/hopper_gray_odd.jpg" "$WORK/odd.ppm"
@@ -262,6 +270,7 @@ cmp "$WORK/dqt-original.ppm" "$WORK/dqt-canonical.ppm"
 
 cp "$CORE/rgb_color.jpg" "$APPLE/rgb_color.jpg"
 cp "$CORE/display_p3_profile.jpg" "$APPLE/display_p3_profile.jpg"
+cp "$CORE/rgb_p3_profile.jpg" "$APPLE/rgb_p3_profile.jpg"
 
 # The cross-check against ImageIO needs the pictures, not the dumps.
 cjpeg -quality 88 -sample 1x1 -outfile "$APPLE/hopper_444.jpg" "$WORK/full.ppm"
