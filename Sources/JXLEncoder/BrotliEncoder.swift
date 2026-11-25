@@ -72,13 +72,42 @@ struct BrotliCodedValue: Equatable, Sendable {
 
 /// The insert-and-copy length alphabet of RFC 7932 §5.
 enum BrotliLengthCodes {
+	/// Per code, the smallest length and the extra-bit count, from the §5 tables.
+	private static let insertBase = [
+		0, 1, 2, 3, 4, 5, 6, 8, 10, 14, 18, 26, 34, 50, 66, 98,
+		130, 194, 322, 578, 1090, 2114, 6210, 22594,
+	]
+	private static let insertExtraBits = [
+		0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4, 5, 5,
+		6, 7, 8, 9, 10, 12, 14, 24,
+	]
+	private static let copyBase = [
+		2, 3, 4, 5, 6, 7, 8, 9, 10, 12, 14, 18, 22, 30, 38, 54,
+		70, 102, 134, 198, 326, 582, 1094, 2118,
+	]
+	private static let copyExtraBits = [
+		0, 0, 0, 0, 0, 0, 0, 0, 1, 1, 2, 2, 3, 3, 4, 4,
+		5, 5, 6, 7, 8, 9, 10, 24,
+	]
+
+	private static func codedValue(
+		length: Int, base: [Int], extraBits: [Int]
+	) -> BrotliCodedValue {
+		var code = base.count - 1
+		while base[code] > length { code -= 1 }
+		return BrotliCodedValue(
+			code: code, extraBitCount: extraBits[code], extraBits: length - base[code])
+	}
+
 	static func insertCode(forLength length: Int) -> BrotliCodedValue {
-		fatalError("unimplemented")
+		precondition(length >= 0, "insert length \(length) is negative")
+		return codedValue(length: length, base: insertBase, extraBits: insertExtraBits)
 	}
 
 	/// `length` is at least 2, the shortest copy §5 can express.
 	static func copyCode(forLength length: Int) -> BrotliCodedValue {
-		fatalError("unimplemented")
+		precondition(length >= 2, "copy length \(length) is below 2")
+		return codedValue(length: length, base: copyBase, extraBits: copyExtraBits)
 	}
 
 	/// The insert-and-copy symbol. With `reusesLastDistance`, it is one of the
@@ -89,29 +118,62 @@ enum BrotliLengthCodes {
 	static func insertAndCopySymbol(
 		insertCode: Int, copyCode: Int, reusesLastDistance: Bool
 	) -> Int {
-		fatalError("unimplemented")
+		precondition((0..<24).contains(insertCode) && (0..<24).contains(copyCode))
+		let cell: Int
+		if reusesLastDistance {
+			precondition(insertCode < 8 && copyCode < 16, "no implicit-distance symbol")
+			cell = (copyCode >> 3) << 6
+		} else {
+			// Cell bases of the §5 table, indexed by insert code / 8 and copy code / 8.
+			let bases = [[128, 192, 384], [256, 320, 512], [448, 576, 640]]
+			cell = bases[insertCode >> 3][copyCode >> 3]
+		}
+		return cell + ((insertCode & 7) << 3) + (copyCode & 7)
 	}
 }
 
 /// The stream-wide ring of the four last distances (RFC 7932 §4), with
 /// NPOSTFIX = 0 and NDIRECT = 0.
 struct BrotliDistanceRing: Equatable, Sendable {
+	/// Most recent first.
+	private var distances: [Int]
+
 	/// RFC 7932 §4: "the fourth-to-last is set to 16, the third-to-last to 15,
 	/// the second-to-last to 11, and the last distance to 4".
 	init() {
-		fatalError("unimplemented")
+		distances = [4, 11, 15, 16]
 	}
 
 	/// The distance symbol and extra bits that encode `distance` now: a special
 	/// symbol 0...15 if one resolves to it, otherwise a symbol of 16 or more.
 	func code(forDistance distance: Int) -> BrotliCodedValue {
-		fatalError("unimplemented")
+		precondition(distance >= 1, "distance \(distance) is not positive")
+		for symbol in 0..<16 where special(symbol) == distance {
+			return BrotliCodedValue(code: symbol, extraBitCount: 0, extraBits: 0)
+		}
+		// §4 with NPOSTFIX = NDIRECT = 0: distance = offset + dextra + 1, where
+		// offset = ((2 + (hcode & 1)) << ndistbits) - 4. Adding 3 to the distance
+		// puts its leading two bits at the top of (2 + (hcode & 1)) << ndistbits.
+		let shifted = distance + 3
+		let ndistbits = (Int.bitWidth - shifted.leadingZeroBitCount) - 2
+		let low = (shifted >> ndistbits) & 1
+		return BrotliCodedValue(
+			code: 16 + 2 * (ndistbits - 1) + low, extraBitCount: ndistbits,
+			extraBits: shifted - ((2 + low) << ndistbits))
+	}
+
+	/// The distance a special symbol 0...15 stands for, which may not be positive.
+	private func special(_ symbol: Int) -> Int {
+		let deltas = [0, 0, 0, 0, -1, 1, -2, 2, -3, 3]
+		if symbol < 4 { return distances[symbol] }
+		return distances[symbol < 10 ? 0 : 1] + deltas[symbol < 10 ? symbol : symbol - 6]
 	}
 
 	/// Advances the ring after a copy written with `code`. §4: "When a distance
 	/// symbol 0 appears, the distance it represents ... is not pushed".
 	mutating func record(distance: Int, code: Int) {
-		fatalError("unimplemented")
+		guard code != 0 else { return }
+		distances = [distance, distances[0], distances[1], distances[2]]
 	}
 }
 

@@ -188,35 +188,201 @@ struct BrotliEncoderTests {
 
 	@Suite("length and distance codes")
 	struct Codes {
-		@Test(
-			"every insert length up to 2^16 maps to its RFC 7932 §5 code and extra bits",
-			.disabled())
-		func insertCodes() {}
+		/// RFC 7932 §5: (code, extra bits, first length, last length).
+		private static let insertTable: [(Int, Int, Int, Int)] = [
+			(0, 0, 0, 0), (1, 0, 1, 1), (2, 0, 2, 2), (3, 0, 3, 3), (4, 0, 4, 4),
+			(5, 0, 5, 5), (6, 1, 6, 7), (7, 1, 8, 9), (8, 2, 10, 13), (9, 2, 14, 17),
+			(10, 3, 18, 25), (11, 3, 26, 33), (12, 4, 34, 49), (13, 4, 50, 65),
+			(14, 5, 66, 97), (15, 5, 98, 129), (16, 6, 130, 193), (17, 7, 194, 321),
+			(18, 8, 322, 577), (19, 9, 578, 1089), (20, 10, 1090, 2113),
+			(21, 12, 2114, 6209), (22, 14, 6210, 22593), (23, 24, 22594, 16_799_809),
+		]
+		private static let copyTable: [(Int, Int, Int, Int)] = [
+			(0, 0, 2, 2), (1, 0, 3, 3), (2, 0, 4, 4), (3, 0, 5, 5), (4, 0, 6, 6),
+			(5, 0, 7, 7), (6, 0, 8, 8), (7, 0, 9, 9), (8, 1, 10, 11), (9, 1, 12, 13),
+			(10, 2, 14, 17), (11, 2, 18, 21), (12, 3, 22, 29), (13, 3, 30, 37),
+			(14, 4, 38, 53), (15, 4, 54, 69), (16, 5, 70, 101), (17, 5, 102, 133),
+			(18, 6, 134, 197), (19, 7, 198, 325), (20, 8, 326, 581), (21, 9, 582, 1093),
+			(22, 10, 1094, 2117), (23, 24, 2118, 16_779_333),
+		]
+
+		private func check(
+			_ lengths: [Int], table: [(Int, Int, Int, Int)],
+			code: (Int) -> BrotliCodedValue
+		) {
+			for length in lengths {
+				let row = table.first { $0.2 <= length && length <= $0.3 }!
+				let coded = code(length)
+				#expect(coded.code == row.0, "length \(length)")
+				#expect(coded.extraBitCount == row.1, "length \(length)")
+				#expect(coded.extraBits == length - row.2, "length \(length)")
+			}
+		}
+
+		private static let sampledLengths =
+			Array(0...65536) + [
+				100_000, 22593, 22594, 1_000_000, 16_779_333, 16_799_809,
+			]
 
 		@Test(
-			"every copy length from 2 to 2^16 maps to its RFC 7932 §5 code and extra bits",
-			.disabled())
-		func copyCodes() {}
+			"every insert length up to 2^16 maps to its RFC 7932 §5 code and extra bits"
+		)
+		func insertCodes() {
+			check(
+				Self.sampledLengths.filter { $0 <= 16_799_809 },
+				table: Self.insertTable
+			) {
+				BrotliLengthCodes.insertCode(forLength: $0)
+			}
+		}
 
 		@Test(
-			"insert-and-copy symbols follow the §5 cell table, with implicit distance reuse only in 0...127",
-			.disabled())
-		func insertAndCopySymbols() {}
+			"every copy length from 2 to 2^16 maps to its RFC 7932 §5 code and extra bits"
+		)
+		func copyCodes() {
+			check(
+				Self.sampledLengths.filter { $0 >= 2 && $0 <= 16_779_333 },
+				table: Self.copyTable
+			) {
+				BrotliLengthCodes.copyCode(forLength: $0)
+			}
+		}
 
 		@Test(
-			"the distance ring starts with last 4, then 11, 15, 16, and symbol 0 does not push",
-			.disabled())
-		func distanceRing() {}
+			"insert-and-copy symbols follow the §5 cell table, with implicit distance reuse only in 0...127"
+		)
+		func insertAndCopySymbols() {
+			// §5 cells: insert code range, copy code range, first symbol.
+			let cells: [(ClosedRange<Int>, ClosedRange<Int>, Int, Bool)] = [
+				(0...7, 0...7, 0, true), (0...7, 8...15, 64, true),
+				(0...7, 0...7, 128, false), (0...7, 8...15, 192, false),
+				(0...7, 16...23, 384, false), (8...15, 0...7, 256, false),
+				(8...15, 8...15, 320, false), (8...15, 16...23, 512, false),
+				(16...23, 0...7, 448, false), (16...23, 8...15, 576, false),
+				(16...23, 16...23, 640, false),
+			]
+			var seen = Set<Int>()
+			for insert in 0..<24 {
+				for copy in 0..<24 {
+					for reuse in [false, true] {
+						guard !reuse || (insert < 8 && copy < 16) else {
+							continue
+						}
+						let cell = cells.first {
+							$0.0.contains(insert) && $0.1.contains(copy)
+								&& $0.3 == reuse
+						}!
+						let expected =
+							cell.2 + (insert & 7) * 8 + (copy & 7)
+						let symbol = BrotliLengthCodes.insertAndCopySymbol(
+							insertCode: insert, copyCode: copy,
+							reusesLastDistance: reuse)
+						#expect(
+							symbol == expected,
+							"insert \(insert) copy \(copy) reuse \(reuse)"
+						)
+						#expect((symbol < 128) == reuse)
+						#expect(seen.insert(symbol).inserted)
+					}
+				}
+			}
+			#expect(seen == Set(0..<704))
+		}
+
+		/// RFC 7932 §4 special distance symbols.
+		private static func special(_ symbol: Int, ring: [Int]) -> Int {
+			let deltas = [-1, 1, -2, 2, -3, 3]
+			switch symbol {
+			case 0...3: return ring[symbol]
+			case 4...9: return ring[0] + deltas[symbol - 4]
+			default: return ring[1] + deltas[symbol - 10]
+			}
+		}
 
 		@Test(
-			"special distance symbols resolve to the distance they encode and never to zero or less",
-			.disabled())
-		func specialDistanceSymbols() {}
+			"the distance ring starts with last 4, then 11, 15, 16, and symbol 0 does not push"
+		)
+		func distanceRing() {
+			var ring = BrotliDistanceRing()
+			#expect(ring.code(forDistance: 4).code == 0)
+			#expect(ring.code(forDistance: 11).code == 1)
+			#expect(ring.code(forDistance: 15).code == 2)
+			#expect(ring.code(forDistance: 16).code == 3)
+			let initial = ring
+			ring.record(distance: 4, code: 0)
+			#expect(ring == initial)
+			ring.record(distance: 1000, code: 20)
+			#expect(ring.code(forDistance: 1000).code == 0)
+			#expect(ring.code(forDistance: 4).code == 1)
+			#expect(ring.code(forDistance: 11).code == 2)
+			#expect(ring.code(forDistance: 15).code == 3)
+			#expect(ring.code(forDistance: 16).code >= 16)
+			ring.record(distance: 11, code: 2)
+			#expect(ring.code(forDistance: 11).code == 0)
+			#expect(ring.code(forDistance: 1000).code == 1)
+		}
 
 		@Test(
-			"long distance symbols and extra bits give back the distance by the §4 formula",
-			.disabled())
-		func longDistanceSymbols() {}
+			"special distance symbols resolve to the distance they encode and never to zero or less"
+		)
+		func specialDistanceSymbols() {
+			var rings: [(BrotliDistanceRing, [Int])] = [
+				(BrotliDistanceRing(), [4, 11, 15, 16])
+			]
+			var ring = BrotliDistanceRing()
+			ring.record(distance: 2, code: 20)
+			ring.record(distance: 3, code: 20)
+			rings.append((ring, [3, 2, 4, 11]))
+			for (ring, last) in rings {
+				for distance in 1...64 {
+					let coded = ring.code(forDistance: distance)
+					let smallest = (0..<16).first {
+						Self.special($0, ring: last) == distance
+					}
+					if let smallest {
+						#expect(
+							coded.code == smallest,
+							"distance \(distance)")
+						#expect(coded.extraBitCount == 0)
+					} else {
+						#expect(coded.code >= 16, "distance \(distance)")
+					}
+					if coded.code < 16 {
+						#expect(
+							Self.special(coded.code, ring: last)
+								== distance)
+					}
+				}
+			}
+		}
+
+		@Test(
+			"long distance symbols and extra bits give back the distance by the §4 formula"
+		)
+		func longDistanceSymbols() {
+			let ring = BrotliDistanceRing()
+			var distances = Array(1...5000)
+			for bits in 3...22 {
+				for delta in -2...2 { distances.append((1 << bits) + delta) }
+			}
+			distances.append(BrotliEncoder.windowSize)
+			var longCount = 0
+			for distance in distances where distance <= BrotliEncoder.windowSize {
+				let coded = ring.code(forDistance: distance)
+				guard coded.code >= 16 else { continue }
+				longCount += 1
+				#expect(coded.code < 64)
+				let ndistbits = 1 + ((coded.code - 16) >> 1)
+				#expect(coded.extraBitCount == ndistbits)
+				#expect(coded.extraBits >= 0 && coded.extraBits < 1 << ndistbits)
+				let hcode = coded.code - 16
+				let offset = ((2 + (hcode & 1)) << ndistbits) - 4
+				#expect(
+					offset + coded.extraBits + 1 == distance,
+					"distance \(distance)")
+			}
+			#expect(longCount > 4000)
+		}
 	}
 
 	@Suite("prefix codes")
