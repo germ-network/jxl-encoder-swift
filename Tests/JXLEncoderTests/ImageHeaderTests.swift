@@ -6,6 +6,7 @@ import Testing
 /// are differential tests against the reference encoder rather than against our
 /// own reading of the spec. Header length is 11 bytes when a dimension needs
 /// the 13-bit size selector (600) and 10 bytes when 9 bits suffice (200, 512).
+/// The unprofiled 64×64 goldens were captured from the writer before ICC support.
 @Suite("ImageHeader")
 struct ImageHeaderTests {
 	struct HeaderBits {
@@ -25,6 +26,27 @@ struct ImageHeaderTests {
 			let selector = read(2)
 			let bits = [9, 13, 18, 30][selector]
 			return (selector, read(bits) + 1, bits)
+		}
+
+		/// Reads a `U64` field as libjxl `U64Coder::Read` does (fields.cc:494-520).
+		mutating func u64() -> UInt64 {
+			switch read(2) {
+			case 0: return 0
+			case 1: return 1 + UInt64(read(4))
+			case 2: return 17 + UInt64(read(8))
+			default:
+				var result = UInt64(read(12))
+				var shift: UInt64 = 12
+				while read(1) == 1 {
+					if shift == 60 {
+						result |= UInt64(read(4)) << shift
+						break
+					}
+					result |= UInt64(read(8)) << shift
+					shift += 8
+				}
+				return result
+			}
 		}
 	}
 
@@ -124,18 +146,107 @@ struct ImageHeaderTests {
 }
 
 extension ImageHeaderTests {
-	@Test(
-		"a nil profile leaves the header bytes unchanged",
-		.disabled("pending implementation"))
-	func unprofiledHeaderUnchanged() {}
+	static func displayP3() throws -> ICCProfile {
+		try ICCProfile(validating: ICCCodecTests.displayP3())
+	}
 
-	@Test(
-		"a profile sets want_icc and the RGB colour space and nothing else",
-		.disabled("pending implementation"))
-	func iccHeaderSignalsWantICCAndRGB() {}
+	/// A 64×64 JPEG-transcode header, read up to the colour encoding's
+	/// all_default bit.
+	static func jpegHeaderBits(iccProfile: ICCProfile?) throws -> HeaderBits {
+		var w = BitWriter()
+		try ImageHeader.write(
+			width: 64, height: 64, transferFunction: .sRGB, xybEncoded: false,
+			isGrayscale: false, iccProfile: iccProfile, to: &w)
+		var bits = HeaderBits(bytes: w.take())
+		#expect(bits.read(16) == 0x0AFF)
+		#expect(bits.read(1) == 0)
+		_ = bits.size()
+		#expect(bits.read(3) == 0)
+		_ = bits.size()
+		// all_default, extra_fields, integer 8-bit samples, modular 16 bit,
+		// no extra channels, not xyb, colour encoding not all_default.
+		for (count, value) in [
+			(1, 0), (1, 0), (1, 0), (2, 0), (1, 1), (2, 0), (1, 0), (1, 0),
+		] {
+			#expect(bits.read(count) == value)
+		}
+		return bits
+	}
 
-	@Test(
-		"the coded ICC follows the transform data and precedes byte padding",
-		.disabled("pending implementation"))
-	func codedICCFollowsTransformDataBeforePadding() {}
+	@Test("a nil profile leaves the header bytes unchanged")
+	func unprofiledHeaderUnchanged() throws {
+		let expected: [(xyb: Bool, gray: Bool, tf: TransferFunction, bytes: [UInt8])] = [
+			(
+				true, false, .sRGB,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x28, 0x6E, 0x04]
+			),
+			(
+				true, false, .linear,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x28, 0x5A, 0x04]
+			),
+			(
+				true, true, .sRGB,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x8A, 0x1B, 0x01]
+			),
+			(
+				true, true, .linear,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x90, 0x43, 0x8A, 0x16, 0x01]
+			),
+			(
+				false, false, .sRGB,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0x80, 0xE2, 0x46]
+			),
+			(
+				false, false, .linear,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0x80, 0xA2, 0x45]
+			),
+			(
+				false, true, .sRGB,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0xA0, 0xB8, 0x11]
+			),
+			(
+				false, true, .linear,
+				[0xFF, 0x0A, 0xF8, 0x01, 0x7E, 0x80, 0xA0, 0x68, 0x11]
+			),
+		]
+		for (xyb, gray, tf, bytes) in expected {
+			var w = BitWriter()
+			try ImageHeader.write(
+				width: 64, height: 64, transferFunction: tf, xybEncoded: xyb,
+				isGrayscale: gray, iccProfile: nil, to: &w)
+			#expect(w.take() == bytes)
+		}
+	}
+
+	/// ColorEncoding::VisitFields (color_encoding_internal.cc:151-158) sends
+	/// colour_space even with want_icc, then skips every enum.
+	@Test("a profile sets want_icc and the RGB colour space and nothing else")
+	func iccHeaderSignalsWantICCAndRGB() throws {
+		var bits = try Self.jpegHeaderBits(iccProfile: Self.displayP3())
+		#expect(bits.read(1) == 1)  // want_icc
+		#expect(bits.read(2) == 0)  // RGB
+		#expect(bits.u64() == 0)  // no extensions
+		#expect(bits.read(1) == 1)  // all default transform data
+		#expect(bits.u64() == UInt64(ICCCodec.predict(try Self.displayP3().bytes).count))
+
+		var plain = try Self.jpegHeaderBits(iccProfile: nil)
+		#expect(plain.read(1) == 0)
+	}
+
+	@Test("the coded ICC follows the transform data and precedes byte padding")
+	func codedICCFollowsTransformDataBeforePadding() throws {
+		let profile = try Self.displayP3()
+		var bits = try Self.jpegHeaderBits(iccProfile: profile)
+		_ = bits.read(1 + 2 + 2 + 1)
+		var icc = BitWriter()
+		ICCCodec.write(profile, to: &icc)
+		#expect(icc.bitsWritten > 0)
+		var expected = icc
+		expected.zeroPadToByte()
+		var coded = HeaderBits(bytes: expected.take())
+		let header = (0..<icc.bitsWritten).map { _ in bits.read(1) }
+		#expect(header == (0..<icc.bitsWritten).map { _ in coded.read(1) })
+		#expect(bits.bytes.count == (bits.offset + 7) / 8)
+		#expect(bits.read((8 - bits.offset % 8) % 8) == 0)
+	}
 }

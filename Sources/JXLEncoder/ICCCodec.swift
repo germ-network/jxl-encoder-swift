@@ -241,7 +241,23 @@ enum ICCCodec {
 	/// forced-prefix tokens over `contextCount` contexts, with LZ77 chosen by
 	/// `lz77Method(transformedSize:)`. Ports `WriteICC` (enc_icc_codec.cc).
 	static func write(_ profile: ICCProfile, to writer: inout BitWriter) {
-		fatalError("unimplemented")
+		let stream = predict(profile.bytes)
+		writer.writeU64(UInt64(stream.count))
+		let tokens = stream.indices.map { i in
+			Token(
+				context: UInt32(
+					context(
+						index: i, previous: i > 0 ? stream[i - 1] : 0,
+						previousPrevious: i > 1 ? stream[i - 2] : 0)),
+				value: UInt32(stream[i]))
+		}
+		let prepared = EntropyCodeWriter.prepare(
+			tokens, contextCount: contextCount,
+			parameters: HistogramParameters(
+				lz77Method: lz77Method(transformedSize: stream.count),
+				forcesPrefixCodes: true))
+		EntropyCodeWriter.write(prepared.code, writer: &writer)
+		EntropyCodeWriter.writeTokens(prepared.tokens, code: prepared.code, writer: &writer)
 	}
 
 	private static let headerSize = 128

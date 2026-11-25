@@ -65,8 +65,23 @@ struct BitWriterTests {
 }
 
 extension BitWriterTests {
-	@Test(
-		"U64 picks libjxl's selector per range and continues varints past 4095",
-		.disabled("pending implementation"))
-	func u64EncodesSelectorsAndVarintContinuation() {}
+	@Test("U64 picks libjxl's selector per range and continues varints past 4095")
+	func u64EncodesSelectorsAndVarintContinuation() {
+		// Bit counts follow U64Coder::CanEncode (fields.cc:523-550).
+		let cases: [(value: UInt64, bits: Int)] = [
+			(0, 2), (1, 6), (16, 6), (17, 10), (272, 10), (273, 15), (4095, 15),
+			(4096, 24), (1 << 20 - 1, 24), (1 << 20, 33), (1 << 60 - 1, 69),
+			(1 << 60, 73), (.max, 73),
+		]
+		for (value, bits) in cases {
+			var w = BitWriter()
+			w.writeU64(value)
+			#expect(w.bitsWritten == bits, "\(value)")
+			w.write(5, 0b10110)
+			w.zeroPadToByte()
+			var reader = ImageHeaderTests.HeaderBits(bytes: w.take())
+			#expect(reader.u64() == value)
+			#expect(reader.read(5) == 0b10110)
+		}
+	}
 }

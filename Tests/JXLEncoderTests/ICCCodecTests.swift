@@ -397,4 +397,26 @@ struct ICCCodecTests {
 		#expect(ICCCodec.lz77Method(transformedSize: 16_384) == .lz77)
 		#expect(ICCCodec.lz77Method(transformedSize: 390) == .optimal)
 	}
+
+	/// Forced prefix codes put LZ77 lengths at min_symbol 512, U32 selector 1
+	/// (enc_ans.cc:1090, dec_ans.cc:304-315).
+	@Test("coded ICC enables LZ77 with the forced-prefix min_symbol")
+	func writeEnablesLZ77WithForcedPrefixMinSymbol() throws {
+		for (fixture, method) in [
+			("p3_desc4_profile", LZ77.Method.optimal),
+			("p3_desc3300_profile_420", .lz77),
+		] {
+			let profile = try ICCProfile(validating: Self.profile(fixture))
+			let size = ICCCodec.predict(profile.bytes).count
+			#expect(ICCCodec.lz77Method(transformedSize: size) == method)
+			var w = BitWriter()
+			ICCCodec.write(profile, to: &w)
+			w.zeroPadToByte()
+			var bits = ImageHeaderTests.HeaderBits(bytes: w.take())
+			#expect(bits.u64() == UInt64(size))
+			#expect(bits.read(1) == 1, "\(fixture) LZ77 enabled")
+			#expect(bits.read(2) == 1, "\(fixture) min_symbol 512")
+			#expect(bits.read(2) == 0, "\(fixture) min_length 3")
+		}
+	}
 }
