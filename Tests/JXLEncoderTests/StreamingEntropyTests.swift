@@ -211,6 +211,14 @@ struct StreamingEntropyTests {
 		let result = HistogramCluster.fastCluster(
 			input, maxHistograms: 1, previous: previous)
 		#expect(result.symbols == [1, 0, 1, 2])
+		// A tiny earlier histogram is cheap to merge into by `distance` even
+		// when it codes the context worse; KL picks the better code.
+		let closer = HistogramCluster.fastCluster(
+			[Self.histogram([0: 10, 1: 10])], maxHistograms: 0,
+			previous: [
+				Self.histogram([0: 700, 1: 300]), Self.histogram([0: 1, 1: 3]),
+			])
+		#expect(closer.symbols == [0])
 		let missing = HistogramCluster.klDivergence(
 			Self.histogram([0: 4, 5: 4]), coding: previous[0])
 		#expect(missing == .infinity)
@@ -242,6 +250,15 @@ struct StreamingEntropyTests {
 		#expect(untouched.totalCount == 1000)
 	}
 
+	@Test("promotion stops once contexts are close to a new cluster")
+	func fastClusterStopsBelowDistinctDistanceAfterPrevious() throws {
+		let result = HistogramCluster.fastCluster(
+			[Self.histogram([10: 20, 11: 20]), Self.histogram([10: 21, 11: 19])],
+			maxHistograms: 2, previous: [Self.histogram([0: 500, 1: 500])])
+		#expect(result.clusters.count == 1)
+		#expect(result.symbols == [1, 1])
+	}
+
 	@Test(
 		"encoded histograms read back as ANS frequencies or 2^(15-depth)")
 	func previousHistogramFromEncodedCodes() throws {
@@ -257,6 +274,9 @@ struct StreamingEntropyTests {
 		let fromPrefix = Histogram(encodedPrefix: prefix)
 		#expect(fromPrefix.counts == [16384, 8192, 0, 8192])
 		#expect(fromPrefix.totalCount == 32768)
+		let lone = Histogram(
+			encodedPrefix: PrefixCode(depths: [0, 1, 0], bits: [0, 0, 0]))
+		#expect(lone.totalCount == 0)
 	}
 
 	// MARK: Local DC modular streams
@@ -266,6 +286,10 @@ struct StreamingEntropyTests {
 	func localTreesUseEachDCGroupsOwnPixelCount() throws {
 		let large = DCGroupData(widthInBlocks: 32, heightInBlocks: 32)
 		let small = DCGroupData(widthInBlocks: 9, heightInBlocks: 3)
+		// 18 + 1200 metadata pixels is above libjxl's 1024 cut; 18 + 800 is not.
+		let boundary = ContextTree.prepareLocal(
+			group: DCGroupData(widthInBlocks: 20, heightInBlocks: 20))
+		#expect(boundary.metadata.contextCount > 1)
 		let largeTrees = ContextTree.prepareLocal(group: large)
 		let smallTrees = ContextTree.prepareLocal(group: small)
 		// A small group's DC image is too short for a gap-8 split chain, and
@@ -323,7 +347,7 @@ struct StreamingEntropyTests {
 
 		var expected = BitWriter()
 		expected.write(2, 1)
-		for stream in [local.dc, local.metadata] {
+		for (position, stream) in [local.dc, local.metadata].enumerated() {
 			expected.write(4, 2)
 			expected.write(1, 0)
 			EntropyCodeWriter.write(stream.treeCode, writer: &expected)
@@ -333,7 +357,7 @@ struct StreamingEntropyTests {
 			EntropyCodeWriter.write(stream.code, writer: &expected)
 			EntropyCodeWriter.writeTokens(
 				stream.tokens, code: stream.code, writer: &expected)
-			if stream.tokens.count == local.dc.tokens.count {
+			if position == 0 {
 				let blocks = data.widthInBlocks * data.heightInBlocks
 				expected.write(
 					Int.bitWidth - (blocks - 1).leadingZeroBitCount,

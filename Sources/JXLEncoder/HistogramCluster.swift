@@ -76,7 +76,11 @@ extension Histogram {
 	}
 
 	init(encodedPrefix code: PrefixCode) {
-		counts = code.depths.map { $0 == 0 ? 0 : UInt32(1) << UInt32(15 - Int($0)) }
+		// libjxl gives a lone symbol depth 0, so it reads back empty.
+		counts =
+			code.isDegenerate
+			? code.depths.map { _ in 0 }
+			: code.depths.map { $0 == 0 ? 0 : UInt32(1) << UInt32(15 - Int($0)) }
 		totalCount = counts.reduce(0) { $0 + Int($1) }
 	}
 }
@@ -337,6 +341,25 @@ enum HistogramCluster {
 		return (
 			Array(reordered.prefix(next)),
 			symbols.map { UInt8(newIndex[$0]!) }
+		)
+	}
+
+	/// `reindex` for clusters that extend `previousCount` earlier ones: symbols
+	/// below it keep their index, new clusters renumber by first use after
+	/// them (libjxl `HistogramReindex`, enc_cluster.cc:234-256).
+	static func reindex(
+		symbols: [UInt32], clusters: [Histogram], previousCount: Int
+	) -> (clusters: [Histogram], contextMap: [UInt8]) {
+		var reordered: [Histogram] = []
+		var newIndex: [UInt32: Int] = [:]
+		for symbol in symbols where Int(symbol) >= previousCount {
+			guard newIndex[symbol] == nil else { continue }
+			newIndex[symbol] = previousCount + reordered.count
+			reordered.append(clusters[Int(symbol) - previousCount])
+		}
+		return (
+			reordered,
+			symbols.map { UInt8(Int($0) < previousCount ? Int($0) : newIndex[$0]!) }
 		)
 	}
 
