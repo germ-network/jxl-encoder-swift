@@ -1,0 +1,899 @@
+import Foundation
+import Testing
+
+@testable import JXLEncoder
+
+/// Deterministic pseudo-random bytes (SplitMix64), so every run sees the same corpus.
+private func pseudoRandomBytes(_ count: Int, seed: UInt64) -> [UInt8] {
+	var state = seed
+	var bytes = [UInt8]()
+	bytes.reserveCapacity(count)
+	while bytes.count < count {
+		state &+= 0x9E37_79B9_7F4A_7C15
+		var z = state
+		z = (z ^ (z >> 30)) &* 0xBF58_476D_1CE4_E5B9
+		z = (z ^ (z >> 27)) &* 0x94D0_49BB_1331_11EB
+		z ^= z >> 31
+		for shift in stride(from: 0, to: 64, by: 8) where bytes.count < count {
+			bytes.append(UInt8(truncatingIfNeeded: z >> UInt64(shift)))
+		}
+	}
+	return bytes
+}
+
+private struct CorpusInput {
+	var name: String
+	var bytes: [UInt8]
+}
+
+private let corpus: [CorpusInput] = {
+	let text = Array(
+		"The quick brown fox jumps over the lazy dog. Pack my box with five dozen liquid jugs. "
+			.utf8)
+	let block = 1 << 16
+	var mixed = [UInt8]()
+	for index in 0..<6 {
+		mixed +=
+			index % 2 == 0
+			? pseudoRandomBytes(block, seed: UInt64(index))
+			: Array(repeating: UInt8(index), count: block / 2)
+				+ Array((0..<block / 2).map { UInt8(truncatingIfNeeded: $0 % 7) })
+	}
+	let farRepeat = pseudoRandomBytes(5000, seed: 77)
+	return [
+		CorpusInput(name: "empty", bytes: []),
+		CorpusInput(name: "one byte", bytes: [0x41]),
+		CorpusInput(name: "two distinct bytes", bytes: [1, 2, 1, 1, 2, 2, 1, 2, 1, 1]),
+		CorpusInput(
+			name: "three distinct bytes", bytes: [1, 2, 3, 1, 1, 2, 1, 3, 3, 1, 1, 1]),
+		CorpusInput(
+			name: "four distinct bytes",
+			bytes: [1, 2, 3, 4, 1, 1, 2, 1, 3, 3, 4, 1, 1, 1]),
+		CorpusInput(name: "0...255 once", bytes: (0...255).map { UInt8($0) }),
+		CorpusInput(
+			name: "uniform over 256 values",
+			bytes: (0..<4096).map { UInt8($0 % 256) }),
+		CorpusInput(name: "65535 random", bytes: pseudoRandomBytes(65535, seed: 1)),
+		CorpusInput(name: "65536 random", bytes: pseudoRandomBytes(65536, seed: 2)),
+		CorpusInput(name: "65537 random", bytes: pseudoRandomBytes(65537, seed: 3)),
+		CorpusInput(
+			name: "text with repeats", bytes: Array((0..<40).map { _ in text }.joined())
+		),
+		CorpusInput(
+			name: "long single-byte run", bytes: Array(repeating: 0x5A, count: 200_000)),
+		CorpusInput(name: "300 KiB random", bytes: pseudoRandomBytes(300 * 1024, seed: 4)),
+		CorpusInput(
+			name: "repeats more than 64 KiB apart",
+			bytes: farRepeat + pseudoRandomBytes(70_000, seed: 5) + farRepeat),
+		CorpusInput(name: "random alternating with repetitive blocks", bytes: mixed),
+	]
+}()
+
+#if (os(macOS) && !targetEnvironment(macCatalyst)) || os(Linux)
+	/// Runs an external decoder over a stream. The binary comes only from an
+	/// environment variable, never from PATH, so a missing tool cannot silently
+	/// skip the check.
+	private enum ExternalDecoder {
+		static func binary(variable: String) -> String? {
+			ProcessInfo.processInfo.environment[variable]
+		}
+
+		static func decode(
+			_ stream: [UInt8], binary: String, arguments: (String) -> [String]
+		) throws -> [UInt8] {
+			let file = FileManager.default.temporaryDirectory
+				.appendingPathComponent("brotli-\(UUID().uuidString).br")
+			try Data(stream).write(to: file)
+			defer { try? FileManager.default.removeItem(at: file) }
+
+			let process = Process()
+			process.executableURL = URL(fileURLWithPath: binary)
+			process.arguments = arguments(file.path)
+			let output = Pipe()
+			process.standardOutput = output
+			process.standardError = FileHandle.nullDevice
+			try process.run()
+			let decoded = output.fileHandleForReading.readDataToEndOfFile()
+			process.waitUntilExit()
+			guard process.terminationStatus == 0 else {
+				throw DecoderFailure(status: process.terminationStatus)
+			}
+			return [UInt8](decoded)
+		}
+
+		struct DecoderFailure: Error { var status: Int32 }
+
+		static func referenceDecode(_ stream: [UInt8], binary: String) throws -> [UInt8] {
+			try decode(stream, binary: binary) { ["-d", "-c", $0] }
+		}
+
+		static func peerDecode(_ stream: [UInt8], binary: String) throws -> [UInt8] {
+			try decode(stream, binary: binary) { [$0] }
+		}
+	}
+#endif
+
+/// Reads bits in the order RFC 7932 §1.5.1 packs them.
+private struct BitReader {
+	var bytes: [UInt8]
+	var position = 0
+
+	mutating func read(_ count: Int) -> Int {
+		var value = 0
+		for index in 0..<count {
+			let bit = Int(bytes[position / 8] >> UInt8(position % 8)) & 1
+			value |= bit << index
+			position += 1
+		}
+		return value
+	}
+}
+
+/// Brotli streams must be RFC 7932-conformant and decode to their input byte
+/// for byte. Google's reference decoder checks that wherever it can run; the
+/// remaining tests pin the encoder's own invariants on every platform.
+@Suite("Brotli encoder")
+struct BrotliEncoderTests {
+	@Suite("stream framing")
+	struct Framing {
+		@Test("empty input is the WBITS 22 header and an empty last meta-block")
+		func emptyInput() {
+			// §9.1 pattern "1011" for WBITS 22, then ISLAST = 1 and ISLASTEMPTY = 1.
+			#expect(BrotliEncoder.compress([]) == [0x3B])
+		}
+
+		@Test("the stream header encodes WBITS 22 in four bits")
+		func streamHeader() {
+			var writer = BitWriter()
+			BrotliMetaBlock.writeStreamHeader(to: &writer)
+			#expect(writer.bitsWritten == 4)
+			writer.zeroPadToByte()
+			#expect(writer.take() == [0b1011])
+			#expect(BrotliEncoder.windowBits == 22)
+			#expect(BrotliEncoder.windowSize == (1 << 22) - 16)
+		}
+
+		@Test(
+			"an uncompressed meta-block carries MLEN - 1 in four nibbles, then the bytes verbatim from a byte boundary"
+		)
+		func uncompressedMetaBlock() {
+			let payload: [UInt8] = [0xDE, 0xAD, 0xBE, 0xEF, 0x00]
+			// Without the stream header the 20 header bits leave the payload
+			// four bits short of a byte boundary.
+			var writer = BitWriter()
+			BrotliMetaBlock.writeUncompressed(payload[...], to: &writer)
+			var reader = BitReader(bytes: writer.take())
+			#expect(reader.read(1) == 0)  // ISLAST
+			#expect(reader.read(2) == 0)  // MNIBBLES = 4
+			#expect(reader.read(16) == payload.count - 1)
+			#expect(reader.read(1) == 1)  // ISUNCOMPRESSED
+			#expect(reader.read(4) == 0)  // fill bits
+			#expect(Array(reader.bytes[3...]) == payload)
+			#expect(reader.bytes.count == 3 + payload.count)
+		}
+
+		@Test("inputs are split into meta-blocks of at most 64 KiB")
+		func metaBlockSplit() {
+			let input = pseudoRandomBytes(3 * 65536 + 100, seed: 9)
+			var reader = BitReader(bytes: BrotliEncoder.compress(input))
+			#expect(reader.read(4) == 0b1011)
+			#expect(reader.read(1) == 0)  // ISLAST: more meta-blocks follow
+			#expect(reader.read(2) == 0)  // MNIBBLES = 4
+			#expect(reader.read(16) + 1 == BrotliEncoder.maxMetaBlockLength)
+			#expect(BrotliEncoder.maxMetaBlockLength == 65536)
+		}
+	}
+
+	@Suite("length and distance codes")
+	struct Codes {
+		/// RFC 7932 §5: (code, extra bits, first length, last length).
+		private static let insertTable: [(Int, Int, Int, Int)] = [
+			(0, 0, 0, 0), (1, 0, 1, 1), (2, 0, 2, 2), (3, 0, 3, 3), (4, 0, 4, 4),
+			(5, 0, 5, 5), (6, 1, 6, 7), (7, 1, 8, 9), (8, 2, 10, 13), (9, 2, 14, 17),
+			(10, 3, 18, 25), (11, 3, 26, 33), (12, 4, 34, 49), (13, 4, 50, 65),
+			(14, 5, 66, 97), (15, 5, 98, 129), (16, 6, 130, 193), (17, 7, 194, 321),
+			(18, 8, 322, 577), (19, 9, 578, 1089), (20, 10, 1090, 2113),
+			(21, 12, 2114, 6209), (22, 14, 6210, 22593), (23, 24, 22594, 16_799_809),
+		]
+		private static let copyTable: [(Int, Int, Int, Int)] = [
+			(0, 0, 2, 2), (1, 0, 3, 3), (2, 0, 4, 4), (3, 0, 5, 5), (4, 0, 6, 6),
+			(5, 0, 7, 7), (6, 0, 8, 8), (7, 0, 9, 9), (8, 1, 10, 11), (9, 1, 12, 13),
+			(10, 2, 14, 17), (11, 2, 18, 21), (12, 3, 22, 29), (13, 3, 30, 37),
+			(14, 4, 38, 53), (15, 4, 54, 69), (16, 5, 70, 101), (17, 5, 102, 133),
+			(18, 6, 134, 197), (19, 7, 198, 325), (20, 8, 326, 581), (21, 9, 582, 1093),
+			(22, 10, 1094, 2117), (23, 24, 2118, 16_779_333),
+		]
+
+		private func check(
+			_ lengths: [Int], table: [(Int, Int, Int, Int)],
+			code: (Int) -> BrotliCodedValue
+		) {
+			for length in lengths {
+				let row = table.first { $0.2 <= length && length <= $0.3 }!
+				let coded = code(length)
+				#expect(coded.code == row.0, "length \(length)")
+				#expect(coded.extraBitCount == row.1, "length \(length)")
+				#expect(coded.extraBits == length - row.2, "length \(length)")
+			}
+		}
+
+		private static let sampledLengths =
+			Array(0...65536) + [
+				100_000, 22593, 22594, 1_000_000, 16_779_333, 16_799_809,
+			]
+
+		@Test(
+			"every insert length up to 2^16 maps to its RFC 7932 §5 code and extra bits"
+		)
+		func insertCodes() {
+			check(
+				Self.sampledLengths.filter { $0 <= 16_799_809 },
+				table: Self.insertTable
+			) {
+				BrotliLengthCodes.insertCode(forLength: $0)
+			}
+		}
+
+		@Test(
+			"every copy length from 2 to 2^16 maps to its RFC 7932 §5 code and extra bits"
+		)
+		func copyCodes() {
+			check(
+				Self.sampledLengths.filter { $0 >= 2 && $0 <= 16_779_333 },
+				table: Self.copyTable
+			) {
+				BrotliLengthCodes.copyCode(forLength: $0)
+			}
+		}
+
+		@Test(
+			"insert-and-copy symbols follow the §5 cell table, with implicit distance reuse only in 0...127"
+		)
+		func insertAndCopySymbols() {
+			// §5 cells: insert code range, copy code range, first symbol.
+			let cells: [(ClosedRange<Int>, ClosedRange<Int>, Int, Bool)] = [
+				(0...7, 0...7, 0, true), (0...7, 8...15, 64, true),
+				(0...7, 0...7, 128, false), (0...7, 8...15, 192, false),
+				(0...7, 16...23, 384, false), (8...15, 0...7, 256, false),
+				(8...15, 8...15, 320, false), (8...15, 16...23, 512, false),
+				(16...23, 0...7, 448, false), (16...23, 8...15, 576, false),
+				(16...23, 16...23, 640, false),
+			]
+			var seen = Set<Int>()
+			for insert in 0..<24 {
+				for copy in 0..<24 {
+					for reuse in [false, true] {
+						guard !reuse || (insert < 8 && copy < 16) else {
+							continue
+						}
+						let cell = cells.first {
+							$0.0.contains(insert) && $0.1.contains(copy)
+								&& $0.3 == reuse
+						}!
+						let expected =
+							cell.2 + (insert & 7) * 8 + (copy & 7)
+						let symbol = BrotliLengthCodes.insertAndCopySymbol(
+							insertCode: insert, copyCode: copy,
+							reusesLastDistance: reuse)
+						#expect(
+							symbol == expected,
+							"insert \(insert) copy \(copy) reuse \(reuse)"
+						)
+						#expect((symbol < 128) == reuse)
+						#expect(seen.insert(symbol).inserted)
+					}
+				}
+			}
+			#expect(seen == Set(0..<704))
+		}
+
+		/// RFC 7932 §4 special distance symbols.
+		private static func special(_ symbol: Int, ring: [Int]) -> Int {
+			let deltas = [-1, 1, -2, 2, -3, 3]
+			switch symbol {
+			case 0...3: return ring[symbol]
+			case 4...9: return ring[0] + deltas[symbol - 4]
+			default: return ring[1] + deltas[symbol - 10]
+			}
+		}
+
+		@Test(
+			"the distance ring starts with last 4, then 11, 15, 16, and symbol 0 does not push"
+		)
+		func distanceRing() {
+			var ring = BrotliDistanceRing()
+			#expect(ring.code(forDistance: 4).code == 0)
+			#expect(ring.code(forDistance: 11).code == 1)
+			#expect(ring.code(forDistance: 15).code == 2)
+			#expect(ring.code(forDistance: 16).code == 3)
+			let initial = ring
+			ring.record(distance: 4, code: 0)
+			#expect(ring == initial)
+			ring.record(distance: 1000, code: 20)
+			#expect(ring.code(forDistance: 1000).code == 0)
+			#expect(ring.code(forDistance: 4).code == 1)
+			#expect(ring.code(forDistance: 11).code == 2)
+			#expect(ring.code(forDistance: 15).code == 3)
+			#expect(ring.code(forDistance: 16).code >= 16)
+			ring.record(distance: 11, code: 2)
+			#expect(ring.code(forDistance: 11).code == 0)
+			#expect(ring.code(forDistance: 1000).code == 1)
+		}
+
+		@Test(
+			"special distance symbols resolve to the distance they encode and never to zero or less"
+		)
+		func specialDistanceSymbols() {
+			var rings: [(BrotliDistanceRing, [Int])] = [
+				(BrotliDistanceRing(), [4, 11, 15, 16])
+			]
+			var ring = BrotliDistanceRing()
+			ring.record(distance: 2, code: 20)
+			ring.record(distance: 3, code: 20)
+			rings.append((ring, [3, 2, 4, 11]))
+			for (ring, last) in rings {
+				for distance in 1...64 {
+					let coded = ring.code(forDistance: distance)
+					let smallest = (0..<16).first {
+						Self.special($0, ring: last) == distance
+					}
+					if let smallest {
+						#expect(
+							coded.code == smallest,
+							"distance \(distance)")
+						#expect(coded.extraBitCount == 0)
+					} else {
+						#expect(coded.code >= 16, "distance \(distance)")
+					}
+					if coded.code < 16 {
+						#expect(
+							Self.special(coded.code, ring: last)
+								== distance)
+					}
+				}
+			}
+		}
+
+		@Test(
+			"long distance symbols and extra bits give back the distance by the §4 formula"
+		)
+		func longDistanceSymbols() {
+			let ring = BrotliDistanceRing()
+			var distances = Array(1...5000)
+			for bits in 3...22 {
+				for delta in -2...2 { distances.append((1 << bits) + delta) }
+			}
+			distances.append(BrotliEncoder.windowSize)
+			var longCount = 0
+			for distance in distances where distance <= BrotliEncoder.windowSize {
+				let coded = ring.code(forDistance: distance)
+				guard coded.code >= 16 else { continue }
+				longCount += 1
+				#expect(coded.code < 64)
+				let ndistbits = 1 + ((coded.code - 16) >> 1)
+				#expect(coded.extraBitCount == ndistbits)
+				#expect(coded.extraBits >= 0 && coded.extraBits < 1 << ndistbits)
+				let hcode = coded.code - 16
+				let offset = ((2 + (hcode & 1)) << ndistbits) - 4
+				#expect(
+					offset + coded.extraBits + 1 == distance,
+					"distance \(distance)")
+			}
+			#expect(longCount > 4000)
+		}
+	}
+
+	/// The insert-and-copy symbols of a one-meta-block stream whose literal
+	/// and distance codes are simple, plus whether the distance code costs bits.
+	private static func commandSymbols(
+		for commands: [BrotliCommand]
+	) -> (symbols: [Int], distanceCodeIsDegenerate: Bool) {
+		var input = [UInt8]()
+		var noise = pseudoRandomBytes(200, seed: 71).map { $0 % 4 }[...]
+		for command in commands {
+			for _ in 0..<command.insertLength { input.append(noise.removeFirst()) }
+			for _ in 0..<command.copyLength {
+				input.append(input[input.count - command.distance])
+			}
+		}
+		var ring = BrotliDistanceRing()
+		var writer = BitWriter()
+		BrotliMetaBlock.writeCompressed(
+			input: input, range: 0..<input.count, commands: commands, isLast: true,
+			ring: &ring, to: &writer)
+		writer.zeroPadToByte()
+		var reader = BitReader(bytes: writer.take())
+		_ = reader.read(1 + 1 + 2 + 16 + 3 + 2 + 4 + 2 + 2)
+		func readSimpleCode(symbolBits: Int) -> [Int] {
+			#expect(reader.read(2) == 1)
+			let count = reader.read(2) + 1
+			let symbols = (0..<count).map { _ in reader.read(symbolBits) }
+			if count == 4 { _ = reader.read(1) }
+			return symbols
+		}
+		_ = readSimpleCode(symbolBits: 8)
+		let symbols = readSimpleCode(symbolBits: 10)
+		let distances = readSimpleCode(symbolBits: 6)
+		return (symbols, distances.count == 1)
+	}
+
+	@Test(
+		"a copy at the last distance is written implicitly when insert code < 8 and copy code < 16"
+	)
+	func implicitLastDistance() {
+		let implicit = Self.commandSymbols(for: [
+			BrotliCommand(insertLength: 6, copyLength: 54, distance: 4),
+			BrotliCommand(insertLength: 9, copyLength: 10, distance: 4),
+			BrotliCommand(insertLength: 3, copyLength: 0, distance: 0),
+		])
+		#expect(implicit.symbols.filter { $0 < 128 }.sorted() == [119, 120])
+		#expect(implicit.symbols.filter { $0 >= 128 }.count == 1)
+		#expect(implicit.distanceCodeIsDegenerate)
+
+		// Insert code 8 has no implicit form, so symbol 0 is written explicitly.
+		let explicit = Self.commandSymbols(for: [
+			BrotliCommand(insertLength: 10, copyLength: 8, distance: 4),
+			BrotliCommand(insertLength: 3, copyLength: 0, distance: 0),
+		])
+		#expect(explicit.symbols.allSatisfy { $0 >= 128 })
+	}
+
+	@Suite("prefix codes")
+	struct PrefixCodes {
+		@Test(
+			"code lengths stay within 15 bits and fill the code space exactly")
+		func depthLimitAndCompleteness() {
+			var fibonacci = [UInt32](repeating: 0, count: 704)
+			var (a, b): (UInt32, UInt32) = (1, 1)
+			for index in 0..<40 {
+				fibonacci[index * 3] = a
+				(a, b) = (b, a &+ b)
+			}
+			var random = [UInt32](repeating: 0, count: 256)
+			for (index, byte) in pseudoRandomBytes(256, seed: 6).enumerated() {
+				random[index] = UInt32(byte) + 1
+			}
+			var uniform = [UInt32](repeating: 7, count: 64)
+			uniform[3] = 0
+			for counts in [fibonacci, random, uniform, [5, 9, 1, 0, 3]] {
+				let code = BrotliPrefixCode.build(counts: counts)
+				#expect(code.depths.count == counts.count)
+				#expect(code.depths.max()! <= 15)
+				var space = 0
+				for (symbol, depth) in code.depths.enumerated() {
+					#expect((depth != 0) == (counts[symbol] != 0))
+					if depth != 0 { space += 1 << (15 - Int(depth)) }
+				}
+				#expect(space == 1 << 15)
+			}
+			let skewed = BrotliPrefixCode.build(counts: fibonacci)
+			#expect(skewed.depths.max()! > 10)
+		}
+
+		@Test(
+			"simple-code symbols use the bit width of the whole alphabet, not the largest symbol"
+		)
+		func simpleCodeSymbolWidth() {
+			for (alphabetSize, width) in [(256, 8), (704, 10), (64, 6)] {
+				for used in [[1, 2], [1, 2, 3], [1, 2, 3, 4]] {
+					var counts = [UInt32](repeating: 0, count: alphabetSize)
+					for (rank, symbol) in used.enumerated() {
+						counts[symbol] = UInt32(10 + rank)
+					}
+					let code = BrotliPrefixCode.build(counts: counts)
+					var writer = BitWriter()
+					BrotliPrefixCode.write(
+						code, alphabetSize: alphabetSize, to: &writer)
+					let treeSelect = used.count == 4 ? 1 : 0
+					#expect(
+						writer.bitsWritten == 4 + used.count * width
+							+ treeSelect)
+					writer.zeroPadToByte()
+					var reader = BitReader(bytes: writer.take())
+					#expect(reader.read(2) == 1)
+					#expect(reader.read(2) == used.count - 1)
+					var decoded = [Int]()
+					for _ in used { decoded.append(reader.read(width)) }
+					#expect(Set(decoded) == Set(used))
+					if used.count == 3 {
+						// §3.4: lengths "1, 2, 2 in the order they appear", so the most
+						// frequent symbol comes first.
+						#expect(decoded[0] == used[2])
+					}
+				}
+			}
+		}
+
+		@Test("a code over more than four symbols is written as a complex code")
+		func complexCodeIsWritten() {
+			var counts = [UInt32](repeating: 0, count: 256)
+			for (index, byte) in pseudoRandomBytes(256, seed: 6).enumerated() {
+				counts[index] = UInt32(byte) + 1
+			}
+			let code = BrotliPrefixCode.build(counts: counts)
+			var writer = BitWriter()
+			BrotliPrefixCode.write(code, alphabetSize: 256, to: &writer)
+			let bits = writer.bitsWritten
+			writer.zeroPadToByte()
+			var reader = BitReader(bytes: writer.take())
+			#expect([0, 2, 3].contains(reader.read(2)))  // HSKIP, never 1
+			#expect(bits > 256)
+			var truncated = BitWriter()
+			counts[255] = 0
+			let shorter = BrotliPrefixCode.build(counts: counts)
+			BrotliPrefixCode.write(shorter, alphabetSize: 256, to: &truncated)
+			#expect(truncated.bitsWritten != bits)
+		}
+
+		@Test(
+			"an empty or one-symbol histogram gives a degenerate code that costs no bits per symbol"
+		)
+		func degenerateCodes() {
+			var counts = [UInt32](repeating: 0, count: 704)
+			let empty = BrotliPrefixCode.build(counts: counts)
+			#expect(empty.isDegenerate)
+			counts[300] = 12
+			let single = BrotliPrefixCode.build(counts: counts)
+			#expect(single.isDegenerate)
+			#expect(single.depths[300] != 0)
+			for (code, symbol) in [(empty, 0), (single, 300)] {
+				var writer = BitWriter()
+				BrotliPrefixCode.write(code, alphabetSize: 704, to: &writer)
+				#expect(writer.bitsWritten == 4 + 10)
+				writer.zeroPadToByte()
+				var reader = BitReader(bytes: writer.take())
+				#expect(reader.read(2) == 1)
+				#expect(reader.read(2) == 0)
+				#expect(reader.read(10) == symbol)
+			}
+		}
+	}
+
+	@Suite("backward references")
+	struct References {
+		/// Reproduces `range` of `input` from the commands alone.
+		private static func replay(
+			_ commands: [BrotliCommand], input: [UInt8], from start: Int
+		) -> [UInt8] {
+			var output = Array(input[..<start])
+			var position = start
+			for command in commands {
+				output += input[position..<position + command.insertLength]
+				position += command.insertLength
+				if command.copyLength > 0 {
+					for _ in 0..<command.copyLength {
+						output.append(
+							output[output.count - command.distance])
+					}
+					position += command.copyLength
+				}
+			}
+			return output
+		}
+
+		private static let repetitiveText: [UInt8] = {
+			let sentence = Array("a stitch in time saves nine; ".utf8)
+			return (0..<50).flatMap { round in
+				sentence + pseudoRandomBytes(3 + round % 5, seed: UInt64(round))
+			}
+		}()
+
+		@Test("replaying the commands reproduces the input range")
+		func commandsReplay() {
+			for input in corpus.map(\.bytes) where !input.isEmpty {
+				var finder = BrotliMatchFinder(
+					input: input, windowSize: BrotliEncoder.windowSize)
+				let commands = finder.commands(for: 0..<input.count)
+				#expect(Self.replay(commands, input: input, from: 0) == input)
+			}
+			let input = Self.repetitiveText
+			var finder = BrotliMatchFinder(
+				input: input, windowSize: BrotliEncoder.windowSize)
+			let commands = finder.commands(for: 0..<input.count)
+			#expect(commands.contains { $0.copyLength > 0 })
+		}
+
+		@Test(
+			"no copy reaches beyond the window or before the input start, and every copy is at least 2 bytes"
+		)
+		func copiesStayInWindow() {
+			let chunk = pseudoRandomBytes(40, seed: 21)
+			let input = chunk + pseudoRandomBytes(300, seed: 22) + chunk + chunk
+			for windowSize in [64, 200, 1000] {
+				var finder = BrotliMatchFinder(input: input, windowSize: windowSize)
+				let commands = finder.commands(for: 0..<input.count)
+				var position = 0
+				var copies = 0
+				for command in commands {
+					position += command.insertLength
+					if command.copyLength > 0 {
+						copies += 1
+						#expect(command.copyLength >= 2)
+						#expect(command.distance >= 1)
+						#expect(command.distance <= position)
+						#expect(command.distance <= windowSize)
+						position += command.copyLength
+					}
+				}
+				#expect(position == input.count)
+				#expect(copies >= 1)
+				#expect(Self.replay(commands, input: input, from: 0) == input)
+			}
+			// The distant first chunk is out of reach of the small windows only.
+			var small = BrotliMatchFinder(input: input, windowSize: 64)
+			#expect(
+				!small.commands(for: 0..<input.count).contains {
+					$0.copyLength >= 40 && $0.distance > 300
+				})
+			var large = BrotliMatchFinder(input: input, windowSize: 1000)
+			#expect(
+				large.commands(for: 0..<input.count).contains {
+					$0.copyLength >= 40 && $0.distance > 300
+				})
+		}
+
+		@Test("copies may reach back into earlier meta-blocks")
+		func crossMetaBlockCopies() {
+			let block = pseudoRandomBytes(1000, seed: 31)
+			let input = block + block
+			var finder = BrotliMatchFinder(
+				input: input, windowSize: BrotliEncoder.windowSize)
+			let first = finder.commands(for: 0..<1500)
+			let second = finder.commands(for: 1500..<2000)
+			#expect(first.reduce(0) { $0 + $1.insertLength + $1.copyLength } == 1500)
+			#expect(first.contains { $0.distance == 1000 && $0.copyLength == 500 })
+			#expect(second.reduce(0) { $0 + $1.insertLength + $1.copyLength } == 500)
+			#expect(second.contains { $0.distance == 1000 && $0.copyLength >= 400 })
+			#expect(Self.replay(second, input: input, from: 1500) == input)
+		}
+
+		@Test("a copy may use exactly the window size as its distance, and no more")
+		func windowBoundary() {
+			let chunk = pseudoRandomBytes(40, seed: 51)
+			let input = chunk + pseudoRandomBytes(60, seed: 52) + chunk
+			var exact = BrotliMatchFinder(input: input, windowSize: 100)
+			#expect(
+				exact.commands(for: 0..<input.count).contains { $0.distance == 100 }
+			)
+			var short = BrotliMatchFinder(input: input, windowSize: 99)
+			#expect(
+				short.commands(for: 0..<input.count).allSatisfy {
+					$0.copyLength == 0
+				})
+		}
+
+		@Test("a short match is deferred when the next position starts a much longer one")
+		func lazyMatching() {
+			let long = pseudoRandomBytes(40, seed: 41)
+			let marker: UInt8 = 0xFE
+			var decoy = [marker] + long[0..<3]
+			decoy.append(long[3] &+ 1)
+			let input = long + decoy + [marker] + long
+			var finder = BrotliMatchFinder(
+				input: input, windowSize: BrotliEncoder.windowSize)
+			let commands = finder.commands(for: 0..<input.count)
+			let copies = commands.filter { $0.copyLength > 0 }
+			#expect(copies.map(\.copyLength) == [40])
+			#expect(copies.first?.distance == input.count - 40)
+			#expect(
+				commands.reduce(0) { $0 + $1.insertLength + $1.copyLength }
+					== input.count)
+		}
+	}
+
+	@Suite("size bound")
+	struct SizeBound {
+		@Test(
+			"incompressible input of N bytes takes at most N + 3 per 64 KiB meta-block + 1 bytes"
+		)
+		func incompressibleInputBound() {
+			for count in [0, 1, 2, 100, 65535, 65536, 65537, 131_072, 300 * 1024] {
+				let input = pseudoRandomBytes(count, seed: UInt64(count))
+				let size = BrotliEncoder.compress(input).count
+				let metaBlocks = (count + 65535) / 65536
+				#expect(
+					size <= count + 3 * metaBlocks + 1,
+					"\(count) bytes gave \(size)")
+			}
+		}
+
+		@Test(
+			"writing the smaller form advances the distance ring only when the compressed form is kept"
+		)
+		func rejectedTrialKeepsRing() {
+			// Eight bytes with one copy of four: the compressed form's code tables
+			// cost more than the copy saves.
+			let small = pseudoRandomBytes(8, seed: 61)
+			let input = small + small[0..<4]
+			let commands = [
+				BrotliCommand(insertLength: 8, copyLength: 4, distance: 8)
+			]
+			var ring = BrotliDistanceRing()
+			var writer = BitWriter()
+			BrotliMetaBlock.writeSmaller(
+				input: input, range: 0..<input.count, commands: commands,
+				isLast: true,
+				ring: &ring, to: &writer)
+			#expect(ring == BrotliDistanceRing())
+			#expect(writer.bitsWritten == 24 + 8 * input.count + 8)
+
+			let sentence = Array("a stitch in time saves nine; ".utf8)
+			let repetitive = (0..<500).flatMap { _ in sentence }
+			var finder = BrotliMatchFinder(
+				input: repetitive, windowSize: BrotliEncoder.windowSize)
+			let repeated = finder.commands(for: 0..<repetitive.count)
+			var kept = BrotliDistanceRing()
+			var compressed = BitWriter()
+			BrotliMetaBlock.writeSmaller(
+				input: repetitive, range: 0..<repetitive.count, commands: repeated,
+				isLast: false, ring: &kept, to: &compressed)
+			#expect(kept != BrotliDistanceRing())
+			#expect(compressed.bitsWritten < 8 * repetitive.count / 10)
+		}
+
+		@Test("the smaller form is chosen at bit precision from any starting bit")
+		func smallerFormIsExact() {
+			for seed in 0..<240 {
+				let count = 2 + seed / 8
+				let alphabet = 1 + seed % 8
+				let input = pseudoRandomBytes(count, seed: UInt64(seed + 100)).map {
+					UInt8($0 % UInt8(alphabet))
+				}
+				var finder = BrotliMatchFinder(
+					input: input, windowSize: BrotliEncoder.windowSize)
+				let commands = finder.commands(for: 0..<count)
+				for isLast in [false, true] {
+					for offset in 0..<8 {
+						func prefixed() -> BitWriter {
+							var writer = BitWriter()
+							writer.write(offset, 0)
+							return writer
+						}
+						var compressed = prefixed()
+						var ring = BrotliDistanceRing()
+						BrotliMetaBlock.writeCompressed(
+							input: input, range: 0..<count,
+							commands: commands, isLast: isLast,
+							ring: &ring, to: &compressed)
+						if isLast { compressed.zeroPadToByte() }
+						var plain = prefixed()
+						BrotliMetaBlock.writeUncompressed(
+							input[...], to: &plain)
+						if isLast {
+							BrotliMetaBlock.writeEmptyLast(to: &plain)
+						}
+						var chosen = prefixed()
+						var chosenRing = BrotliDistanceRing()
+						BrotliMetaBlock.writeSmaller(
+							input: input, range: 0..<count,
+							commands: commands, isLast: isLast,
+							ring: &chosenRing, to: &chosen)
+						if isLast { chosen.zeroPadToByte() }
+						#expect(
+							chosen.bitsWritten
+								== min(
+									compressed.bitsWritten,
+									plain.bitsWritten),
+							"seed \(seed) offset \(offset) last \(isLast)"
+						)
+					}
+				}
+			}
+		}
+
+		@Test("repetitive input compresses below a tenth of its size")
+		func repetitiveInputCompresses() {
+			let sentence = Array("a stitch in time saves nine; ".utf8)
+			let input = (0..<3000).flatMap { _ in sentence }
+			#expect(BrotliEncoder.compress(input).count * 10 < input.count)
+		}
+	}
+
+	@Suite("reference decoder")
+	struct ReferenceDecoder {
+		#if (os(macOS) && !targetEnvironment(macCatalyst)) || os(Linux)
+			@Test(
+				"Google's brotli decoder reproduces every corpus input exactly",
+				.enabled(
+					if: ExternalDecoder.binary(variable: "BROTLI_REFERENCE")
+						!= nil))
+			func roundTripsThroughReference() throws {
+				let reference = try #require(
+					ExternalDecoder.binary(variable: "BROTLI_REFERENCE"))
+				let peer = ExternalDecoder.binary(variable: "BROTLI_PEER_DECODER")
+				for input in corpus where !input.bytes.isEmpty {
+					// The same input with every meta-block compressed, so each simple-code
+					// shape is decoded whatever the size comparison chooses.
+					var writer = BitWriter()
+					BrotliMetaBlock.writeStreamHeader(to: &writer)
+					var finder = BrotliMatchFinder(
+						input: input.bytes,
+						windowSize: BrotliEncoder.windowSize)
+					var ring = BrotliDistanceRing()
+					var start = 0
+					while start < input.bytes.count {
+						let end = min(
+							start + BrotliEncoder.maxMetaBlockLength,
+							input.bytes.count)
+						BrotliMetaBlock.writeCompressed(
+							input: input.bytes, range: start..<end,
+							commands: finder.commands(for: start..<end),
+							isLast: end == input.bytes.count,
+							ring: &ring, to: &writer)
+						start = end
+					}
+					writer.zeroPadToByte()
+					let forced = try ExternalDecoder.referenceDecode(
+						writer.take(), binary: reference)
+					#expect(
+						forced == input.bytes,
+						"forced compressed: \(input.name)")
+				}
+				for input in corpus {
+					let stream = BrotliEncoder.compress(input.bytes)
+					let decoded = try ExternalDecoder.referenceDecode(
+						stream, binary: reference)
+					#expect(
+						decoded == input.bytes,
+						"reference decoder: \(input.name)")
+					if let peer {
+						let peerDecoded = try ExternalDecoder.peerDecode(
+							stream, binary: peer)
+						#expect(
+							peerDecoded == input.bytes,
+							"peer decoder: \(input.name)")
+					}
+				}
+			}
+		#endif
+
+		#if (os(macOS) && !targetEnvironment(macCatalyst)) || os(Linux)
+			@Test(
+				"a hand-built compressed meta-block with copies decodes, covering implicit, explicit, special and long distances",
+				.enabled(
+					if: ExternalDecoder.binary(variable: "BROTLI_REFERENCE")
+						!= nil))
+			func handBuiltCopies() throws {
+				let reference = try #require(
+					ExternalDecoder.binary(variable: "BROTLI_REFERENCE"))
+				let commands = [
+					BrotliCommand(
+						insertLength: 100, copyLength: 8, distance: 4),
+					BrotliCommand(insertLength: 4, copyLength: 8, distance: 4),
+					BrotliCommand(insertLength: 1, copyLength: 10, distance: 5),
+					BrotliCommand(insertLength: 12, copyLength: 5, distance: 5),
+					BrotliCommand(
+						insertLength: 3, copyLength: 40, distance: 100),
+					BrotliCommand(
+						insertLength: 2, copyLength: 70, distance: 100),
+					BrotliCommand(insertLength: 7, copyLength: 0, distance: 0),
+				]
+				var input = [UInt8]()
+				var noise = pseudoRandomBytes(200, seed: 11)[...]
+				for command in commands {
+					for _ in 0..<command.insertLength {
+						input.append(noise.removeFirst())
+					}
+					for _ in 0..<command.copyLength {
+						input.append(input[input.count - command.distance])
+					}
+				}
+				var ring = BrotliDistanceRing()
+				var writer = BitWriter()
+				BrotliMetaBlock.writeStreamHeader(to: &writer)
+				BrotliMetaBlock.writeCompressed(
+					input: input, range: 0..<input.count, commands: commands,
+					isLast: true,
+					ring: &ring, to: &writer)
+				writer.zeroPadToByte()
+				let decoded = try ExternalDecoder.referenceDecode(
+					writer.take(), binary: reference)
+				#expect(decoded == input)
+				var expected = BrotliDistanceRing()
+				expected.record(distance: 5, code: 4)
+				expected.record(distance: 100, code: 20)
+				#expect(ring == expected)
+			}
+		#endif
+	}
+}

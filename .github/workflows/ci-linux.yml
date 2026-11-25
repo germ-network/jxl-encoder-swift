@@ -46,11 +46,18 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ github.event.pull_request.head.sha || github.sha }}
+      - name: Install reference Brotli decoder
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends brotli
+          brotli --version
       - name: Build core
         run: swift build --target JXLEncoder
       - name: Build Dispatch adapter
         run: swift build --target JXLEncoderDispatch
       - name: Test core and Dispatch adapter
+        env:
+          BROTLI_REFERENCE: /usr/bin/brotli
         run: swift test --filter 'JXLEncoderTests|JXLEncoderDispatchTests'
 
   lint:
