@@ -99,10 +99,11 @@ enum SwiftSemanticEncoding {
 				groupX: $0 % dim.widthInGroups,
 				groupY: $0 / dim.widthInGroups, params: params)
 		}
-		var order = Encoder.computeCoeffOrder(computes, dim: dim)
-		altering.coeffOrder(&order)
-		let blockContextMap = Encoder.computeBlockContextMap(computes, params: params)
 		let plan = FramePlan(dim: dim, upsampling: params.upsampling)
+		var order = Encoder.computeCoeffOrder(computes, dim: dim, plan: plan)
+		altering.coeffOrder(&order)
+		let blockContextMap = Encoder.computeBlockContextMap(
+			computes, params: params, plan: plan)
 		acCode = EntropyCode(
 			contextMap: [UInt8](
 				repeating: 0,

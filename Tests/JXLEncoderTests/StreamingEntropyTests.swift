@@ -79,6 +79,36 @@ struct StreamingEntropyTests {
 		#endif
 	}
 
+	/// Groups whose content differs between the first eight (DC group 0) and
+	/// the last, so a frame-wide statistic differs from DC group 0's.
+	static func syntheticComputes(dim: ImageDim) -> [Encoder.ACGroupCompute] {
+		(0..<dim.groupCount).map { index in
+			let groupX = index % dim.widthInGroups
+			let groupY = index / dim.widthInGroups
+			let blocks = 32 * 32
+			let inLaterDCGroup = groupX >= 8
+			let coefficients = (0..<3).map { channel in
+				(0..<blocks * 64).map { offset -> Int32 in
+					let position = offset % 64
+					let block = offset / 64
+					if inLaterDCGroup {
+						return position >= 40 && (block + channel) % 3 != 0
+							? 1 : 0
+					}
+					return position < 12 && (block + position) % 2 == 0 ? 1 : 0
+				}
+			}
+			return Encoder.ACGroupCompute(
+				groupX: groupX, groupY: groupY, widthInBlocks: 32,
+				heightInBlocks: 32,
+				coefficients: coefficients,
+				rawDC: (0..<3).map { _ in [Float](repeating: 0, count: blocks) },
+				quantField: (0..<blocks).map {
+					inLaterDCGroup ? UInt8(1 + $0 % 40) : UInt8(1 + $0 % 3)
+				})
+		}
+	}
+
 	static func histogram(_ counts: [Int: UInt32]) -> Histogram {
 		var histogram = Histogram()
 		for (symbol, count) in counts {
@@ -352,14 +382,46 @@ struct StreamingEntropyTests {
 	// MARK: DC group 0 heuristics
 
 	@Test(
-		"the coefficient order comes from DC group 0 alone",
-		.disabled("pending implementation"))
-	func streamingCoeffOrderUsesDCGroupZeroOnly() throws {}
+		"the coefficient order comes from DC group 0 alone")
+	func streamingCoeffOrderUsesDCGroupZeroOnly() throws {
+		let dim = ImageDim(width: 2304, height: 256)
+		let params = try DistanceParams(distance: 1)
+		let computes = Self.syntheticComputes(dim: dim)
+		let plan = FramePlan(dim: dim, upsampling: 1)
+		let dcZero = computes.filter {
+			plan.histogramIndex(groupX: $0.groupX, groupY: $0.groupY) == 0
+		}
+		#expect(dcZero.count == 8)
+		let expected = Encoder.computeCoeffOrder(
+			dcZero, dim: ImageDim(width: 2048, height: 256))
+		let allGroups = Encoder.computeCoeffOrder(computes, dim: dim)
+		#expect(allGroups.orders != expected.orders)
+
+		let analysis = Encoder.analyzePixelFrame(
+			computes: computes, dim: dim, params: params, optimizeCodes: true)
+		#expect(analysis.coeffOrder.orders == expected.orders)
+		#expect(analysis.coeffOrder.isCustom == expected.isCustom)
+	}
 
 	@Test(
-		"the block context map comes from DC group 0 alone",
-		.disabled("pending implementation"))
-	func streamingBlockContextMapUsesDCGroupZeroOnly() throws {}
+		"the block context map comes from DC group 0 alone")
+	func streamingBlockContextMapUsesDCGroupZeroOnly() throws {
+		let dim = ImageDim(width: 2304, height: 256)
+		let params = try DistanceParams(distance: 1)
+		let computes = Self.syntheticComputes(dim: dim)
+		let plan = FramePlan(dim: dim, upsampling: 1)
+		let dcZero = computes.filter {
+			plan.histogramIndex(groupX: $0.groupX, groupY: $0.groupY) == 0
+		}
+		let expected = Encoder.computeBlockContextMap(dcZero, params: params)
+		let allGroups = Encoder.computeBlockContextMap(computes, params: params)
+		#expect(allGroups.contextMap != expected.contextMap)
+
+		let analysis = Encoder.analyzePixelFrame(
+			computes: computes, dim: dim, params: params, optimizeCodes: true)
+		#expect(analysis.blockContextMap?.contextMap == expected.contextMap)
+		#expect(analysis.blockContextMap?.numContexts == expected.numContexts)
+	}
 
 	// MARK: Per-DC-group AC histograms
 

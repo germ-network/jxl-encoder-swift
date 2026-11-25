@@ -236,11 +236,26 @@ public enum Encoder {
 			section: writer, rawDC: compute.rawDC, quantField: compute.quantField)
 	}
 
+	private static func dcGroupZeroComputes(
+		_ computes: [ACGroupCompute], plan: FramePlan
+	) -> [ACGroupCompute] {
+		guard case .streaming = plan else { return computes }
+		return computes.filter {
+			plan.histogramIndex(groupX: $0.groupX, groupY: $0.groupY) == 0
+		}
+	}
+
 	/// Reduces every group's coefficients into the frame-global zero
 	/// statistics `CoeffOrder` computes the transmitted order from.
+	///
+	/// A streaming frame computes its order once, from DC group 0 alone. The
+	/// small-image floor never applies there: a streaming frame has more than
+	/// eight groups, so DC group 0 is far above five blocks on a side.
 	static func computeCoeffOrder(
-		_ computes: [ACGroupCompute], dim: ImageDim
+		_ allComputes: [ACGroupCompute], dim: ImageDim,
+		plan: FramePlan = .oneShot
 	) -> CoeffOrder.Result {
+		let computes = dcGroupZeroComputes(allComputes, plan: plan)
 		var counts = [CoeffOrder.ZeroCounts](repeating: CoeffOrder.ZeroCounts(), count: 3)
 		var sampler = CoeffOrder.Sampler()
 		for compute in computes.sorted(by: {
@@ -258,9 +273,13 @@ public enum Encoder {
 			heightInBlocks: dim.heightInBlocks)
 	}
 
+	/// libjxl builds the model from DC group 0's quant field only when it
+	/// streams.
 	static func computeBlockContextMap(
-		_ computes: [ACGroupCompute], params: DistanceParams
+		_ allComputes: [ACGroupCompute], params: DistanceParams,
+		plan: FramePlan = .oneShot
 	) -> JPEGBlockContextMap.Result {
+		let computes = dcGroupZeroComputes(allComputes, plan: plan)
 		var quantCounts = [Int](repeating: 0, count: 256)
 		for compute in computes {
 			for quant in compute.quantField { quantCounts[Int(quant) - 1] += 1 }
@@ -347,9 +366,11 @@ public enum Encoder {
 		let plan = FramePlan(dim: dim, upsampling: params.upsampling)
 		var acCode = EntropyCode.staticAC
 		let coeffOrder: CoeffOrder.Result =
-			optimizeCodes ? computeCoeffOrder(computes, dim: dim) : .identity
+			optimizeCodes
+			? computeCoeffOrder(computes, dim: dim, plan: plan) : .identity
 		let blockContextMap =
-			optimizeCodes ? computeBlockContextMap(computes, params: params) : nil
+			optimizeCodes
+			? computeBlockContextMap(computes, params: params, plan: plan) : nil
 		let sets = plan.histogramSetCount
 		if let blockContextMap {
 			acCode = EntropyCode(
