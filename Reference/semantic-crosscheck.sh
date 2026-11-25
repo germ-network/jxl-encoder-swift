@@ -68,6 +68,9 @@ JXL_CROSSCHECK_ELIGIBLE_INPUT="$OUT/pixel_lifecycle_2057x257.ppm" \
   swift test --skip-build --filter 'SemanticCrossCheckTests.write'
 "$HARNESS" dump "$OUT/swift_2057x257.jxl" entropy_layout \
   > "$OUT/swift_2057x257.layout.sem"
+for name in reference_2057x257 swift_2057x257; do
+  "$HARNESS" dump "$OUT/$name.jxl" ac_entropy > "$OUT/$name.ac.sem"
+done
 "$HARNESS" dump "$OUT/swift_2057x521.jxl" coeff_order block_context \
   > "$OUT/swift_2057x521.layout.sem"
 "$HARNESS" encode "$HERE/../Tests/JXLEncoderTests/Fixtures/semantic/pixel_lifecycle_2057x521.ppm" 1 \

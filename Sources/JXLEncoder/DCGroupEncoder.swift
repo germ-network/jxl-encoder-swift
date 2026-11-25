@@ -419,6 +419,8 @@ public enum DCGroupEncoder {
 	}
 
 	static func localStreams(data: DCGroupData) throws -> LocalStreams {
+		// Local trees never split on the stream id, so the placeholder ids below
+		// are not observable.
 		let trees = ContextTree.prepareLocal(group: data)
 		func stream(_ tree: ContextTree.Prepared, _ tokens: [Token]) -> LocalStreams.Stream
 		{

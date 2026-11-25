@@ -479,25 +479,49 @@ struct StreamingEntropyTests {
 		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 126) == 2)
 		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 128) == 0)
 
-		// Every context of every set differs, so each set uses all its budget.
-		var sections = Self.stagedSets(setCount: 3, contextsPerSet: 200) { set, context in
-			(0..<40).map {
-				UInt32(
-					$0 % 2 == 0
-						? (context + set) % 50 : (context * 7 + set) % 50)
-			}
+		// Every context is a distinct pair of symbols at least 48 bits from the
+		// others, so each set promotes its whole budget. After renumbering by
+		// first use, the histograms first appearing in a set's slice are the
+		// new ones it added.
+		let pairs = (0..<16).flatMap { a in ((a + 1)..<16).map { (a, $0) } }
+		var sections = Self.stagedSets(setCount: 3, contextsPerSet: 40) { set, context in
+			let (a, b) = pairs[set * 40 + context]
+			return (0..<60).flatMap { _ in [UInt32(a), UInt32(b)] }
 		}
 		let code = SectionOptimizer.optimizeStreaming(
 			sections: &sections, range: 0..<3, histogramSetCount: 3,
-			contextsPerSet: 200)
-		let count = code.ansHistograms?.count ?? code.prefixCodeCount
-		var budget = 1
-		for _ in 0..<3 {
-			budget += SectionOptimizer.streamingClusterBudget(
-				previousHistograms: budget)
+			contextsPerSet: 40)
+		var seen = Set<UInt8>()
+		var added: [Int] = []
+		for set in 0..<3 {
+			let before = seen.count
+			seen.formUnion(code.contextMap[(set * 40)..<((set + 1) * 40)])
+			added.append(seen.count - before)
 		}
-		#expect(count <= budget)
-		#expect(count > 31)
+		#expect(added == [31, 24, 18])
+	}
+
+	@Test("a flat frame above eight groups codes every set with prefix codes and decodes")
+	func flatFrameUsesPrefixCodesAcrossSets() throws {
+		var sections = Self.stagedSets(setCount: 2, contextsPerSet: 6) { _, context in
+			context < 3 ? [UInt32(context), 0] : []
+		}
+		let code = SectionOptimizer.optimizeStreaming(
+			sections: &sections, range: 0..<2, histogramSetCount: 2, contextsPerSet: 6)
+		#expect(code.ansHistograms == nil)
+		#expect(code.contextMap.count == 12)
+		#expect(code.prefixCodeCount == Set(code.contextMap).count)
+
+		let flat = try ImageBuffer(
+			width: 2304, height: 256,
+			samples: [UInt8](repeating: 128, count: 2304 * 256 * 3))
+		let bytes = try Encoder.encode(flat, distance: 1)
+		#if canImport(ImageIO)
+			let source = try #require(
+				CGImageSourceCreateWithData(Data(bytes) as CFData, nil))
+			let image = try #require(CGImageSourceCreateImageAtIndex(source, 0, nil))
+			#expect(image.width == 2304 && image.height == 256)
+		#endif
 	}
 
 	@Test(

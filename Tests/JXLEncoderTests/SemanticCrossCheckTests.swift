@@ -303,11 +303,20 @@ struct SemanticCrossCheckTests {
 				try integers(swift, field) == (try integers(reference, field)),
 				"\(field)")
 		}
-		// Two contexts of DC group 0 (histogram set 0 spans entries 0..<2970),
-		// holding five and two tokens, are assigned to a different one of
-		// several near-equal clusters than in the reference. libjxl's own
-		// clustering run on Swift's set-0 histograms reproduces Swift's map,
-		// so the difference lies in those contexts' input, not the algorithm.
+		// The encoded histograms are identical, so the same ANS tables and
+		// alphabet lengths are transmitted.
+		let referenceCode = try Self.layout(
+			"reference_2057x257", suffix: "ac", in: directory)
+		let swiftCode = try Self.layout("swift_2057x257", suffix: "ac", in: directory)
+		#expect(!referenceCode.fields.isEmpty)
+		#expect(referenceCode.fields == swiftCode.fields)
+		// Two contexts of DC group 0 (set 0 spans entries 0..<2970) differ from
+		// the reference. libjxl's streaming clustering run on Swift's own staged
+		// tokens reproduces Swift's whole map, and the quant field, coefficient
+		// order, block map and every ANS table match, so the difference is in
+		// the quantized AC tokens feeding clustering: lane 3's cropped AC
+		// computation or the quantizer skips. These indices stop differing
+		// when that lands.
 		let referenceMap = try integers(reference, "entropy_layout.ac.context_map")
 		let swiftMap = try integers(swift, "entropy_layout.ac.context_map")
 		#expect(referenceMap.count == swiftMap.count)
@@ -348,10 +357,13 @@ struct SemanticCrossCheckTests {
 		#expect(Set(swift.fields.keys) == Set(reference.fields.keys))
 	}
 
-	static func layout(_ name: String, in directory: URL) throws -> SemanticDump {
+	static func layout(
+		_ name: String, suffix: String = "layout", in directory: URL
+	) throws -> SemanticDump {
 		try SemanticDump(
 			parsing: String(
-				contentsOf: directory.appendingPathComponent(name + ".layout.sem"),
+				contentsOf: directory.appendingPathComponent(
+					name + "." + suffix + ".sem"),
 				encoding: .utf8))
 	}
 
