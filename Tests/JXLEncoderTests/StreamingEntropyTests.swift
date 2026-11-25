@@ -9,6 +9,14 @@ import Testing
 /// the one-shot coding, which the existing byte-equality tests pin.
 @Suite("Streaming entropy")
 struct StreamingEntropyTests {
+	static func histogram(_ counts: [Int: UInt32]) -> Histogram {
+		var histogram = Histogram()
+		for (symbol, count) in counts {
+			for _ in 0..<count { histogram.add(UInt32(symbol)) }
+		}
+		return histogram
+	}
+
 	// MARK: One-context codes
 
 	@Test(
@@ -38,29 +46,108 @@ struct StreamingEntropyTests {
 	// MARK: Clustering against earlier DC groups
 
 	@Test(
-		"the first new cluster is always promoted, from the context farthest by KL",
-		.disabled("pending implementation"))
-	func fastClusterStartsFromFarthestByKLDivergence() throws {}
+		"the first new cluster is always promoted, from the context farthest by KL")
+	func fastClusterStartsFromFarthestByKLDivergence() throws {
+		let previous = [Self.histogram([0: 500, 1: 500])]
+		let input = [
+			Self.histogram([0: 90, 1: 90]),
+			Self.histogram([10: 20, 11: 20]),
+			Self.histogram([0: 40, 1: 40]),
+		]
+		let far = HistogramCluster.fastCluster(
+			input, maxHistograms: 1, previous: previous)
+		#expect(far.symbols == [0, 1, 0])
+		#expect(far.clusters.count == 1)
+
+		// Every context already matches the earlier histogram, so no
+		// divergence is positive and the largest context starts the cluster.
+		let same = [
+			Self.histogram([0: 30, 1: 30]), Self.histogram([0: 90, 1: 90]),
+			Self.histogram([0: 40, 1: 40]),
+		]
+		let fallback = HistogramCluster.fastCluster(
+			same, maxHistograms: 1, previous: previous)
+		#expect(fallback.symbols[1] == 1)
+	}
 
 	@Test(
-		"with no budget left every context goes to an earlier histogram",
-		.disabled("pending implementation"))
-	func exhaustedBudgetAssignsEveryContextToPrevious() throws {}
+		"with no budget left every context goes to an earlier histogram")
+	func exhaustedBudgetAssignsEveryContextToPrevious() throws {
+		let previous = [
+			Self.histogram([0: 500, 1: 500]), Self.histogram([10: 500, 11: 500]),
+		]
+		let input = [
+			Self.histogram([0: 9, 1: 11]), Histogram(),
+			Self.histogram([10: 7, 11: 5]),
+		]
+		let result = HistogramCluster.fastCluster(
+			input, maxHistograms: 0, previous: previous)
+		#expect(result.clusters.isEmpty)
+		#expect(result.symbols == [0, 0, 1])
+	}
 
 	@Test(
-		"contexts close to an earlier histogram reuse it by KL divergence",
-		.disabled("pending implementation"))
-	func fastClusterAssignsToPreviousByKLDivergence() throws {}
+		"contexts close to an earlier histogram reuse it by KL divergence")
+	func fastClusterAssignsToPreviousByKLDivergence() throws {
+		let previous = [
+			Self.histogram([0: 500, 1: 500]), Self.histogram([10: 500, 11: 500]),
+		]
+		let input = [
+			Self.histogram([10: 30, 11: 25]),
+			Self.histogram([0: 20, 1: 30]),
+			Self.histogram([10: 5, 11: 2]),
+			Self.histogram([30: 100]),
+		]
+		let result = HistogramCluster.fastCluster(
+			input, maxHistograms: 1, previous: previous)
+		#expect(result.symbols == [1, 0, 1, 2])
+		let missing = HistogramCluster.klDivergence(
+			Self.histogram([0: 4, 5: 4]), coding: previous[0])
+		#expect(missing == .infinity)
+		#expect(
+			HistogramCluster.klDivergence(
+				Self.histogram([0: 4, 1: 4]), coding: previous[0]) < 0.01)
+		#expect(
+			HistogramCluster.klDivergence(Histogram(), coding: previous[0]) == 0)
+		#expect(result.clusters.count == 1)
+	}
 
 	@Test(
-		"new clusters are numbered after previous ones and only they absorb counts",
-		.disabled("pending implementation"))
-	func fastClusterPromotesOnlyBeyondPrevious() throws {}
+		"new clusters are numbered after previous ones and only they absorb counts")
+	func fastClusterPromotesOnlyBeyondPrevious() throws {
+		let previous = [Self.histogram([0: 500, 1: 500])]
+		let input = [
+			Self.histogram([20: 1000]), Self.histogram([40: 1000, 41: 1000]),
+			Self.histogram([40: 10, 41: 10]), Self.histogram([0: 4, 1: 6]),
+		]
+		let result = HistogramCluster.fastCluster(
+			input, maxHistograms: 2, previous: previous)
+		#expect(result.clusters.count == 2)
+		#expect(Set(result.symbols[0...1]) == [1, 2])
+		#expect(result.symbols[2] == result.symbols[1])
+		#expect(result.symbols[3] == 0)
+		let absorbed = result.clusters[Int(result.symbols[1]) - 1]
+		#expect(absorbed.totalCount == 2020)
+		let untouched = result.clusters[Int(result.symbols[0]) - 1]
+		#expect(untouched.totalCount == 1000)
+	}
 
 	@Test(
-		"encoded histograms read back as ANS frequencies or 2^(15-depth)",
-		.disabled("pending implementation"))
-	func previousHistogramFromEncodedCodes() throws {}
+		"encoded histograms read back as ANS frequencies or 2^(15-depth)")
+	func previousHistogramFromEncodedCodes() throws {
+		var source = Self.histogram([0: 700, 1: 200, 2: 100])
+		source.computeBitCost()
+		let encoded = ANSEncodingHistogram.computeBest(
+			counts: source.counts, strategy: .fast)
+		let fromANS = Histogram(encodedANS: encoded)
+		#expect(fromANS.counts.map(Int.init) == encoded.normalizedCounts)
+		#expect(fromANS.totalCount == encoded.normalizedCounts.reduce(0, +))
+
+		let prefix = PrefixCode(depths: [1, 2, 0, 2], bits: [0, 1, 0, 3])
+		let fromPrefix = Histogram(encodedPrefix: prefix)
+		#expect(fromPrefix.counts == [16384, 8192, 0, 8192])
+		#expect(fromPrefix.totalCount == 32768)
+	}
 
 	// MARK: Local DC modular streams
 

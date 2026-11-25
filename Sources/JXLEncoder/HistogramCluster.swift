@@ -57,18 +57,27 @@ extension Histogram {
 	/// libjxl `Histogram::Flat(alphabetSize, 4096)`: the fixed histogram a
 	/// streaming frame's first DC group prepends (enc_ans.cc:1187-1213).
 	static func flat(alphabetSize: Int) -> Histogram {
-		preconditionFailure("not implemented")
+		let total = 4096
+		precondition(alphabetSize > 0 && alphabetSize <= total)
+		var histogram = Histogram()
+		histogram.counts = (0..<alphabetSize).map {
+			UInt32(total / alphabetSize + ($0 < total % alphabetSize ? 1 : 0))
+		}
+		histogram.totalCount = total
+		return histogram
 	}
 
 	/// libjxl `HistogramFromSymbolInfo` (enc_ans.cc ~692-707): what an
 	/// already-encoded histogram looks like to later clustering — ANS
 	/// normalized frequencies, or `2^(15 - depth)` per prefix-coded symbol.
 	init(encodedANS histogram: ANSEncodingHistogram) {
-		preconditionFailure("not implemented")
+		counts = histogram.normalizedCounts.map { UInt32($0) }
+		totalCount = histogram.normalizedCounts.reduce(0, +)
 	}
 
 	init(encodedPrefix code: PrefixCode) {
-		preconditionFailure("not implemented")
+		counts = code.depths.map { $0 == 0 ? 0 : UInt32(1) << UInt32(15 - Int($0)) }
+		totalCount = counts.reduce(0) { $0 + Int($1) }
 	}
 }
 
@@ -151,13 +160,87 @@ enum HistogramCluster {
 		guard !previous.isEmpty else {
 			return fastCluster(input, maxHistograms: maxHistograms)
 		}
-		preconditionFailure("not implemented")
+		var input = input
+		var previous = previous
+		for i in previous.indices { previous[i].computeBitCost() }
+		let unassigned = UInt32.max
+		var output: [Histogram] = []
+		var symbols = [UInt32](repeating: unassigned, count: input.count)
+		var dists = [Float](repeating: .greatestFiniteMagnitude, count: input.count)
+
+		var largest = 0
+		for i in 0..<input.count {
+			if input[i].totalCount == 0 {
+				symbols[i] = 0
+				dists[i] = 0
+				continue
+			}
+			input[i].computeBitCost()
+			if input[i].totalCount > input[largest].totalCount { largest = i }
+		}
+		for i in 0..<input.count where dists[i] != 0 {
+			for old in previous {
+				dists[i] = min(klDivergence(input[i], coding: old), dists[i])
+			}
+		}
+		if let farthest = dists.indices.max(by: { dists[$0] < dists[$1] }),
+			dists[farthest] > 0
+		{
+			largest = farthest
+		}
+
+		while output.count < maxHistograms {
+			symbols[largest] = UInt32(previous.count + output.count)
+			output.append(input[largest])
+			dists[largest] = 0
+			largest = 0
+			for i in 0..<input.count where dists[i] != 0 {
+				let d = distance(input[i], output[output.count - 1])
+				dists[i] = min(d, dists[i])
+				if dists[i] > dists[largest] { largest = i }
+			}
+			if dists[largest] < minDistanceForDistinct { break }
+		}
+
+		for i in 0..<input.count where symbols[i] == unassigned {
+			var best = 0
+			var bestDistance = Float.greatestFiniteMagnitude
+			for j in 0..<(previous.count + output.count) {
+				let d =
+					j < previous.count
+					? klDivergence(input[i], coding: previous[j])
+					: distance(input[i], output[j - previous.count])
+				if d < bestDistance {
+					best = j
+					bestDistance = d
+				}
+			}
+			if best >= previous.count {
+				output[best - previous.count].add(input[i])
+				output[best - previous.count].computeBitCost()
+			}
+			symbols[i] = UInt32(best)
+		}
+		return (output, symbols)
 	}
 
 	/// libjxl `HistogramKLDivergence` (enc_cluster.cc:108-133): bits lost coding
 	/// `actual` with a code already fitted to `coding`.
 	static func klDivergence(_ actual: Histogram, coding: Histogram) -> Float {
-		preconditionFailure("not implemented")
+		guard actual.totalCount != 0 else { return 0 }
+		guard coding.totalCount != 0 else { return .infinity }
+		var actual = actual
+		actual.computeBitCost()
+		let inverseTotal = 1.0 / Float(coding.totalCount)
+		var cost: Float = 0
+		for i in actual.counts.indices where actual.counts[i] != 0 {
+			let codingCount = i < coding.counts.count ? coding.counts[i] : 0
+			if codingCount == 0 { return .infinity }
+			cost +=
+				-(Float(actual.counts[i])
+				* FastMath.log2(Float(codingCount) * inverseTotal))
+		}
+		return cost - actual.bitCost
 	}
 
 	static func clusterBest(_ histograms: [Histogram]) -> (
