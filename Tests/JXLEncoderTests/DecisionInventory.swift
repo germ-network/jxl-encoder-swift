@@ -130,7 +130,7 @@ struct DecisionInventory {
 	/// planner files for this audit is added here in the same change.
 	static let replacementIssues: Set<String> = [
 		"GER-3386", "GER-3387", "GER-3388", "GER-3389", "GER-3392", "GER-3418",
-		"GER-3404", "GER-3419", "GER-3640",
+		"GER-3404", "GER-3419", "GER-3617", "GER-3640",
 	]
 
 	/// Id prefix for each inventoried source file; mirrors the table in
@@ -145,6 +145,7 @@ struct DecisionInventory {
 		"AT": "Sources/JXLEncoder/ACTokenizer.swift",
 		"AW": "Sources/JXLEncoder/ANSTokenWriter.swift",
 		"BC": "Sources/JXLEncoder/JPEGBlockContextMap.swift",
+		"BR": "Sources/JXLEncoder/BrotliEncoder.swift",
 		"BW": "Sources/JXLEncoder/BitWriter.swift",
 		"CO": "Sources/JXLEncoder/CoeffOrder.swift",
 		"CS": "Sources/JXLEncoder/ChromaSubsampling.swift",
@@ -643,6 +644,7 @@ enum SourceGroup: String, CaseIterable {
 		case .entropy:
 			return [
 				"ANSCoder", "ANSHistogramWriter", "ANSTokenWriter", "BitWriter",
+				"BrotliEncoder",
 				"CoeffOrder",
 				"EntropyCode", "EntropyCodeWriter", "EntropyDiagnostics",
 				"HistogramCluster",
