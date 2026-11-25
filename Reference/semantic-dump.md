@@ -328,8 +328,7 @@ coefficient-stage observations as absolute-group/channel-major AC and
 full-frame channel-major DC arrays. Pixel semantic tests compare every Swift
 AC and DC integer against these observations after sorting lifecycle metadata
 by absolute group ID and mapping AC groups into full-frame coordinates.
-Expected per-channel divergences are isolated under GER-3387 and, for
-`flower_1024` AC, GER-3419. Separate synthetic values continue to verify
+Expected per-channel divergences are isolated under GER-3387. Separate synthetic values continue to verify
 placement of channel, group, and block identity; metadata checks full-frame
 group extents and lifecycle.
 

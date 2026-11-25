@@ -325,10 +325,27 @@ struct PixelSemanticFixtureTests {
 			#expect(
 				upstreamDC.count == dimension.widthInBlocks
 					* dimension.heightInBlocks * 3)
+			let cropSensitive = Self.cropSensitiveBlocks(dimension)
+			#expect(
+				cropSensitive.count
+					== (name == "flower_1024" ? 255 : 453))
 			for channel in 0..<3 {
-				let acIssues =
-					name == "flower_1024"
-					? ["GER-3387", "GER-3419"] : ["GER-3387"]
+				for block in cropSensitive {
+					let offset =
+						(block.row * dimension.widthInBlocks + block.col)
+						* 64
+					#expect(
+						swift.ac[channel][offset..<(offset + 64)]
+							== expectedAC[channel][
+								offset..<(offset + 64)],
+						"\(name)#ac.c\(channel) crop-sensitive block \(block) (a GER-3387 rounding diff can also land here)"
+					)
+				}
+			}
+			for channel in 0..<3 {
+				// Remaining AC diffs are quantization rounding; patch-border consumers
+				// are gated off at e4 (Reference/streaming-crop-evidence.md).
+				let acIssues = ["GER-3387"]
 				let acDifferences = zip(swift.ac[channel], expectedAC[channel])
 					.enumerated().filter { $0.element.0 != $0.element.1 }
 				let acDifferenceCount = acDifferences.count
@@ -367,6 +384,47 @@ struct PixelSemanticFixtureTests {
 				#expect(Array(actualChannelDC) == Array(expectedChannelDC))
 			}
 		}
+	}
+
+	struct BlockIndex: Hashable, CustomStringConvertible {
+		let row: Int
+		let col: Int
+		var description: String { "(row \(row), col \(col))" }
+	}
+
+	/// Blocks where streaming patch geometry acts (kBlockDim border,
+	/// group_rect offset and rounding, edge padding): both sides of each
+	/// interior DC-group boundary and the last block row and column.
+	static func cropSensitiveBlocks(_ dimension: ImageDim) -> [BlockIndex] {
+		let step = Geometry.dcGroupDim / Geometry.blockDim
+		let cols = dimension.widthInBlocks
+		let rows = dimension.heightInBlocks
+		var columns = Set([cols - 1])
+		var rowSet = Set([rows - 1])
+		for boundary in stride(from: step, to: cols, by: step) {
+			columns.formUnion([boundary - 1, boundary])
+		}
+		for boundary in stride(from: step, to: rows, by: step) {
+			rowSet.formUnion([boundary - 1, boundary])
+		}
+		var blocks = Set<BlockIndex>()
+		for row in 0..<rows {
+			for col in 0..<cols
+			where columns.contains(col) || rowSet.contains(row) {
+				blocks.insert(BlockIndex(row: row, col: col))
+			}
+		}
+		return blocks.sorted { ($0.row, $0.col) < ($1.row, $1.col) }
+	}
+
+	@Test("crop-sensitive blocks cover DC-group boundaries on both axes")
+	func cropSensitiveBlocksCoverBothAxes() {
+		let blocks = Set(
+			Self.cropSensitiveBlocks(ImageDim(width: 2057, height: 2100)))
+		#expect(blocks.count == 1554)
+		#expect(blocks.contains(BlockIndex(row: 256, col: 0)))
+		#expect(blocks.contains(BlockIndex(row: 262, col: 100)))
+		#expect(!blocks.contains(BlockIndex(row: 254, col: 0)))
 	}
 
 	@Test("full-frame coefficient placement preserves channel, group, and block identity")
