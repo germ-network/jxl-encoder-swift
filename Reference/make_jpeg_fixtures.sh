@@ -131,7 +131,16 @@ cjpeg -rgb -quality 90 -icc "$HERE/fixtures/Display-P3.icc" -outfile "$CORE/rgb_
 python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 4 "$HERE/fixtures/Display-P3-desc4.icc"
 python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 3300 "$HERE/fixtures/Display-P3-desc3300.icc"
 python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 1000 "$HERE/fixtures/Display-P3-desc1000.icc"
-python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 40000 "$HERE/fixtures/Display-P3-random40000.icc" 1
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 0 "$HERE/fixtures/Display-P3-random40000.icc" 1 40000 0
+# N=3300 repeats behind 122 or 121 random characters straddle the reader's
+# 256:1 limit at the 65,536-byte checkpoint; 200 random characters after the
+# repeats leave the total above the limit while the checkpoint is below it.
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 3300 "$HERE/fixtures/Display-P3-ratio-below.icc" 1 122 0
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 3300 "$HERE/fixtures/Display-P3-ratio-above.icc" 1 121 0
+python3 "$HERE/make_desc_icc.py" "$HERE/fixtures/Display-P3.icc" 3300 "$HERE/fixtures/Display-P3-ratio-late.icc" 1 0 200
+for edge in below above late; do
+	cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-ratio-$edge.icc" -outfile "$CORE/p3_ratio_${edge}_420.jpg" "$WORK/colors.ppm"
+done
 cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-desc1000.icc" -outfile "$CORE/p3_desc1000_profile_420.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-random40000.icc" -outfile "$CORE/p3_random40000_profile_420.jpg" "$WORK/colors.ppm"
 cjpeg -quality 90 -sample 2x2 -icc "$HERE/fixtures/Display-P3-desc4.icc" -outfile "$CORE/p3_desc4_profile.jpg" "$WORK/colors.ppm"

@@ -237,6 +237,19 @@ enum ICCCodec {
 		transformedSize < 16_384 ? .optimal : .lz77
 	}
 
+	/// One token per transformed byte, in the context the reader will decode it
+	/// with (`ICCANSContext(i, stream[i - 1], stream[i - 2])`).
+	static func tokens(_ stream: [UInt8]) -> [Token] {
+		stream.indices.map { i in
+			Token(
+				context: UInt32(
+					context(
+						index: i, previous: i > 0 ? stream[i - 1] : 0,
+						previousPrevious: i > 1 ? stream[i - 2] : 0)),
+				value: UInt32(stream[i]))
+		}
+	}
+
 	/// Whether libjxl's ICC reader accepts a stream that has decoded `symbols`
 	/// transformed bytes (a multiple of 65,536) from `bits` coded bits since
 	/// the length field. It fails any stream coded more than 256:1 at such a
@@ -257,16 +270,8 @@ enum ICCCodec {
 		var coded = writer
 		let base = coded.bitsWritten
 		coded.writeU64(UInt64(stream.count))
-		let tokens = stream.indices.map { i in
-			Token(
-				context: UInt32(
-					context(
-						index: i, previous: i > 0 ? stream[i - 1] : 0,
-						previousPrevious: i > 1 ? stream[i - 2] : 0)),
-				value: UInt32(stream[i]))
-		}
 		let prepared = EntropyCodeWriter.prepare(
-			tokens, contextCount: contextCount,
+			tokens(stream), contextCount: contextCount,
 			parameters: HistogramParameters(
 				lz77Method: lz77Method(transformedSize: stream.count),
 				forcesPrefixCodes: true))

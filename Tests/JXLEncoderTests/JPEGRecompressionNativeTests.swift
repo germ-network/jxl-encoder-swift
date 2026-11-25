@@ -17,12 +17,15 @@
 			"lz77-p3": ("p3_desc4_profile", 1),
 			"kLZ77": ("p3_desc1000_profile_420", 1),
 			"random": ("p3_random40000_profile_420", 1),
+			"ratio-above": ("p3_ratio_above_420", 1),
 		]
 
 		@Test(
 			"libjxl recovers the exact profile, coefficients and quantizers",
 			.enabled(if: CoeffOrderNativeIntegrationTests.harness != nil),
-			arguments: ["ycbcr-p3", "rgb-p3", "lz77-p3", "kLZ77", "random"],
+			arguments: [
+				"ycbcr-p3", "rgb-p3", "lz77-p3", "kLZ77", "random", "ratio-above",
+			],
 			[true, false])
 		func witnessRecoversProfileCoefficientsAndQuantizers(
 			fixture: String, optimizeCodes: Bool

@@ -328,13 +328,23 @@ extension PortableJPEGRecompressionTests {
 
 	@Test("a profile libjxl's ICC reader would reject declines to nil")
 	func overcompressedProfileDeclines() throws {
-		let jpeg = try JPEGParserTests.fixture("p3_desc3300_profile_420")
-		let image = try JPEGParser.parse(jpeg)
-		#expect(try #require(image.iccProfile).count > 65_519)
-		#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation) {
-			try JPEGTranscode(image)
+		for fixture in [
+			"p3_desc3300_profile_420", "p3_ratio_below_420", "p3_ratio_late_420",
+		] {
+			let jpeg = try JPEGParserTests.fixture(fixture)
+			let image = try JPEGParser.parse(jpeg)
+			#expect(try #require(image.iccProfile).count > 65_519, "\(fixture)")
+			#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation)
+			{
+				try JPEGTranscode(image)
+			}
+			#expect(Encoder.recompressJPEG(jpeg) == nil, "\(fixture)")
 		}
-		#expect(Encoder.recompressJPEG(jpeg) == nil)
+	}
+
+	@Test("a profile just inside the reader's compression limit recompresses")
+	func profileJustInsideReaderLimitRecompresses() throws {
+		try Self.expectProfiled("p3_ratio_above_420")
 	}
 
 	@Test("a small profile whose coded ICC enables optimal LZ77 recompresses")

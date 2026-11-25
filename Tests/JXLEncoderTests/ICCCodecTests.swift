@@ -421,6 +421,28 @@ struct ICCCodecTests {
 		}
 	}
 
+	@Test("each token's context follows the two bytes before it, in that order")
+	func tokensUseTheReadersContexts() throws {
+		let stream = ICCCodec.predict(try Self.displayP3())
+		let tokens = ICCCodec.tokens(stream)
+		#expect(tokens.count == stream.count)
+		var differsWhenSwapped = false
+		for i in 129..<stream.count {
+			let expected = ICCCodec.context(
+				index: i, previous: stream[i - 1], previousPrevious: stream[i - 2])
+			#expect(Int(tokens[i].context) == expected, "index \(i)")
+			#expect(tokens[i].value == UInt32(stream[i]))
+			differsWhenSwapped =
+				differsWhenSwapped
+				|| expected
+					!= ICCCodec.context(
+						index: i, previous: stream[i - 2],
+						previousPrevious: stream[i - 1])
+		}
+		#expect(differsWhenSwapped, "the input distinguishes the two orders")
+		#expect(tokens.prefix(129).allSatisfy { $0.context == 0 })
+	}
+
 	/// The reader checks at multiples of 65,536 decoded bytes, so the edge is
 	/// 256 coded bytes there (icc_codec.cc:399-403).
 	@Test("the reader's 256:1 check passes at exactly 256 coded bytes")
@@ -431,18 +453,30 @@ struct ICCCodecTests {
 		#expect(!ICCCodec.readerAccepts(symbols: 131_072, bits: 4_095))
 	}
 
-	@Test("write declines a stream the reader rejects and leaves the writer untouched")
+	/// "below" and "above" differ by a seeded character, a few coded bits on
+	/// either side of the limit at the first checkpoint; "late" is under it
+	/// there and over it by the end of the stream.
+	@Test(
+		"write declines exactly the streams the reader rejects and leaves the writer untouched"
+	)
 	func writeDeclinesOvercompressedProfile() throws {
-		let declined = try ICCProfile(validating: Self.profile("p3_desc3300_profile_420"))
-		var writer = BitWriter()
-		writer.write(3, 5)
-		#expect(!ICCCodec.write(declined, to: &writer))
-		#expect(writer.bitsWritten == 3)
-		for fixture in ["p3_random40000_profile_420", "p3_desc1000_profile_420"] {
+		for fixture in [
+			"p3_desc3300_profile_420", "p3_ratio_below_420", "p3_ratio_late_420",
+		] {
+			let declined = try ICCProfile(validating: Self.profile(fixture))
+			var writer = BitWriter()
+			writer.write(3, 5)
+			#expect(!ICCCodec.write(declined, to: &writer), "\(fixture)")
+			#expect(writer.bitsWritten == 3, "\(fixture)")
+		}
+		for fixture in [
+			"p3_random40000_profile_420", "p3_desc1000_profile_420",
+			"p3_ratio_above_420",
+		] {
 			let accepted = try ICCProfile(validating: Self.profile(fixture))
 			var fresh = BitWriter()
 			#expect(ICCCodec.write(accepted, to: &fresh), "\(fixture)")
-			#expect(fresh.bitsWritten > 0)
+			#expect(fresh.bitsWritten > 0, "\(fixture)")
 		}
 	}
 }
