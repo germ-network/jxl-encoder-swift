@@ -8,8 +8,56 @@ import Testing
 struct EntropyCodeWriterTests {
 	@Test(
 		"forced prefix codes write LZ77 min_symbol 512 and use_prefix_code",
-		.disabled("pending implementation"))
-	func forcedPrefixCodesUseMinSymbol512() {}
+		arguments: [LZ77.Method.rle, .lz77, .optimal])
+	func forcedPrefixCodesUseMinSymbol512(method: LZ77.Method) {
+		let values =
+			Array(1...40) + Array(1...40) + Array(1...40)
+			+ [UInt32](repeating: 40, count: 60)
+		let prepared = EntropyCodeWriter.prepare(
+			values.map { Token(context: 0, value: $0) }, contextCount: 1,
+			parameters: HistogramParameters(lz77Method: method, forcesPrefixCodes: true)
+		)
+		#expect(prepared.code.lz77 == LZ77.Parameters(minSymbol: 512, distanceContext: 1))
+		#expect(prepared.code.ansInfoTables == nil)
+		var writer = BitWriter()
+		EntropyCodeWriter.write(prepared, writer: &writer)
+		#expect(prepared.code.ansHistograms == nil)
+		#expect(writer.bytes[0] == 0b000_00_01_1)
+	}
+
+	@Test(
+		"kBest prices histograms past 256 symbols at FLT_MAX: length contexts merge (inf saving), the distance context stays apart",
+		arguments: [LZ77.Method.rle, .lz77, .optimal])
+	func forcedPrefixLengthContextsMerge(method: LZ77.Method) {
+		let prepared = EntropyCodeWriter.prepare(
+			LZ77Tests.mixed, contextCount: 3,
+			parameters: HistogramParameters(lz77Method: method, forcesPrefixCodes: true)
+		)
+		#expect(
+			Set(prepared.tokens.filter { $0.isLength }.map { $0.token.context }) == [
+				0, 1, 2,
+			])
+		#expect(prepared.code.contextMap == [0, 0, 0, 1], "\(prepared.code.contextMap)")
+	}
+
+	@Test("the LZ77 header picks the U32 selector for each min_symbol")
+	func lz77HeaderMinSymbolSelectors() {
+		func header(_ minSymbol: UInt32) -> (UInt64, Int) {
+			var writer = BitWriter()
+			EntropyCodeWriter.writeLZ77Header(
+				LZ77.Parameters(minSymbol: minSymbol, distanceContext: 1),
+				writer: &writer)
+			var value: UInt64 = 0
+			for (index, byte) in writer.bytes.enumerated() {
+				value |= UInt64(byte) << (8 * index)
+			}
+			return (value & ((1 << writer.bitsWritten) - 1), writer.bitsWritten)
+		}
+		#expect(header(224) == (0b0000_00_00_1, 9))
+		#expect(header(512) == (0b0000_00_01_1, 9))
+		#expect(header(4096) == (0b0000_00_10_1, 9))
+		#expect(header(8 + 300) == (0b0000_00_000000100101100_11_1, 24))
+	}
 
 	@Test("forced prefix codes override the cost-based ANS choice")
 	func forcedPrefixCodesSkipANS() {

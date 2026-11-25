@@ -350,11 +350,29 @@ extension EntropyCodeWriter {
 	static func writeLZ77Header(_ lz77: LZ77.Parameters?, writer: inout BitWriter) {
 		writer.write(1, lz77 == nil ? 0 : 1)
 		guard let lz77 else { return }
-		precondition(lz77.minSymbol == 224)
-		writer.write(2, 0)
-		writer.write(2, 0)
+		writeU32(
+			lz77.minSymbol, [(224, 0), (512, 0), (4096, 0), (8, 15)], writer: &writer)
+		writeU32(LZ77.minLength, [(3, 0), (4, 0), (5, 2), (9, 8)], writer: &writer)
 		PrefixCodeWriter.writeUintConfigs(
 			[LZ77.lengthConfiguration], logAlphaSize: 8, writer: &writer)
+	}
+
+	/// A header `U32` field given its four (offset, extra bits) distributions,
+	/// a direct value having 0 extra bits: the first with the fewest extra bits
+	/// that holds `value` (fields.cc:454-489, enc_fields.cc:110-127).
+	private static func writeU32(
+		_ value: UInt32, _ distributions: [(offset: UInt32, bitCount: Int)],
+		writer: inout BitWriter
+	) {
+		let (selector, distribution) = distributions.enumerated()
+			.filter {
+				value >= $0.element.offset
+					&& UInt64(value - $0.element.offset) < UInt64(1)
+						<< $0.element.bitCount
+			}
+			.min { $0.element.bitCount < $1.element.bitCount }!
+		writer.write(2, UInt64(selector))
+		writer.write(distribution.bitCount, UInt64(value - distribution.offset))
 	}
 
 	/// The code, then the tokens.
