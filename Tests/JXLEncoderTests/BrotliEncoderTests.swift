@@ -631,14 +631,102 @@ struct BrotliEncoderTests {
 	@Suite("size bound")
 	struct SizeBound {
 		@Test(
-			"incompressible input of N bytes takes at most N + 3 per 64 KiB meta-block + 1 bytes",
-			.disabled())
-		func incompressibleInputBound() {}
+			"incompressible input of N bytes takes at most N + 3 per 64 KiB meta-block + 1 bytes"
+		)
+		func incompressibleInputBound() {
+			for count in [0, 1, 2, 100, 65535, 65536, 65537, 131_072, 300 * 1024] {
+				let input = pseudoRandomBytes(count, seed: UInt64(count))
+				let size = BrotliEncoder.compress(input).count
+				let metaBlocks = (count + 65535) / 65536
+				#expect(
+					size <= count + 3 * metaBlocks + 1,
+					"\(count) bytes gave \(size)")
+			}
+		}
 
 		@Test(
-			"writing the smaller form advances the distance ring only when the compressed form is kept",
-			.disabled())
-		func rejectedTrialKeepsRing() {}
+			"writing the smaller form advances the distance ring only when the compressed form is kept"
+		)
+		func rejectedTrialKeepsRing() {
+			// Eight bytes with one copy of four: the compressed form's code tables
+			// cost more than the copy saves.
+			let small = pseudoRandomBytes(8, seed: 61)
+			let input = small + small[0..<4]
+			let commands = [
+				BrotliCommand(insertLength: 8, copyLength: 4, distance: 8)
+			]
+			var ring = BrotliDistanceRing()
+			var writer = BitWriter()
+			BrotliMetaBlock.writeSmaller(
+				input: input, range: 0..<input.count, commands: commands,
+				isLast: true,
+				ring: &ring, to: &writer)
+			#expect(ring == BrotliDistanceRing())
+			#expect(writer.bitsWritten == 24 + 8 * input.count + 8)
+
+			let sentence = Array("a stitch in time saves nine; ".utf8)
+			let repetitive = (0..<500).flatMap { _ in sentence }
+			var finder = BrotliMatchFinder(
+				input: repetitive, windowSize: BrotliEncoder.windowSize)
+			let repeated = finder.commands(for: 0..<repetitive.count)
+			var kept = BrotliDistanceRing()
+			var compressed = BitWriter()
+			BrotliMetaBlock.writeSmaller(
+				input: repetitive, range: 0..<repetitive.count, commands: repeated,
+				isLast: false, ring: &kept, to: &compressed)
+			#expect(kept != BrotliDistanceRing())
+			#expect(compressed.bitsWritten < 8 * repetitive.count / 10)
+		}
+
+		@Test("the smaller form is chosen at bit precision from any starting bit")
+		func smallerFormIsExact() {
+			for seed in 0..<240 {
+				let count = 2 + seed / 8
+				let alphabet = 1 + seed % 8
+				let input = pseudoRandomBytes(count, seed: UInt64(seed + 100)).map {
+					UInt8($0 % UInt8(alphabet))
+				}
+				var finder = BrotliMatchFinder(
+					input: input, windowSize: BrotliEncoder.windowSize)
+				let commands = finder.commands(for: 0..<count)
+				for isLast in [false, true] {
+					for offset in 0..<8 {
+						func prefixed() -> BitWriter {
+							var writer = BitWriter()
+							writer.write(offset, 0)
+							return writer
+						}
+						var compressed = prefixed()
+						var ring = BrotliDistanceRing()
+						BrotliMetaBlock.writeCompressed(
+							input: input, range: 0..<count,
+							commands: commands, isLast: isLast,
+							ring: &ring, to: &compressed)
+						if isLast { compressed.zeroPadToByte() }
+						var plain = prefixed()
+						BrotliMetaBlock.writeUncompressed(
+							input[...], to: &plain)
+						if isLast {
+							BrotliMetaBlock.writeEmptyLast(to: &plain)
+						}
+						var chosen = prefixed()
+						var chosenRing = BrotliDistanceRing()
+						BrotliMetaBlock.writeSmaller(
+							input: input, range: 0..<count,
+							commands: commands, isLast: isLast,
+							ring: &chosenRing, to: &chosen)
+						if isLast { chosen.zeroPadToByte() }
+						#expect(
+							chosen.bitsWritten
+								== min(
+									compressed.bitsWritten,
+									plain.bitsWritten),
+							"seed \(seed) offset \(offset) last \(isLast)"
+						)
+					}
+				}
+			}
+		}
 
 		@Test("repetitive input compresses below a tenth of its size")
 		func repetitiveInputCompresses() {

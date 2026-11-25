@@ -33,7 +33,7 @@ enum BrotliEncoder {
 		while start < input.count {
 			let end = min(start + maxMetaBlockLength, input.count)
 			let commands = finder.commands(for: start..<end)
-			BrotliMetaBlock.writeCompressed(
+			BrotliMetaBlock.writeSmaller(
 				input: input, range: start..<end, commands: commands,
 				isLast: end == input.count, ring: &ring, to: &writer)
 			start = end
@@ -450,7 +450,30 @@ enum BrotliMetaBlock {
 		input: [UInt8], range: Range<Int>, commands: [BrotliCommand],
 		isLast: Bool, ring: inout BrotliDistanceRing, to writer: inout BitWriter
 	) {
-		fatalError("unimplemented")
+		var trialRing = ring
+		var trial = BitWriter()
+		writeCompressed(
+			input: input, range: range, commands: commands, isLast: isLast,
+			ring: &trialRing, to: &trial)
+
+		// Bit position after each form, starting from the writer's current bit.
+		// A last meta-block ends on a byte boundary, which the uncompressed form
+		// reaches only after its empty last meta-block.
+		let start = writer.bitsWritten % 8
+		var compressedEnd = start + trial.bitsWritten
+		var uncompressedEnd = (start + 20 + 7) / 8 * 8 + 8 * range.count
+		if isLast {
+			compressedEnd = (compressedEnd + 7) / 8 * 8
+			uncompressedEnd = (uncompressedEnd + 2 + 7) / 8 * 8
+		}
+
+		if compressedEnd <= uncompressedEnd {
+			writer.append(trial)
+			ring = trialRing
+		} else {
+			writeUncompressed(input[range], to: &writer)
+			if isLast { writeEmptyLast(to: &writer) }
+		}
 	}
 
 	/// The empty last meta-block: ISLAST = 1, ISLASTEMPTY = 1, zero fill.
