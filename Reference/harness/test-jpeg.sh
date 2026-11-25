@@ -43,7 +43,7 @@ for suffix in ('420','422','440'):
  assert row[3]=='full-libjxl' and row[7]==f"libjxl {pins['LIBJXL_COMMIT']}", name
  assert 'jpeg-witness' in row[5] and 'full-resolution luma DC buckets' in row[8], name
  assert hashlib.sha256((root/row[0]).read_bytes()).hexdigest()==row[2], name
-assert pins['JPEG_TURBO_VERSION']=='3.2.0'
+assert pins['JPEG_TURBO_VERSION']=='3.2.1'
 PYCODE
 }
 

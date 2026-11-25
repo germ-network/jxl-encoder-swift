@@ -7,7 +7,7 @@ OUT="$ROOT/Tests/JXLEncoderTests/Fixtures/semantic"
 HARNESS="$HERE/build/harness/jxl-harness"
 CJXL="$HERE/build/harness/libjxl/tools/cjxl"
 LINKED="$(sed -n 's/^LIBJXL_DIR:[^=]*=//p' "$HERE/build/harness/CMakeCache.txt")"
-: "${JPEG_PREFIX:?Set JPEG_PREFIX to the pinned jpeg-turbo 3.2.0 installation}"
+: "${JPEG_PREFIX:?Set JPEG_PREFIX to the pinned jpeg-turbo 3.2.1 installation}"
 WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 

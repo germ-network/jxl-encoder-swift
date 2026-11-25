@@ -23,7 +23,7 @@ and external tool dependencies, is recorded in [`Reference/libjxl.pin`](libjxl.p
 - **Git**: version 2.20 or later.
 - **Disk Space**: approximately 3 GB free for the build tree (`df -h`).
 - **Required Libraries**:
-  - `libjpeg-turbo`: version `3.2.0` (matching `JPEG_TURBO_VERSION` in `libjxl.pin`).
+  - `libjpeg-turbo`: version `3.2.1` (matching `JPEG_TURBO_VERSION` in `libjxl.pin`).
   - `little-cms2` (`lcms2`)
   - `libpng`
 
@@ -114,20 +114,20 @@ to produce `Tests/JXLEncoderTests/Fixtures/recip_estimate.bin`.
 Because `genrecip.cc` captures the hardware `vrecpeq_f32` NEON reciprocal estimate
 instruction, the script requires an `arm64` host (`arm64` or `aarch64`).
 
-### JPEG Fixtures Require Pinned libjpeg-turbo 3.2.0
+### JPEG Fixtures Require Pinned libjpeg-turbo 3.2.1
 
 `Reference/make_jpeg_fixtures.sh` regenerates JPEG parser test fixtures and
 coefficient dumps (`.coef`).
 
 To guarantee byte-identical reproduction:
-- `cjpeg -version` must report `3.2.0`.
-- `$JPEG_PREFIX/include/jconfig.h` must define `LIBJPEG_TURBO_VERSION` as `3.2.0`.
+- `cjpeg -version` must report `3.2.1`.
+- `$JPEG_PREFIX/include/jconfig.h` must define `LIBJPEG_TURBO_VERSION` as `3.2.1`.
 
 Any version mismatch causes `make_jpeg_fixtures.sh` to abort.
 
 ## Internal reference harness
 
-Set `JPEG_PREFIX` to the pinned libjpeg-turbo 3.2.0 installation, then run
+Set `JPEG_PREFIX` to the pinned libjpeg-turbo 3.2.1 installation, then run
 `Reference/build-harness.sh` and `Reference/harness/test-harness.sh`. The build
 checks `include/jconfig.h` and links `lib/libjpeg.dylib` from that prefix.
 The build adds the pinned checkout as a CMake subproject, links its internal

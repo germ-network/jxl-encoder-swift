@@ -19,7 +19,7 @@ TARGET_DIR="${1:-${LIBJXL_DIR:-$HOME/tmp/automation/libjxl-v0.12.0}}"
 OUT="$HERE/build/harness"
 JPEG_PREFIX="${JPEG_PREFIX:-}"
 if [ -z "$JPEG_PREFIX" ]; then
-	echo "Set JPEG_PREFIX to the pinned libjpeg-turbo 3.2.0 installation." >&2
+	echo "Set JPEG_PREFIX to the pinned libjpeg-turbo 3.2.1 installation." >&2
 	exit 1
 fi
 if [ ! -r "$JPEG_PREFIX/include/jconfig.h" ] ||

@@ -20,6 +20,8 @@ int main(int argc, char** argv) {
   compressor.input_components = 3;
   compressor.in_color_space = JCS_YCbCr;
   jpeg_set_defaults(&compressor);
+  compressor.jpeg_width = compressor.image_width;
+  compressor.jpeg_height = compressor.image_height;
   for (int c = 0; c < 3; ++c) {
     compressor.comp_info[c].component_id = c + 1;
     compressor.comp_info[c].h_samp_factor = 1;
