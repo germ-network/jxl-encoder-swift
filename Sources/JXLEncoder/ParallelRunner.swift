@@ -42,9 +42,7 @@ extension Encoder {
 		return ParallelWork.drain(
 			consume computes, maximumWorkers: maximumWorkers, runner: runner
 		) { compute in
-			tokenizeACGroup(
-				compute, order: analysis.coeffOrder.orders,
-				mode: mode, blockContextMap: analysis.blockContextMap)
+			tokenizeACGroup(compute, analysis: analysis, mode: mode)
 		}
 	}
 
