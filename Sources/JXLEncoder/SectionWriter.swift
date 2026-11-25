@@ -351,9 +351,6 @@ enum SectionOptimizer {
 		return code
 	}
 
-	/// libjxl `kNumFixedHistograms` (enc_ans.h:79).
-	static let fixedHistogramCount = 1
-
 	/// New clusters one streaming set may add (enc_frame.cc:1306-1311).
 	static func streamingClusterBudget(previousHistograms: Int) -> Int {
 		let remaining = max(0, clustersLimit - previousHistograms)

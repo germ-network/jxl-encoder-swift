@@ -303,12 +303,11 @@ struct SemanticCrossCheckTests {
 				try integers(swift, field) == (try integers(reference, field)),
 				"\(field)")
 		}
-		// libjxl's clustering run on Swift's own per-context histograms
-		// reproduces Swift's map exactly. The reference file differs in two
-		// contexts of DC group 0 that hold five and two tokens, where the
-		// choice among near-equal clusters is decided by upstream's input
-		// rather than by the clustering. Every encoded histogram and every
-		// section size is identical.
+		// Two contexts of DC group 0 (histogram set 0 spans entries 0..<2970),
+		// holding five and two tokens, are assigned to a different one of
+		// several near-equal clusters than in the reference. libjxl's own
+		// clustering run on Swift's set-0 histograms reproduces Swift's map,
+		// so the difference lies in those contexts' input, not the algorithm.
 		let referenceMap = try integers(reference, "entropy_layout.ac.context_map")
 		let swiftMap = try integers(swift, "entropy_layout.ac.context_map")
 		#expect(referenceMap.count == swiftMap.count)
@@ -316,7 +315,7 @@ struct SemanticCrossCheckTests {
 			$0.element.0 != $0.element.1
 		}
 		.map(\.offset)
-		#expect(differing.count <= 2, "\(differing)")
+		#expect(differing == [2922, 2966])
 		for group in 0..<2 {
 			for stream in ["dc", "metadata"] {
 				#expect(

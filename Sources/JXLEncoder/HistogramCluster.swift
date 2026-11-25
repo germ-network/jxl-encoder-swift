@@ -36,8 +36,8 @@ struct Histogram {
 	}
 
 	/// Shannon entropy. `lanes` accumulates in the four lanes libjxl's vector
-	/// loop uses, so near-tied distances break the same way; otherwise the sum
-	/// runs left to right.
+	/// loop uses on arm64 (NEON), so near-tied distances break the same way as
+	/// the reference harness; otherwise the sum runs left to right.
 	mutating func computeBitCost(lanes useLanes: Bool = false) {
 		bitCost = 0
 		guard totalCount != 0 else { return }
