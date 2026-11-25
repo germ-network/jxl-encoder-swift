@@ -27,13 +27,19 @@ enum BrotliEncoder {
 	static func compress(_ input: [UInt8]) -> [UInt8] {
 		var writer = BitWriter()
 		BrotliMetaBlock.writeStreamHeader(to: &writer)
+		var ring = BrotliDistanceRing()
 		var start = 0
 		while start < input.count {
 			let end = min(start + maxMetaBlockLength, input.count)
-			BrotliMetaBlock.writeUncompressed(input[start..<end], to: &writer)
+			let literals = BrotliCommand(
+				insertLength: end - start, copyLength: 0, distance: 0)
+			BrotliMetaBlock.writeCompressed(
+				input: input, range: start..<end, commands: [literals],
+				isLast: end == input.count, ring: &ring, to: &writer)
 			start = end
 		}
-		BrotliMetaBlock.writeEmptyLast(to: &writer)
+		if input.isEmpty { BrotliMetaBlock.writeEmptyLast(to: &writer) }
+		writer.zeroPadToByte()
 		return writer.take()
 	}
 }
@@ -249,7 +255,94 @@ enum BrotliMetaBlock {
 		input: [UInt8], range: Range<Int>, commands: [BrotliCommand],
 		isLast: Bool, ring: inout BrotliDistanceRing, to writer: inout BitWriter
 	) {
-		fatalError("unimplemented")
+		precondition(
+			(1...BrotliEncoder.maxMetaBlockLength).contains(range.count),
+			"meta-block length \(range.count) out of range")
+
+		struct Coded {
+			var symbol: Int
+			var insert: BrotliCodedValue
+			var copy: BrotliCodedValue
+			var literals: Range<Int>
+			var distance: BrotliCodedValue?
+		}
+		var literalCounts = [UInt32](repeating: 0, count: 256)
+		var commandCounts = [UInt32](repeating: 0, count: 704)
+		var distanceCounts = [UInt32](repeating: 0, count: 64)
+		var coded = [Coded]()
+		var position = range.lowerBound
+		for command in commands {
+			let insert = BrotliLengthCodes.insertCode(forLength: command.insertLength)
+			let literals = position..<position + command.insertLength
+			for index in literals { literalCounts[Int(input[index])] += 1 }
+			position = literals.upperBound
+			let copy: BrotliCodedValue
+			var distance: BrotliCodedValue?
+			var reusesLastDistance = false
+			if command.copyLength == 0 {
+				precondition(
+					command.insertLength > 0 && position == range.upperBound,
+					"only a non-empty trailing insert may omit its copy")
+				// The copy of a meta-block's last command is ignored (§9.3), so any
+				// copy code will do.
+				copy = BrotliCodedValue(code: 0, extraBitCount: 0, extraBits: 0)
+			} else {
+				copy = BrotliLengthCodes.copyCode(forLength: command.copyLength)
+				let distanceCode = ring.code(forDistance: command.distance)
+				ring.record(distance: command.distance, code: distanceCode.code)
+				reusesLastDistance =
+					distanceCode.code == 0 && insert.code < 8 && copy.code < 16
+				if !reusesLastDistance {
+					distance = distanceCode
+					distanceCounts[distanceCode.code] += 1
+				}
+				position += command.copyLength
+			}
+			let symbol = BrotliLengthCodes.insertAndCopySymbol(
+				insertCode: insert.code, copyCode: copy.code,
+				reusesLastDistance: reusesLastDistance)
+			commandCounts[symbol] += 1
+			coded.append(
+				Coded(
+					symbol: symbol, insert: insert, copy: copy,
+					literals: literals,
+					distance: distance))
+		}
+		precondition(position == range.upperBound, "commands must cover the range")
+
+		writer.write(1, isLast ? 1 : 0)  // ISLAST
+		if isLast { writer.write(1, 0) }  // ISLASTEMPTY
+		writer.write(2, 0)  // MNIBBLES = 4
+		writer.write(16, UInt64(range.count - 1))
+		if !isLast { writer.write(1, 0) }  // ISUNCOMPRESSED
+		writer.write(3, 0)  // NBLTYPESL, NBLTYPESI, NBLTYPESD = 1
+		writer.write(2, 0)  // NPOSTFIX
+		writer.write(4, 0)  // NDIRECT
+		writer.write(2, 0)  // context mode of the one literal block type
+		writer.write(2, 0)  // NTREESL, NTREESD = 1
+
+		let literalCode = BrotliPrefixCode.build(counts: literalCounts)
+		let commandCode = BrotliPrefixCode.build(counts: commandCounts)
+		let distanceCode = BrotliPrefixCode.build(counts: distanceCounts)
+		BrotliPrefixCode.write(literalCode, alphabetSize: 256, to: &writer)
+		BrotliPrefixCode.write(commandCode, alphabetSize: 704, to: &writer)
+		BrotliPrefixCode.write(distanceCode, alphabetSize: 64, to: &writer)
+
+		func emit(_ symbol: Int, _ code: PrefixCode) {
+			if !code.isDegenerate {
+				writer.write(Int(code.depths[symbol]), UInt64(code.bits[symbol]))
+			}
+		}
+		for command in coded {
+			emit(command.symbol, commandCode)
+			writer.write(command.insert.extraBitCount, UInt64(command.insert.extraBits))
+			writer.write(command.copy.extraBitCount, UInt64(command.copy.extraBits))
+			for index in command.literals { emit(Int(input[index]), literalCode) }
+			if let distance = command.distance {
+				emit(distance.code, distanceCode)
+				writer.write(distance.extraBitCount, UInt64(distance.extraBits))
+			}
+		}
 	}
 
 	/// `input[range]` as whichever of the compressed and uncompressed meta-block

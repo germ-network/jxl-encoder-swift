@@ -560,5 +560,54 @@ struct BrotliEncoderTests {
 				}
 			}
 		#endif
+
+		#if (os(macOS) && !targetEnvironment(macCatalyst)) || os(Linux)
+			@Test(
+				"a hand-built compressed meta-block with copies decodes, covering implicit, explicit, special and long distances",
+				.enabled(
+					if: ExternalDecoder.binary(variable: "BROTLI_REFERENCE")
+						!= nil))
+			func handBuiltCopies() throws {
+				let reference = try #require(
+					ExternalDecoder.binary(variable: "BROTLI_REFERENCE"))
+				let commands = [
+					BrotliCommand(
+						insertLength: 100, copyLength: 8, distance: 4),
+					BrotliCommand(insertLength: 4, copyLength: 8, distance: 4),
+					BrotliCommand(insertLength: 1, copyLength: 10, distance: 5),
+					BrotliCommand(insertLength: 12, copyLength: 5, distance: 5),
+					BrotliCommand(
+						insertLength: 3, copyLength: 40, distance: 100),
+					BrotliCommand(
+						insertLength: 2, copyLength: 70, distance: 100),
+					BrotliCommand(insertLength: 7, copyLength: 0, distance: 0),
+				]
+				var input = [UInt8]()
+				var noise = pseudoRandomBytes(200, seed: 11)[...]
+				for command in commands {
+					for _ in 0..<command.insertLength {
+						input.append(noise.removeFirst())
+					}
+					for _ in 0..<command.copyLength {
+						input.append(input[input.count - command.distance])
+					}
+				}
+				var ring = BrotliDistanceRing()
+				var writer = BitWriter()
+				BrotliMetaBlock.writeStreamHeader(to: &writer)
+				BrotliMetaBlock.writeCompressed(
+					input: input, range: 0..<input.count, commands: commands,
+					isLast: true,
+					ring: &ring, to: &writer)
+				writer.zeroPadToByte()
+				let decoded = try ExternalDecoder.referenceDecode(
+					writer.take(), binary: reference)
+				#expect(decoded == input)
+				var expected = BrotliDistanceRing()
+				expected.record(distance: 5, code: 4)
+				expected.record(distance: 100, code: 20)
+				#expect(ring == expected)
+			}
+		#endif
 	}
 }
