@@ -225,8 +225,8 @@ struct SemanticCrossCheckTests {
 		#expect(try integers(swiftEligible, "entropy_layout.group_grid") == [9, 2])
 		#expect(try integers(swiftEligible, "entropy_layout.group_count") == [18])
 		#expect(try integers(swiftEligible, "entropy_layout.dc_group_count") == [2])
-		#expect(try integers(swiftEligible, "entropy_layout.histogram_set_count") == [1])
-		#expect(try integers(swiftEligible, "entropy_layout.selector_bits") == [0])
+		#expect(try integers(swiftEligible, "entropy_layout.histogram_set_count") == [2])
+		#expect(try integers(swiftEligible, "entropy_layout.selector_bits") == [1])
 		let swiftSelectors = try integers(swiftEligible, "entropy_layout.ac_selectors")
 		#expect(swiftSelectors.count == 18 * 4)
 		#expect(
@@ -234,9 +234,9 @@ struct SemanticCrossCheckTests {
 				swiftSelectors[$0]
 			} == Array(0..<18).map(Int64.init))
 		#expect(
-			stride(from: 3, to: swiftSelectors.count, by: 4).allSatisfy {
-				swiftSelectors[$0] == 0
-			})
+			stride(from: 3, to: swiftSelectors.count, by: 4).map {
+				swiftSelectors[$0]
+			} == [0, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0, 1])
 		let swiftBytes = try Data(
 			contentsOf: directory.appendingPathComponent("swift_2057x257.jxl"))
 		let swiftIDs = try integers(swiftEligible, "entropy_layout.section_ids")
@@ -292,11 +292,13 @@ struct SemanticCrossCheckTests {
 			#expect(dcGroupCount == [2])
 			#expect(sectionIDs == Array(0...21).map(Int64.init))
 			#expect(sectionIndices == Array(0...21).map(Int64.init))
-			#expect(histogramSetCount == [1])
+			let streamsSwift = name == "swift_2057x257"
+			#expect(histogramSetCount == [streamsSwift ? 2 : 1])
 			var expectedSelectors: [Int64] = []
 			for group in 0..<18 {
 				expectedSelectors.append(contentsOf: [
-					0, Int64(group), Int64(group + 4), 0,
+					0, Int64(group), Int64(group + 4),
+					streamsSwift && (group == 8 || group == 17) ? 1 : 0,
 				])
 			}
 			#expect(selectors == expectedSelectors)

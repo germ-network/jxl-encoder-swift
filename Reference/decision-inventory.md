@@ -142,6 +142,7 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `QZ` | Quantizer.swift |
 | `RE` | ReciprocalEstimate.swift |
 | `SE` | StaticEntropyCodes.swift |
+| `SP` | StreamingPlan.swift |
 | `SR` | SRGBTransfer.swift |
 | `SW` | SectionWriter.swift |
 | `TK` | Token.swift |

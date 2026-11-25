@@ -229,6 +229,8 @@ enum FrameAssembly {
 		/// signals the built-in ones.
 		quantTables: [[UInt16]]? = nil,
 		coeffOrder: CoeffOrder.Result = .identity,
+		/// `FramePlan.histogramSetCount`; JPEG frames are always one-shot.
+		histogramSetCount: Int = 1,
 		writer: inout BitWriter
 	) throws {
 		if let quantTables {
@@ -236,8 +238,9 @@ enum FrameAssembly {
 		} else {
 			writer.write(1, 1)  // all default quant matrices
 		}
+		precondition((1...max(groupCount, 1)).contains(histogramSetCount))
 		let histogramBits = ceilLog2(groupCount)
-		if histogramBits != 0 { writer.write(histogramBits, 0) }
+		if histogramBits != 0 { writer.write(histogramBits, UInt64(histogramSetCount - 1)) }
 		writer.write(2, coeffOrder.isCustom ? 3 : 2)  // kOrderEnc: Bits(13) or Val(0)
 		CoeffOrder.write(coeffOrder, writer: &writer)
 		writer.write(1, 0)  // no lz77

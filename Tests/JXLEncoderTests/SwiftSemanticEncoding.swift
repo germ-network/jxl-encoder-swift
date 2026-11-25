@@ -102,16 +102,19 @@ enum SwiftSemanticEncoding {
 		var order = Encoder.computeCoeffOrder(computes, dim: dim)
 		altering.coeffOrder(&order)
 		let blockContextMap = Encoder.computeBlockContextMap(computes, params: params)
+		let plan = FramePlan(dim: dim, upsampling: params.upsampling)
 		acCode = EntropyCode(
 			contextMap: [UInt8](
 				repeating: 0,
-				count: blockContextMap.numContexts
-					* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+				count: plan.histogramSetCount
+					* Encoder.PixelFrameAnalysis.contextsPerSet(blockContextMap)
+			),
 			prefixCodes: [])
+		let analysis = Encoder.PixelFrameAnalysis(
+			coeffOrder: order, blockContextMap: blockContextMap, acCode: acCode,
+			plan: plan)
 		let outputs = computes.reversed().map {
-			Encoder.tokenizeACGroup(
-				$0, order: order.orders, mode: .staging(acCode),
-				blockContextMap: blockContextMap)
+			Encoder.tokenizeACGroup($0, analysis: analysis, mode: .staging(acCode))
 		}
 		let dcData = try Encoder.assemble(
 			outputs: outputs, dim: dim, params: params,
@@ -147,7 +150,7 @@ enum SwiftSemanticEncoding {
 		var acGlobal = BitWriter()
 		try FrameAssembly.writeACGlobal(
 			groupCount: dim.groupCount, code: acCode, coeffOrder: order,
-			writer: &acGlobal)
+			histogramSetCount: plan.histogramSetCount, writer: &acGlobal)
 		sections[1 + dim.dcGroupCount] = SectionWriter(prewritten: acGlobal)
 		FrameAssembly.writeFrameHeader(
 			colorMode: .xyb(xQuantMatrixScale: params.xQuantMatrixScale),
