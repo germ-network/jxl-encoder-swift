@@ -45,6 +45,12 @@ public struct BitWriter: Sendable {
 		bitsWritten += nBits
 	}
 
+	/// Writes a header `U64` field, so a decoder reads back exactly `value`.
+	/// Ports libjxl `U64Coder::Write` (enc_fields.cc).
+	mutating func writeU64(_ value: UInt64) {
+		fatalError("unimplemented")
+	}
+
 	public mutating func zeroPadToByte() {
 		let remainder = (8 - bitsWritten % 8) % 8
 		guard remainder > 0 else { return }

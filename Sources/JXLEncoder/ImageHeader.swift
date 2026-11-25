@@ -52,8 +52,16 @@ public enum ImageHeader {
 		transferFunction: TransferFunction,
 		xybEncoded: Bool,
 		isGrayscale: Bool,
+		/// A profile to code after the transform data, so a decoder recovers
+		/// its exact bytes; nil keeps the enumerated sRGB encoding. Requires
+		/// `isGrayscale == false`: an admitted profile is always RGB. Follows
+		/// libjxl encode.cc:816-829, which writes `WriteICC` before padding.
+		iccProfile: ICCProfile? = nil,
 		to writer: inout BitWriter
 	) throws {
+		precondition(
+			iccProfile == nil || !isGrayscale, "an admitted ICC profile is always RGB")
+		guard iccProfile == nil else { fatalError("unimplemented") }
 		guard width > 0, height > 0 else { throw EncoderError.emptyImage }
 		guard width <= maxDimension, height <= maxDimension else {
 			throw EncoderError.imageTooLarge(width: width, height: height)

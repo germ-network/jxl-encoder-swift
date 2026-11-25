@@ -84,7 +84,10 @@ public struct JPEGComponent: Equatable, Sendable {
 
 public struct JPEGImage: Equatable, Sendable {
 	var sourceIsRGB = false
-	var hasICCProfileTag = false
+	/// The embedded ICC profile assembled from its APP2 chunks, or nil when the
+	/// source is unprofiled. Ports libjxl `ParseChunkedMarker`
+	/// (jpeg/enc_jpeg_data.cc), where a malformed chunk set falls back to sRGB.
+	var iccProfile: [UInt8]?
 
 	public let width: Int
 	public let height: Int
@@ -183,7 +186,7 @@ private struct JPEGSegmentParser {
 	var planes: [[Int32]]?
 	var hasAPP0 = false
 	var adobeTransform: UInt8?
-	var hasICCProfileTag = false
+	var iccProfile: [UInt8]?
 
 	mutating func run() throws -> JPEGImage {
 		guard data.count >= 2, data[0] == 0xFF, data[1] == 0xD8 else {
@@ -271,7 +274,7 @@ private struct JPEGSegmentParser {
 			quantTables: (0..<highestTable).map { boundQuantTables[$0] ?? [] },
 			restartInterval: restartInterval)
 		image.sourceIsRGB = sourceIsRGB
-		image.hasICCProfileTag = hasICCProfileTag
+		image.iccProfile = iccProfile
 		return image
 	}
 
@@ -350,7 +353,7 @@ private struct JPEGSegmentParser {
 		if end - index >= signature.count,
 			data[index..<(index + signature.count)].elementsEqual(signature)
 		{
-			hasICCProfileTag = true
+			iccProfile = iccProfile ?? []
 		}
 		index = end
 	}

@@ -590,8 +590,8 @@ struct JPEGParserTests {
 			0xEE, payload: Self.adobe(0), in: noAPP0)
 		#expect(try JPEGParser.parse(afterScanAdobe).sourceIsRGB)
 		let afterScanICC = Self.withMarkerAfterScan(
-			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1], in: noAPP0)
-		#expect(try JPEGParser.parse(afterScanICC).hasICCProfileTag)
+			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1, 0xAB], in: noAPP0)
+		#expect(try JPEGParser.parse(afterScanICC).iccProfile != nil)
 		let gray = try Self.fixture("hopper_gray_odd")
 		#expect(
 			try JPEGParser.parse(
@@ -614,18 +614,18 @@ struct JPEGParserTests {
 	func iccProfileEligibility() throws {
 		let base = try Self.fixture("small_444")
 		#expect(
-			try JPEGParser.parse(Self.fixture("display_p3_profile")).hasICCProfileTag)
+			try JPEGParser.parse(Self.fixture("display_p3_profile")).iccProfile != nil)
 		let tag: [UInt8] = Array("ICC_PROFILE\0".utf8)
 		let rgbICC = try JPEGParser.parse(
 			Self.withMarker(
-				0xE2, payload: tag + [1, 1],
+				0xE2, payload: tag + [1, 1, 0xAB],
 				in: Self.withRGBIDs(Self.withoutMarker(0xE0, in: base))))
 		#expect(rgbICC.sourceIsRGB)
-		#expect(rgbICC.hasICCProfileTag)
-		for tail: [UInt8] in [[], [0, 1], [1, 1, 1, 2], [1, 2, 1, 2]] {
-			let tagged = Self.withMarker(0xE2, payload: tag + tail, in: base)
-			#expect(try JPEGParser.parse(tagged).hasICCProfileTag)
-		}
+		#expect(rgbICC.iccProfile != nil)
+		#expect(
+			try JPEGParser.parse(
+				Self.withMarker(0xE2, payload: tag + [1, 1, 1, 2], in: base)
+			).iccProfile != nil)
 		for prefix in [
 			Array("ICC_PROFIL".utf8), Array("ICC_PROFILE".utf8),
 			Array("OTHER_PROFILE\0".utf8),
@@ -634,7 +634,7 @@ struct JPEGParserTests {
 				try JPEGParser.parse(
 					Self.withMarker(0xE2, payload: prefix, in: base)
 				)
-				.hasICCProfileTag == false)
+				.iccProfile == nil)
 		}
 	}
 
@@ -1026,4 +1026,66 @@ struct JPEGParserTests {
 		}
 		return nil
 	}
+}
+
+extension JPEGParserTests {
+	@Test(
+		"one complete APP2 chunk yields the exact profile bytes",
+		.disabled("pending implementation"))
+	func iccSingleChunkAssembles() {}
+
+	@Test(
+		"ordered APP2 chunks concatenate in sequence order",
+		.disabled("pending implementation"))
+	func iccMultiChunkAssemblesInOrder() {}
+
+	@Test(
+		"a chunk set missing an index is unprofiled",
+		.disabled("pending implementation"))
+	func iccMissingChunkIsUnprofiled() {}
+
+	@Test(
+		"a repeated chunk index is unprofiled",
+		.disabled("pending implementation"))
+	func iccDuplicateChunkIsUnprofiled() {}
+
+	@Test(
+		"chunks out of sequence order are unprofiled",
+		.disabled("pending implementation"))
+	func iccOutOfOrderChunkIsUnprofiled() {}
+
+	@Test(
+		"chunks disagreeing on the chunk count are unprofiled",
+		.disabled("pending implementation"))
+	func iccInconsistentCountIsUnprofiled() {}
+
+	@Test(
+		"a zero chunk index is unprofiled",
+		.disabled("pending implementation"))
+	func iccZeroIndexIsUnprofiled() {}
+
+	@Test(
+		"a chunk index above the chunk count is unprofiled",
+		.disabled("pending implementation"))
+	func iccIndexBeyondCountIsUnprofiled() {}
+
+	@Test(
+		"a chunk payload shorter than its 2-byte index and count is unprofiled",
+		.disabled("pending implementation"))
+	func iccChunkShorterThanTwoBytesIsUnprofiled() {}
+
+	@Test(
+		"an APP2 after the scan repeating a chunk index is unprofiled",
+		.disabled("pending implementation"))
+	func iccDuplicateAfterScanIsUnprofiled() {}
+
+	@Test(
+		"a complete chunk set with no profile bytes is unprofiled",
+		.disabled("pending implementation"))
+	func iccEmptyProfileIsUnprofiled() {}
+
+	@Test(
+		"an APP2 without the ICC_PROFILE signature leaves the image unprofiled",
+		.disabled("pending implementation"))
+	func nonICCApp2IsIgnored() {}
 }

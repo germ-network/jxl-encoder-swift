@@ -88,6 +88,9 @@ public struct EntropyCode: Sendable {
 	public static let staticAC = EntropyCode(
 		contextMap: StaticEntropyCodes.acContextMap,
 		prefixCodes: StaticEntropyCodes.acPrefixCodes)
+
+	/// The stream's LZ77 header; nil writes `enabled = 0` (dec_ans.cc:304-315).
+	var lz77: LZ77.Parameters? = nil
 }
 
 extension BitWriter {

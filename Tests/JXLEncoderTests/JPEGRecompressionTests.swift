@@ -225,3 +225,50 @@ struct PortableJPEGRecompressionTests {
 		#expect(!JXLSignature.matches([]))
 	}
 }
+
+extension PortableJPEGRecompressionTests {
+	@Test(
+		"a YCbCr JPEG with an in-family profile recompresses",
+		.disabled("pending implementation"))
+	func profiledYCbCrRecompresses() {}
+
+	@Test(
+		"an RGB JPEG with an in-family profile recompresses",
+		.disabled("pending implementation"))
+	func profiledRGBRecompresses() {}
+
+	@Test(
+		"a profile split over many APP2 chunks recompresses",
+		.disabled("pending implementation"))
+	func multiChunkProfileRecompresses() {}
+
+	@Test(
+		"a small profile whose coded ICC enables optimal LZ77 recompresses",
+		.disabled("pending implementation"))
+	func lz77ProfileRecompresses() {}
+
+	@Test(
+		"a nonempty profile outside the family falls back to nil",
+		.disabled("pending implementation"))
+	func invalidProfileFallsBack() {}
+
+	@Test(
+		"a malformed chunk set recompresses as unprofiled",
+		.disabled("pending implementation"))
+	func malformedAssemblyRecompressesUnprofiled() {}
+
+	@Test(
+		"an empty assembled profile recompresses as unprofiled",
+		.disabled("pending implementation"))
+	func emptyProfileRecompressesUnprofiled() {}
+
+	@Test(
+		"a grayscale JPEG with a profile falls back to nil",
+		.disabled("pending implementation"))
+	func grayscaleProfileFallsBack() {}
+
+	@Test(
+		"v2, sampled-curve, LUT, cicp and gray profiles fall back to nil",
+		.disabled("pending implementation"))
+	func unsupportedFamiliesFallBack() {}
+}

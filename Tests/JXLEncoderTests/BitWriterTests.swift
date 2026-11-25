@@ -63,3 +63,10 @@ struct BitWriterTests {
 		#expect(a.take() == [0x11, 0x02, 0x33])
 	}
 }
+
+extension BitWriterTests {
+	@Test(
+		"U64 picks libjxl's selector per range and continues varints past 4095",
+		.disabled("pending implementation"))
+	func u64EncodesSelectorsAndVarintContinuation() {}
+}

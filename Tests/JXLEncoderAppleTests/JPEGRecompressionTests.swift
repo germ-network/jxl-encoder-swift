@@ -551,4 +551,16 @@
 		}
 	}
 
+	extension JPEGRecompressionTests {
+		@Test(
+			"profiled output decodes to the colour-managed source pixels",
+			.disabled("pending implementation"))
+		func profiledDecodeMatchesColorManagedSource() {}
+
+		@Test(
+			"the ICC-stripped control decodes measurably differently",
+			.disabled("pending implementation"))
+		func strippedControlIsDistinguishable() {}
+	}
+
 #endif  // canImport(ImageIO)

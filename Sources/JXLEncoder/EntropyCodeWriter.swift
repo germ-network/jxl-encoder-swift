@@ -541,6 +541,49 @@ enum ContextMapEntropy {
 	}
 }
 
+/// The `HistogramParams` (enc_ans_params.h) fields this encoder's callers set;
+/// clustering is always `kBest`, the only value they use.
+struct HistogramParameters: Sendable {
+	enum UintMethod: Equatable, Sendable {
+		/// `kContextMap`: the fixed (2, 0, 1) configuration.
+		case contextMap
+		/// `kBest`: per-histogram search over the candidate configurations,
+		/// capped below min(256, LZ77 min_symbol) (enc_ans.cc:732-895).
+		case best
+	}
+
+	var uintMethod: UintMethod = .best
+	var lz77Method: LZ77.Method = .rle
+	/// Prefix codes regardless of cost (`force_huffman`), as the coded ICC
+	/// requires (enc_ans.cc:1170).
+	var forcesPrefixCodes = false
+
+	/// `min_symbol` 224 normally, 512 under forced prefix codes
+	/// (enc_ans.cc:1090).
+	var lz77MinSymbol: UInt32 { forcesPrefixCodes ? 512 : 224 }
+}
+
+extension EntropyCodeWriter {
+	/// A token stream after LZ77 with the code that writes it.
+	struct Prepared {
+		let tokens: [LZ77.EncodedToken]
+		/// Carries the LZ77 parameters, nil when LZ77 is off.
+		let code: EntropyCode
+		/// Header plus token bits, for callers that pick between encodings.
+		let estimatedCost: Int
+	}
+
+	/// LZ77, `kBest` clustering, uint configurations and the prefix-or-ANS
+	/// choice for `contextCount` contexts, so that `write(_:writer:)` followed
+	/// by `writeTokens(_:code:writer:)` is what a decoder reads back as
+	/// `tokens`. Ports `BuildAndEncodeHistograms` (enc_ans.cc:1060-1180).
+	static func prepare(
+		_ tokens: [Token], contextCount: Int, parameters: HistogramParameters
+	) -> Prepared {
+		fatalError("unimplemented")
+	}
+}
+
 enum ContextMapEncoding {
 	enum Representation: Equatable {
 		case simple(entryBits: Int)

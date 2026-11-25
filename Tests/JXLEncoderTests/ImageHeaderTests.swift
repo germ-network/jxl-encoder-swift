@@ -122,3 +122,20 @@ struct ImageHeaderTests {
 	}
 
 }
+
+extension ImageHeaderTests {
+	@Test(
+		"a nil profile leaves the header bytes unchanged",
+		.disabled("pending implementation"))
+	func unprofiledHeaderUnchanged() {}
+
+	@Test(
+		"a profile sets want_icc and the RGB colour space and nothing else",
+		.disabled("pending implementation"))
+	func iccHeaderSignalsWantICCAndRGB() {}
+
+	@Test(
+		"the coded ICC follows the transform data and precedes byte padding",
+		.disabled("pending implementation"))
+	func codedICCFollowsTransformDataBeforePadding() {}
+}
