@@ -109,6 +109,26 @@ struct StreamingEntropyTests {
 		}
 	}
 
+	/// One staged AC section per histogram set, tokens placed in the set's
+	/// slice of the context space.
+	static func stagedSets(
+		setCount: Int, contextsPerSet: Int, _ values: (Int, Int) -> [UInt32]
+	) -> [SectionWriter] {
+		(0..<setCount).map { set in
+			var section = SectionWriter(
+				mode: .staging(.staticAC),
+				contextOffset: UInt32(set * contextsPerSet))
+			for context in 0..<contextsPerSet {
+				for value in values(set, context) {
+					section.write(
+						token: Token(context: UInt32(context), value: value)
+					)
+				}
+			}
+			return section
+		}
+	}
+
 	static func histogram(_ counts: [Int: UInt32]) -> Histogram {
 		var histogram = Histogram()
 		for (symbol, count) in counts {
@@ -450,32 +470,145 @@ struct StreamingEntropyTests {
 	// MARK: Per-DC-group AC histograms
 
 	@Test(
-		"each set adds at most the budget left by earlier sets",
-		.disabled("pending implementation"))
-	func streamingBudgetLimitsNewClustersPerSet() throws {}
+		"each set adds at most the budget left by earlier sets")
+	func streamingBudgetLimitsNewClustersPerSet() throws {
+		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 1) == 31)
+		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 32) == 24)
+		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 108) == 5)
+		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 109) == 4)
+		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 126) == 2)
+		#expect(SectionOptimizer.streamingClusterBudget(previousHistograms: 128) == 0)
+
+		// Every context of every set differs, so each set uses all its budget.
+		var sections = Self.stagedSets(setCount: 3, contextsPerSet: 200) { set, context in
+			(0..<40).map {
+				UInt32(
+					$0 % 2 == 0
+						? (context + set) % 50 : (context * 7 + set) % 50)
+			}
+		}
+		let code = SectionOptimizer.optimizeStreaming(
+			sections: &sections, range: 0..<3, histogramSetCount: 3,
+			contextsPerSet: 200)
+		let count = code.ansHistograms?.count ?? code.prefixCodeCount
+		var budget = 1
+		for _ in 0..<3 {
+			budget += SectionOptimizer.streamingClusterBudget(
+				previousHistograms: budget)
+		}
+		#expect(count <= budget)
+		#expect(count > 31)
+	}
 
 	@Test(
-		"the first set's prefix-or-ANS choice holds for every set",
-		.disabled("pending implementation"))
-	func firstSetDecidesPrefixForAllSets() throws {}
+		"the first set's prefix-or-ANS choice holds for every set")
+	func firstSetDecidesPrefixForAllSets() throws {
+		let busy: (Int, Int) -> [UInt32] = { _, context in
+			(0..<30).map { UInt32(($0 * (context + 2)) % 17) }
+		}
+		let quiet: (Int, Int) -> [UInt32] = { _, context in [UInt32(context % 3)] }
+		var shortFirst = Self.stagedSets(setCount: 2, contextsPerSet: 10) { set, context in
+			set == 0 ? quiet(set, context) : busy(set, context)
+		}
+		let prefix = SectionOptimizer.optimizeStreaming(
+			sections: &shortFirst, range: 0..<2, histogramSetCount: 2,
+			contextsPerSet: 10)
+		#expect(prefix.ansHistograms == nil)
+
+		var longFirst = Self.stagedSets(setCount: 2, contextsPerSet: 10) { set, context in
+			set == 0 ? busy(set, context) : quiet(set, context)
+		}
+		let ans = SectionOptimizer.optimizeStreaming(
+			sections: &longFirst, range: 0..<2, histogramSetCount: 2,
+			contextsPerSet: 10)
+		#expect(ans.ansHistograms != nil)
+	}
 
 	@Test(
-		"empty first-set contexts map to the fixed flat histogram, which keeps its first-use index",
-		.disabled("pending implementation"))
-	func emptyContextsUseFixedHistogramAtFirstUse() throws {}
+		"empty first-set contexts map to the fixed flat histogram, which keeps its first-use index"
+	)
+	func emptyContextsUseFixedHistogramAtFirstUse() throws {
+		func map(emptyContext: Int) -> [UInt8] {
+			var sections = Self.stagedSets(setCount: 1, contextsPerSet: 4) {
+				_, context in
+				context == emptyContext
+					? [] : (0..<60).map { UInt32(($0 * (context + 3)) % 23) }
+			}
+			return SectionOptimizer.optimizeStreaming(
+				sections: &sections, range: 0..<1, histogramSetCount: 1,
+				contextsPerSet: 4
+			).contextMap
+		}
+		// The fixed histogram is histogram 0 before renumbering. After it, a
+		// histogram keeps the index of its first use.
+		let leading = map(emptyContext: 0)
+		#expect(leading[0] == 0)
+		#expect(
+			Set(leading[1...]).count == leading[1...].count || leading[1...].min()! >= 1
+		)
+		#expect(leading[1...].allSatisfy { $0 >= 1 })
+		let trailing = map(emptyContext: 3)
+		#expect(trailing[0] == 0)
+		#expect(trailing[3] == (trailing[0..<3].max() ?? 0) + 1)
+	}
 
 	@Test(
-		"under prefix coding the fixed histogram is an 8-bit code read back as 2^7 per symbol",
-		.disabled("pending implementation"))
-	func fixedHistogramPrefixFormIsDepthEight() throws {}
+		"under prefix coding the fixed histogram is an 8-bit code read back as 2^7 per symbol"
+	)
+	func fixedHistogramPrefixFormIsDepthEight() throws {
+		var sections = Self.stagedSets(setCount: 1, contextsPerSet: 3) { _, context in
+			context == 1 ? [] : [UInt32(context), 3]
+		}
+		let code = SectionOptimizer.optimizeStreaming(
+			sections: &sections, range: 0..<1, histogramSetCount: 1, contextsPerSet: 3)
+		#expect(code.ansHistograms == nil)
+		let fixed = code.prefixCodes[Int(code.contextMap[1])]
+		#expect(fixed.depths.count == 256)
+		#expect(fixed.depths.allSatisfy { $0 == 8 })
+		#expect(Histogram(encodedPrefix: fixed).counts.allSatisfy { $0 == 128 })
+	}
 
 	@Test(
-		"unused histograms are dropped and the rest renumbered by first use",
-		.disabled("pending implementation"))
-	func removeUnusedHistogramsRenumbersByFirstUse() throws {}
+		"unused histograms are dropped and the rest renumbered by first use")
+	func removeUnusedHistogramsRenumbersByFirstUse() throws {
+		var sections = Self.stagedSets(setCount: 1, contextsPerSet: 3) { _, context in
+			(0..<60).map { UInt32(($0 * (context * 5 + 3)) % 29) }
+		}
+		let code = SectionOptimizer.optimizeStreaming(
+			sections: &sections, range: 0..<1, histogramSetCount: 1, contextsPerSet: 3)
+		// Every context is used, so the fixed histogram is unreferenced and
+		// dropped; the rest number by first use.
+		let count = code.ansHistograms?.count ?? code.prefixCodeCount
+		#expect(Set(code.contextMap).count == count)
+		#expect(
+			code.contextMap == [0, 1, 2].prefix(count).map { $0 }
+				+ [0, 0, 0].prefix(3 - count))
+		#expect(count <= 3)
+	}
 
 	@Test(
-		"later sets reuse earlier histograms without changing them",
-		.disabled("pending implementation"))
-	func laterSetsReuseEarlierHistogramsUnchanged() throws {}
+		"later sets reuse earlier histograms without changing them")
+	func laterSetsReuseEarlierHistogramsUnchanged() throws {
+		let contexts: (Int, Int) -> [UInt32] = { _, context in
+			(0..<40).map { UInt32(($0 * (context % 5 + 1)) % 19) }
+		}
+		var one = Self.stagedSets(setCount: 1, contextsPerSet: 12, contexts)
+		let single = SectionOptimizer.optimizeStreaming(
+			sections: &one, range: 0..<1, histogramSetCount: 1, contextsPerSet: 12)
+		var two = Self.stagedSets(setCount: 2, contextsPerSet: 12, contexts)
+		let double = SectionOptimizer.optimizeStreaming(
+			sections: &two, range: 0..<2, histogramSetCount: 2, contextsPerSet: 12)
+		let singleCount = single.ansHistograms?.count ?? single.prefixCodeCount
+		let doubleCount = double.ansHistograms?.count ?? double.prefixCodeCount
+		// The second set repeats the first. Clustering always promotes one new
+		// histogram, and every context of the set then lands in it.
+		#expect(doubleCount == singleCount + 1)
+		#expect(Set(double.contextMap[12...]).count == 1)
+		#expect(double.contextMap[..<12] == single.contextMap[...])
+		if let first = single.ansHistograms, let both = double.ansHistograms {
+			#expect(
+				both.prefix(first.count).map(\.normalizedCounts)
+					== first.map(\.normalizedCounts))
+		}
+	}
 }

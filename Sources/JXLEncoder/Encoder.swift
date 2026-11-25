@@ -421,9 +421,10 @@ public enum Encoder {
 					writer: &section)
 				sections[1 + index] = SectionWriter(prewritten: section)
 			}
-			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode,
-				allowANS: true)
+			acCode = SectionOptimizer.optimizeStreaming(
+				sections: &sections, range: acRange,
+				histogramSetCount: analysis.plan.histogramSetCount,
+				contextsPerSet: analysis.acContextsPerSet)
 		} else if optimizeCodes {
 			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
 			let streams = try dcData.enumerated().map {
