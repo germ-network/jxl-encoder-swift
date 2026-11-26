@@ -130,7 +130,7 @@ struct DecisionInventory {
 	/// planner files for this audit is added here in the same change.
 	static let replacementIssues: Set<String> = [
 		"GER-3386", "GER-3387", "GER-3388", "GER-3389", "GER-3392", "GER-3418",
-		"GER-3404", "GER-3419", "GER-3617", "GER-3640",
+		"GER-3402", "GER-3404", "GER-3419", "GER-3617", "GER-3640", "GER-3703",
 	]
 
 	/// Id prefix for each inventoried source file; mirrors the table in
@@ -164,6 +164,8 @@ struct DecisionInventory {
 		"GE": "Sources/JXLEncoder/Geometry.swift",
 		"HC": "Sources/JXLEncoder/HistogramCluster.swift",
 		"HT": "Sources/JXLEncoder/HuffmanTree.swift",
+		"ICC": "Sources/JXLEncoder/ICCProfile.swift",
+		"ICCC": "Sources/JXLEncoder/ICCCodec.swift",
 		"IH": "Sources/JXLEncoder/ImageHeader.swift",
 		"JH": "Sources/JXLEncoder/JPEGHuffman.swift",
 		"JO": "Sources/JXLEncoder/JPEGOrientation.swift",
@@ -171,6 +173,7 @@ struct DecisionInventory {
 		"JR": "Sources/JXLEncoder/JPEGRecompression.swift",
 		"JF": "Sources/JXLEncoder/JPEGCfL.swift",
 		"JT": "Sources/JXLEncoder/JPEGTranscode.swift",
+		"LZ": "Sources/JXLEncoder/LZ77.swift",
 		"PB": "Sources/JXLEncoder/PlaneBuffer.swift",
 		"PC": "Sources/JXLEncoder/PrefixCodeWriter.swift",
 		"PM": "Sources/JXLEncoder/PixelBlockEntropyModel.swift",
@@ -649,7 +652,7 @@ enum SourceGroup: String, CaseIterable {
 				"CoeffOrder",
 				"EntropyCode", "EntropyCodeWriter", "EntropyDiagnostics",
 				"HistogramCluster",
-				"HuffmanTree", "PrefixCodeWriter", "SectionWriter",
+				"HuffmanTree", "LZ77", "PrefixCodeWriter", "SectionWriter",
 				"StaticEntropyCodes", "Token",
 			].map { "Sources/JXLEncoder/\($0).swift" }
 		case .pixel:
@@ -669,7 +672,7 @@ enum SourceGroup: String, CaseIterable {
 			return [
 				"JPEGCfL", "JPEGBlockContextMap", "JPEGHuffman", "JPEGOrientation",
 				"JPEGParser",
-				"JPEGRecompression", "JPEGTranscode",
+				"JPEGRecompression", "JPEGTranscode", "ICCProfile", "ICCCodec",
 			].map { "Sources/JXLEncoder/\($0).swift" }
 		case .orchestration:
 			return [

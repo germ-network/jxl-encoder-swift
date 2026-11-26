@@ -18,4 +18,7 @@ public enum EncoderError: Error, Equatable, Sendable {
 	/// Only 3 (RGB) and 4 (RGBA stride, alpha ignored) are meaningful; anything
 	/// else would misalign every pixel read.
 	case unsupportedChannelCount(Int)
+	/// The source's ICC profile compresses further than libjxl's ICC reader
+	/// accepts, so a stream carrying it could not be decoded.
+	case unsupportedICCProfile
 }

@@ -8,7 +8,10 @@
 #include "decoded_frame.h"
 #include "lib/jxl/ac_strategy.h"
 #include "lib/jxl/compressed_dc.h"
+#include "lib/jxl/dec_ans.h"
 #include "lib/jxl/enc_entropy_coder.h"
+#include "lib/jxl/headers.h"
+#include "lib/jxl/icc_codec_common.h"
 #include "lib/jxl/jpeg/enc_jpeg_data.h"
 #include "lib/jxl/jpeg/enc_jpeg_data_reader.h"
 #include "lib/jxl/memory_manager_internal.h"
@@ -23,17 +26,57 @@ std::vector<uint8_t> Read(const std::string& path) {
   return {std::istreambuf_iterator<char>(file), {}};
 }
 
+constexpr char kIccProfileTag[] = "ICC_PROFILE";
+
+bool IsICCApp(const std::vector<uint8_t>& app) {
+  return app.size() >= 3 + sizeof(kIccProfileTag) &&
+         app[0] == jxl::jpeg::kApp2 &&
+         std::equal(kIccProfileTag, kIccProfileTag + sizeof(kIccProfileTag),
+                    app.begin() + 3);
+}
+
 bool HasICCProfileTag(const jxl::jpeg::JPEGData& jpeg) {
-  constexpr char kIccProfileTag[] = "ICC_PROFILE";
+  return std::any_of(jpeg.app_data.begin(), jpeg.app_data.end(), IsICCApp);
+}
+
+// Concatenates the APP2 chunk payloads in marker order; the witness inputs
+// carry ordered chunks, which is all ParseChunkedMarker (enc_jpeg_data.cc)
+// accepts too.
+std::vector<uint8_t> SourceICC(const jxl::jpeg::JPEGData& jpeg) {
+  constexpr size_t kPayload = 3 + sizeof(kIccProfileTag) + 2;
+  std::vector<uint8_t> icc;
   for (const auto& app : jpeg.app_data) {
-    if (app.size() >= 3 + sizeof(kIccProfileTag) &&
-        app[0] == jxl::jpeg::kApp2 &&
-        std::equal(kIccProfileTag, kIccProfileTag + sizeof(kIccProfileTag),
-                   app.begin() + 3)) {
-      return true;
+    if (IsICCApp(app) && app.size() >= kPayload) {
+      icc.insert(icc.end(), app.begin() + kPayload, app.end());
     }
   }
-  return false;
+  return icc;
+}
+
+// Re-reads the header up to the coded ICC and decodes its histograms as
+// ICCReader::Init does (icc_codec.cc:339-351), whose ANSCode is private.
+jxl::Status CodedICCUsesLZ77(const std::vector<uint8_t>& bytes, bool* enabled) {
+  JxlMemoryManager manager;
+  JXL_RETURN_IF_ERROR(jxl::MemoryManagerInit(&manager, nullptr));
+  jxl::Status closed = true;
+  {
+    jxl::BitReader reader(jxl::Bytes(bytes.data(), bytes.size()));
+    jxl::BitReaderScopedCloser closer(reader, closed);
+    if (reader.ReadFixedBits<16>() != 0x0AFF) return false;
+    jxl::CodecMetadata metadata;
+    JXL_RETURN_IF_ERROR(jxl::ReadSizeHeader(&reader, &metadata.size));
+    JXL_RETURN_IF_ERROR(jxl::ReadImageMetadata(&reader, &metadata.m));
+    metadata.transform_data.nonserialized_xyb_encoded = metadata.m.xyb_encoded;
+    JXL_RETURN_IF_ERROR(jxl::Bundle::Read(&reader, &metadata.transform_data));
+    if (!metadata.m.color_encoding.WantICC()) return false;
+    jxl::U64Coder::Read(&reader);
+    jxl::ANSCode code;
+    std::vector<uint8_t> context_map;
+    JXL_RETURN_IF_ERROR(jxl::DecodeHistograms(
+        &manager, &reader, jxl::kNumICCContexts, &code, &context_map));
+    *enabled = code.lz77.enabled;
+  }
+  return closed;
 }
 
 bool SameCoefficients(const jxl::jpeg::JPEGData& source,
@@ -129,6 +172,25 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     return false;
   }
 
+  const auto source_icc = SourceICC(jpeg);
+  const bool profiled = jpeg.components.size() == 3 && !source_icc.empty();
+  if (profiled) {
+    const auto& color = frame.metadata.m.color_encoding;
+    bool lz77 = false;
+    if (!color.WantICC() || color.ICC() != source_icc ||
+        frame.metadata.m.xyb_encoded ||
+        !CodedICCUsesLZ77(jxl_bytes, &lz77)) {
+      std::fprintf(stderr, "jpeg-witness: decoded ICC profile differs\n");
+      return false;
+    }
+    out->Integers("jpeg_icc.want_icc", {1});
+    out->Integers("jpeg_icc.exact_bytes", {1});
+    out->Integers("jpeg_icc.size", {static_cast<int64_t>(source_icc.size())});
+    out->Integers("jpeg_icc.coefficients_exact", {1});
+    out->Integers("jpeg_icc.quantizers_exact", {1});
+    out->Integers("jpeg_icc.lz77_enabled", {lz77 ? 1 : 0});
+  }
+
   const auto dim = frame.header.ToFrameDimensions();
   if (jpeg.width != static_cast<int>(frame.header.default_xsize()) ||
       jpeg.height != static_cast<int>(frame.header.default_ysize())) {
@@ -142,7 +204,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
   if (source_is_rgb) {
     if (jpeg.components.size() != 3 ||
         frame.header.color_transform != jxl::ColorTransform::kNone ||
-        !frame.metadata.m.color_encoding.IsSRGB() ||
+        (!profiled && !frame.metadata.m.color_encoding.IsSRGB()) ||
         frame.metadata.m.xyb_encoded ||
         (frame.header.flags & jxl::FrameHeader::kSkipAdaptiveDCSmoothing) == 0) {
       std::fprintf(stderr, "jpeg-witness: RGB frame signaling differs\n");
@@ -156,7 +218,7 @@ jxl::Status Witness(const std::string& jpeg_path, const std::string& jxl_path,
     }
     out->Integers("jpeg_rgb.source_is_rgb", {1});
     out->Integers("jpeg_rgb.no_color_transform", {1});
-    out->Integers("jpeg_rgb.srgb_metadata", {1});
+    if (!profiled) out->Integers("jpeg_rgb.srgb_metadata", {1});
     out->Integers("jpeg_rgb.sampling_444", {1});
     out->Integers("jpeg_rgb.skip_smoothing", {1});
     out->Integers("jpeg_rgb.coefficients_exact", {1});

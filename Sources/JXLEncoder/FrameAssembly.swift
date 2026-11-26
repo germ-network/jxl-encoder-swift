@@ -210,7 +210,6 @@ enum FrameAssembly {
 		} else {
 			ContextTree.write(dcGroupCount: dcGroupCount, writer: &writer)
 		}
-		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(code, writer: &writer)
 	}
 
@@ -268,7 +267,6 @@ enum FrameAssembly {
 		if histogramBits != 0 { writer.write(histogramBits, UInt64(histogramSetCount - 1)) }
 		writer.write(2, coeffOrder.isCustom ? 3 : 2)  // kOrderEnc: Bits(13) or Val(0)
 		CoeffOrder.write(coeffOrder, writer: &writer)
-		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(code, writer: &writer)
 	}
 

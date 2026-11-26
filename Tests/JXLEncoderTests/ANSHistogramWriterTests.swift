@@ -606,6 +606,7 @@ struct ANSHistogramWriterTests {
 		var actual = BitWriter()
 		EntropyCodeWriter.write(code, writer: &actual)
 		var expected = BitWriter()
+		expected.write(1, 0)  // LZ77 disabled
 		expected.write(1, 0)
 		expected.write(2, UInt64(ANSConstants.logAlphaSize - 5))
 		PrefixCodeWriter.writeUintConfigs(
@@ -613,6 +614,7 @@ struct ANSHistogramWriterTests {
 			writer: &expected)
 		for histogram in histograms { histogram.write(to: &expected) }
 		var fullPrecision = BitWriter()
+		fullPrecision.write(1, 0)  // LZ77 disabled
 		fullPrecision.write(1, 0)
 		fullPrecision.write(2, UInt64(ANSConstants.logAlphaSize - 5))
 		PrefixCodeWriter.writeUintConfigs(
@@ -659,6 +661,7 @@ struct ANSHistogramWriterTests {
 		var actual = BitWriter()
 		EntropyCodeWriter.write(code, writer: &actual)
 		var expected = BitWriter()
+		expected.write(1, 0)  // LZ77 disabled
 		EntropyCodeWriter.writeContextMap(code, writer: &expected)
 		expected.write(1, 0)
 		expected.write(2, UInt64(ANSConstants.logAlphaSize - 5))

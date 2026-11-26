@@ -67,7 +67,7 @@ struct ContextTreeTests {
 		let code: EntropyCode = which == "DC" ? .staticDC : .staticAC
 
 		var writer = BitWriter()
-		EntropyCodeWriter.write(code, writer: &writer)
+		EntropyCodeWriter.writeHistograms(code, writer: &writer)
 
 		withKnownIssue(
 			Comment(

@@ -252,6 +252,14 @@ enum HistogramCluster {
 		return cost - actual.bitCost
 	}
 
+	/// `Histogram::ANSPopulationCost` (enc_ans.cc:619-628): past the ANS
+	/// alphabet, as LZ77 lengths at min_symbol 512 are, the cost is FLT_MAX.
+	private static func populationCost(_ histogram: Histogram) -> Float {
+		guard histogram.counts.count <= 256 else { return .greatestFiniteMagnitude }
+		return ANSEncodingHistogram.computeBest(counts: histogram.counts, strategy: .fast)
+			.cost
+	}
+
 	static func clusterBest(_ histograms: [Histogram]) -> (
 		clusters: [Histogram], contextMap: [UInt8]
 	) {
@@ -260,9 +268,7 @@ enum HistogramCluster {
 		}
 		var (clusters, symbols) = fastCluster(
 			histograms, maxHistograms: histograms.count)
-		var costs = clusters.map {
-			ANSEncodingHistogram.computeBest(counts: $0.counts, strategy: .fast).cost
-		}
+		var costs = clusters.map(populationCost)
 		var versions = [UInt32](repeating: 1, count: clusters.count)
 		var renumbering = Array(clusters.indices)
 		var nextVersion: UInt32 = 2
@@ -270,10 +276,7 @@ enum HistogramCluster {
 		func mergeCost(_ first: Int, _ second: Int) -> Float {
 			var combined = clusters[first]
 			combined.add(clusters[second])
-			let combinedCost = ANSEncodingHistogram.computeBest(
-				counts: combined.counts, strategy: .fast
-			).cost
-			return combinedCost - (costs[first] + costs[second])
+			return populationCost(combined) - (costs[first] + costs[second])
 		}
 		func enqueue(_ first: Int, _ second: Int) {
 			let cost = mergeCost(first, second)
@@ -303,10 +306,7 @@ enum HistogramCluster {
 				pair.version == max(versions[first], versions[second])
 			else { continue }
 			clusters[first].add(clusters[second])
-			costs[first] =
-				ANSEncodingHistogram.computeBest(
-					counts: clusters[first].counts, strategy: .fast
-				).cost
+			costs[first] = populationCost(clusters[first])
 			for index in renumbering.indices where renumbering[index] == second {
 				renumbering[index] = first
 			}

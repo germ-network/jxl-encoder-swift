@@ -57,21 +57,6 @@ struct PortableJPEGRecompressionTests {
 		}
 	}
 
-	@Test("profiled JPEGs fall back while supported JPEG color modes recompress")
-	func unsupportedColorFallsBack() throws {
-		let rgb = try JPEGParserTests.fixture("rgb_color")
-		let profile = try JPEGParserTests.fixture("display_p3_profile")
-		let rgbWithProfile = JPEGParserTests.withMarker(
-			0xE2, payload: Array("ICC_PROFILE\0".utf8) + [1, 1], in: rgb)
-		#expect(Encoder.recompressJPEG(rgb) != nil)
-		#expect(Encoder.recompressJPEG(profile) == nil)
-		#expect(Encoder.recompressJPEG(rgbWithProfile) == nil)
-		#expect(Encoder.recompressJPEG(try JPEGParserTests.fixture("small_444")) != nil)
-		#expect(
-			Encoder.recompressJPEG(try JPEGParserTests.fixture("hopper_gray_odd"))
-				!= nil)
-	}
-
 	@Test(
 		"DC boundary JPEGs recompress through the public API",
 		arguments: [-1025, -1024, -1023, 1023, 1024]
@@ -223,5 +208,230 @@ struct PortableJPEGRecompressionTests {
 		#expect(!JXLSignature.matches(try Self.jpeg(orientation: nil)))
 		#expect(!JXLSignature.matches([0xFF]))
 		#expect(!JXLSignature.matches([]))
+	}
+}
+
+extension PortableJPEGRecompressionTests {
+	static func iccChunks(_ profile: [UInt8], chunkSize: Int = 65_519) -> [(UInt8, [UInt8])] {
+		let starts = Array(stride(from: 0, to: profile.count, by: chunkSize))
+		return starts.enumerated().map { index, start in
+			(
+				0xE2,
+				Array("ICC_PROFILE\0".utf8) + [
+					UInt8(index + 1), UInt8(starts.count),
+				]
+					+ profile[start..<min(start + chunkSize, profile.count)]
+			)
+		}
+	}
+
+	static func withoutICC(_ data: [UInt8]) -> [UInt8] {
+		var data = data
+		while JPEGParserTests.segmentOffset(data, marker: 0xE2) != nil {
+			data = JPEGParserTests.withoutMarker(0xE2, in: data)
+		}
+		return data
+	}
+
+	/// Reads a codestream's image header up to the coded ICC's transformed
+	/// size: (want_icc, color space, size), or nil size when want_icc is 0.
+	static func colorSignal(_ stream: [UInt8]) -> (wantICC: Int, colorSpace: Int, size: UInt64?)
+	{
+		var bits = ImageHeaderTests.HeaderBits(bytes: stream)
+		_ = bits.read(16)
+		if bits.read(1) == 1 {
+			_ = bits.read(5)
+			if bits.read(3) == 0 { _ = bits.read(5) }
+		} else {
+			_ = bits.size()
+			if bits.read(3) == 0 { _ = bits.size() }
+		}
+		_ = bits.read(1 + 1 + 1 + 2 + 1 + 2 + 1 + 1)
+		let wantICC = bits.read(1)
+		let colorSpace = bits.read(2)
+		guard wantICC == 1 else { return (wantICC, colorSpace, nil) }
+		_ = bits.u64()
+		_ = bits.read(1)
+		return (wantICC, colorSpace, bits.u64())
+	}
+
+	static func headerBytes(_ transcode: JPEGTranscode) throws -> [UInt8] {
+		var writer = BitWriter()
+		try ImageHeader.write(
+			width: transcode.width, height: transcode.height, transferFunction: .sRGB,
+			xybEncoded: false, isGrayscale: transcode.isGrayscale,
+			iccProfile: transcode.iccProfile, to: &writer)
+		return writer.take()
+	}
+
+	/// The profile is signalled and coded in the header, and the frame after it
+	/// is byte-identical to the ICC-stripped source's.
+	static func expectProfiled(
+		_ fixture: String, sourceLocation: SourceLocation = #_sourceLocation
+	) throws {
+		let jpeg = try JPEGParserTests.fixture(fixture)
+		let image = try JPEGParser.parse(jpeg)
+		let bytes = try #require(image.iccProfile, sourceLocation: sourceLocation)
+		let transcode = try JPEGTranscode(image)
+		#expect(transcode.iccProfile?.bytes == bytes, sourceLocation: sourceLocation)
+		let stripped = try JPEGTranscode(JPEGParser.parse(Self.withoutICC(jpeg)))
+		#expect(stripped.iccProfile == nil, sourceLocation: sourceLocation)
+		#expect(
+			Encoder.recompressJPEG(jpeg) == (try Encoder.encodeJPEG(transcode)),
+			sourceLocation: sourceLocation)
+		let header = try Self.headerBytes(transcode)
+		let strippedHeader = try Self.headerBytes(stripped)
+		for optimizeCodes in [true, false] {
+			let stream = try Encoder.encodeJPEG(transcode, optimizeCodes: optimizeCodes)
+			let plain = try Encoder.encodeJPEG(stripped, optimizeCodes: optimizeCodes)
+			#expect(JXLSignature.matches(stream), sourceLocation: sourceLocation)
+			let signal = Self.colorSignal(stream)
+			#expect(signal.wantICC == 1, sourceLocation: sourceLocation)
+			#expect(signal.colorSpace == 0, sourceLocation: sourceLocation)
+			#expect(
+				signal.size == UInt64(ICCCodec.predict(bytes).count),
+				sourceLocation: sourceLocation)
+			#expect(
+				Self.colorSignal(plain).wantICC == 0, sourceLocation: sourceLocation
+			)
+			#expect(stream.starts(with: header), sourceLocation: sourceLocation)
+			#expect(plain.starts(with: strippedHeader), sourceLocation: sourceLocation)
+			#expect(
+				stream.dropFirst(header.count)
+					== plain.dropFirst(strippedHeader.count),
+				sourceLocation: sourceLocation)
+		}
+	}
+
+	@Test("a YCbCr JPEG with an in-family profile recompresses")
+	func profiledYCbCrRecompresses() throws {
+		try Self.expectProfiled("display_p3_profile")
+	}
+
+	@Test("an RGB JPEG with an in-family profile recompresses")
+	func profiledRGBRecompresses() throws {
+		#expect(try JPEGParser.parse(JPEGParserTests.fixture("rgb_p3_profile")).sourceIsRGB)
+		try Self.expectProfiled("rgb_p3_profile")
+	}
+
+	@Test("a profile split over two APP2 chunks recompresses")
+	func multiChunkProfileRecompresses() throws {
+		let jpeg = try JPEGParserTests.fixture("p3_random40000_profile_420")
+		#expect(try #require(JPEGParser.parse(jpeg).iccProfile).count > 65_519)
+		try Self.expectProfiled("p3_random40000_profile_420")
+	}
+
+	@Test("a profile past the kLZ77 switch recompresses")
+	func greedyLZ77ProfileRecompresses() throws {
+		try Self.expectProfiled("p3_desc1000_profile_420")
+	}
+
+	@Test("a profile libjxl's ICC reader would reject declines to nil")
+	func overcompressedProfileDeclines() throws {
+		for fixture in [
+			"p3_desc3300_profile_420", "p3_ratio_below_420", "p3_ratio_late_420",
+		] {
+			let jpeg = try JPEGParserTests.fixture(fixture)
+			let image = try JPEGParser.parse(jpeg)
+			#expect(try #require(image.iccProfile).count > 65_519, "\(fixture)")
+			let transcode = try JPEGTranscode(image)
+			#expect(throws: EncoderError.unsupportedICCProfile) {
+				try Encoder.encodeJPEG(transcode)
+			}
+			#expect(Encoder.recompressJPEG(jpeg) == nil, "\(fixture)")
+		}
+	}
+
+	@Test("a profile just inside the reader's compression limit recompresses")
+	func profileJustInsideReaderLimitRecompresses() throws {
+		try Self.expectProfiled("p3_ratio_above_420")
+	}
+
+	@Test("a small profile whose coded ICC enables optimal LZ77 recompresses")
+	func lz77ProfileRecompresses() throws {
+		try Self.expectProfiled("p3_desc4_profile")
+	}
+
+	@Test("a nonempty profile outside the family falls back to nil")
+	func invalidProfileFallsBack() throws {
+		for name in ["small_444", "rgb_color"] {
+			let jpeg = JPEGParserTests.withMarkers(
+				Self.iccChunks([0xAB]), in: try JPEGParserTests.fixture(name))
+			let image = try JPEGParser.parse(jpeg)
+			#expect(image.iccProfile == [0xAB])
+			#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation)
+			{
+				try JPEGTranscode(image)
+			}
+			#expect(Encoder.recompressJPEG(jpeg) == nil)
+		}
+	}
+
+	@Test("a malformed chunk set recompresses as unprofiled")
+	func malformedAssemblyRecompressesUnprofiled() throws {
+		let profile = try ICCCodecTests.displayP3()
+		let halves = Self.iccChunks(profile, chunkSize: (profile.count + 1) / 2)
+		for name in ["small_444", "rgb_color", "hopper_gray_odd"] {
+			let source = try JPEGParserTests.fixture(name)
+			let unprofiled = try #require(Encoder.recompressJPEG(source))
+			for chunks in [
+				[halves[1], halves[0]], [halves[0]], [halves[0], halves[0]],
+			] {
+				let jpeg = JPEGParserTests.withMarkers(chunks, in: source)
+				#expect(try JPEGParser.parse(jpeg).iccProfile == nil)
+				#expect(Encoder.recompressJPEG(jpeg) == unprofiled)
+			}
+		}
+	}
+
+	@Test("an empty assembled profile recompresses as unprofiled")
+	func emptyProfileRecompressesUnprofiled() throws {
+		for name in ["small_444", "rgb_color", "hopper_gray_odd"] {
+			let source = try JPEGParserTests.fixture(name)
+			let unprofiled = try #require(Encoder.recompressJPEG(source))
+			let jpeg = JPEGParserTests.withMarkers(Self.iccChunks([]), in: source)
+			#expect(try JPEGParser.parse(jpeg).iccProfile == nil)
+			#expect(Encoder.recompressJPEG(jpeg) == unprofiled)
+			#expect(Self.colorSignal(unprofiled).wantICC == 0)
+		}
+	}
+
+	@Test("a grayscale JPEG with a profile falls back to nil")
+	func grayscaleProfileFallsBack() throws {
+		let jpeg = JPEGParserTests.withMarkers(
+			Self.iccChunks(try ICCCodecTests.displayP3()),
+			in: try JPEGParserTests.fixture("hopper_gray_odd"))
+		#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation) {
+			try JPEGTranscode(JPEGParser.parse(jpeg))
+		}
+		#expect(Encoder.recompressJPEG(jpeg) == nil)
+	}
+
+	@Test("v2, sampled-curve, LUT, cicp and gray profiles fall back to nil")
+	func unsupportedFamiliesFallBack() throws {
+		typealias Builder = ICCProfileTests.Builder
+		var v2 = Builder()
+		v2.setHeader(8, [2, 0x10, 0, 0])
+		var sampled = Builder()
+		sampled.setTRCs(
+			Builder.ascii("curv") + [0, 0, 0, 0, 0, 0, 0, 2, 0, 0, 0xFF, 0xFF])
+		var lut = Builder()
+		lut.setTag("A2B0", Builder.ascii("mAB ") + [UInt8](repeating: 0, count: 28))
+		var cicp = Builder()
+		cicp.setTag("cicp", Builder.ascii("cicp") + [0, 0, 0, 0, 1, 13, 0, 1])
+		var gray = Builder()
+		gray.setHeader(16, Builder.ascii("GRAY"))
+		for name in ["small_444", "rgb_color"] {
+			let source = try JPEGParserTests.fixture(name)
+			let admitted = JPEGParserTests.withMarkers(
+				Self.iccChunks(Builder().bytes), in: source)
+			#expect(Encoder.recompressJPEG(admitted) != nil)
+			for profile in [v2, sampled, lut, cicp, gray] {
+				let jpeg = JPEGParserTests.withMarkers(
+					Self.iccChunks(profile.bytes), in: source)
+				#expect(try JPEGParser.parse(jpeg).iccProfile == profile.bytes)
+				#expect(Encoder.recompressJPEG(jpeg) == nil)
+			}
+		}
 	}
 }

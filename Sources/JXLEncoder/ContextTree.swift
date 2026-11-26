@@ -235,7 +235,6 @@ enum ContextTree {
 		_ prepared: Prepared, code: EntropyCode, writer: inout BitWriter
 	) {
 		writer.write(1, 1)
-		writer.write(1, 0)
 		EntropyCodeWriter.write(code, writer: &writer)
 		EntropyCodeWriter.writeTokens(prepared.tokens, code: code, writer: &writer)
 	}
@@ -315,7 +314,6 @@ enum ContextTree {
 			tokens: tokens, contextCount: treeContextCount)
 
 		writer.write(1, 1)  // not an empty tree
-		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(code, writer: &writer)
 		for token in tokens {
 			writer.write(token: token, code: code)

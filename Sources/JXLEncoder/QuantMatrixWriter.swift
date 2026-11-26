@@ -92,7 +92,6 @@ enum QuantMatrixWriter {
 		// No "has tree" bit here: inside a group stream `DecodeTree` is entered
 		// directly, and that flag belongs to the global-tree path the DC groups
 		// use. Writing it desynchronises everything after.
-		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(treeCode, writer: &writer)
 		for token in leafTree { writer.write(token: token, code: treeCode) }
 
@@ -111,7 +110,6 @@ enum QuantMatrixWriter {
 		}
 		let dataCode = HistogramCluster.optimizeEntropyCode(
 			tokens: tokens, contextCount: 2)
-		writer.write(1, 0)  // no lz77
 		EntropyCodeWriter.write(dataCode, writer: &writer)
 		for token in tokens { writer.write(token: token, code: dataCode) }
 	}

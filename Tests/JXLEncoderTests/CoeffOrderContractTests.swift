@@ -2,6 +2,12 @@ import Testing
 
 @testable import JXLEncoder
 
+private func permutation(_ tokens: [Token]) -> EntropyCodeWriter.Prepared {
+	EntropyCodeWriter.prepare(
+		tokens, contextCount: CoeffOrder.permutationContexts,
+		parameters: HistogramParameters())
+}
+
 @Suite("Coefficient ordering")
 struct CoeffOrderContractTests {
 	private func histograms(from fixture: EntropyReferenceFixture) throws -> [Histogram] {
@@ -286,9 +292,10 @@ struct CoeffOrderContractTests {
 				context: UInt32($0.offset % CoeffOrder.permutationContexts),
 				value: $0.element)
 		}
-		let result = ContextMapEntropy.runLengthEncode(
-			tokens, contextCount: CoeffOrder.permutationContexts)
-		#expect(result.enabled)
+		let result = LZ77.apply(
+			tokens, contextCount: CoeffOrder.permutationContexts,
+			parameters: HistogramParameters())
+		#expect(result.parameters != nil)
 		let lengths = result.tokens.filter(\.isLength)
 		#expect(lengths.count == 1)
 		guard let length = lengths.first else { return }
@@ -296,13 +303,14 @@ struct CoeffOrderContractTests {
 		#expect(length.token.value == 37)
 		#expect(result.tokens[129].token.context == 8)
 		#expect(result.tokens[129].token.value == 0)
-		let short = ContextMapEntropy.runLengthEncode(
+		let short = LZ77.apply(
 			[
 				Token(context: 0, value: 4), Token(context: 1, value: 4),
 				Token(context: 2, value: 4),
 			],
-			contextCount: CoeffOrder.permutationContexts)
-		#expect(!short.enabled)
+			contextCount: CoeffOrder.permutationContexts,
+			parameters: HistogramParameters())
+		#expect(short.parameters == nil)
 	}
 
 	@Test
@@ -311,14 +319,14 @@ struct CoeffOrderContractTests {
 			Token(context: 0, value: UInt32($0 % 3))
 		}
 		#expect(
-			CoeffOrder.preparePermutation(tiedTokens).code.uintConfigurations?.first
+			permutation(tiedTokens).code.uintConfigurations?.first
 				== HybridUintConfiguration(
 					splitExponent: 3, msbInToken: 2, lsbInToken: 0))
 		let tieTokens = (0..<128).map {
 			Token(context: UInt32($0 % 8), value: UInt32($0 % 16))
 		}
-		let tieResult = CoeffOrder.preparePermutation(tieTokens)
-		#expect(tieResult.runLength.enabled == false)
+		let tieResult = permutation(tieTokens)
+		#expect((tieResult.code.lz77 != nil) == false)
 		#expect(
 			tieResult.code.uintConfigurations?.first
 				== HybridUintConfiguration(
@@ -326,7 +334,7 @@ struct CoeffOrderContractTests {
 		let wideTokens = (0..<128).map {
 			Token(context: UInt32($0 % 8), value: UInt32(($0 * 17) % 64))
 		}
-		let wideResult = CoeffOrder.preparePermutation(wideTokens)
+		let wideResult = permutation(wideTokens)
 		#expect(
 			wideResult.code.uintConfigurations?.first
 				!= HybridUintConfiguration(
@@ -338,24 +346,24 @@ struct CoeffOrderContractTests {
 		var reversed = CoeffOrder.natural
 		reversed[1...].reverse()
 		let one = CoeffOrder.tokens(forChannelOrder: reversed)
-		let oneResult = CoeffOrder.preparePermutation(one)
+		let oneResult = permutation(one)
 		#expect(one.count < 100)
 		#expect(oneResult.code.ansHistograms == nil)
-		#expect(!oneResult.runLength.enabled)
-		let twoResult = CoeffOrder.preparePermutation(one + one)
+		#expect(oneResult.code.lz77 == nil)
+		let twoResult = permutation(one + one)
 		#expect((one + one).count >= 100)
 		#expect(twoResult.code.ansHistograms != nil)
 		let runTokens =
 			(0..<128).map { Token(context: UInt32($0 % 8), value: UInt32($0 % 64)) }
 			+ [Token](repeating: Token(context: 0, value: 63), count: 40)
-		let runResult = CoeffOrder.preparePermutation(runTokens)
-		#expect(runResult.runLength.enabled)
+		let runResult = permutation(runTokens)
+		#expect(runResult.code.lz77 != nil)
 		#expect(runResult.code.logAlphabetSize == 8)
 		#expect(runResult.code.ansHistograms != nil)
 		let lengthContext = Int(
 			runResult.code.contextMap[
 				Int(
-					runResult.runLength.tokens.first(where: \.isLength)!.token
+					runResult.tokens.first(where: \.isLength)!.token
 						.context)])
 		#expect(runResult.code.ansInfoTables?[lengthContext][230].freq != 0)
 	}
@@ -368,14 +376,11 @@ struct CoeffOrderContractTests {
 				order[1...].reverse()
 				return order
 			}())
-		let prefix = CoeffOrder.preparePermutation(prefixTokens)
+		let prefix = permutation(prefixTokens)
 		var prefixWriter = BitWriter()
-		EntropyCodeWriter.write(prefix.code, writer: &prefixWriter)
+		EntropyCodeWriter.writeHistograms(prefix.code, writer: &prefixWriter)
 		EntropyCodeWriter.writeTokens(
-			prefix.runLength.tokens, code: prefix.code,
-			lengthConfiguration: HybridUintConfiguration(
-				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
-			lengthSymbolOffset: 224, writer: &prefixWriter)
+			prefix.tokens, code: prefix.code, writer: &prefixWriter)
 		#expect(prefixWriter.bitsWritten == 434)
 		#expect(
 			prefixWriter.bytes == [
@@ -384,9 +389,9 @@ struct CoeffOrderContractTests {
 				210, 36, 142, 194, 192, 247, 92, 199, 182, 76, 67, 215, 84, 69, 150,
 				68, 129, 231, 88, 134, 166, 72, 2, 199, 80, 4, 0,
 			])
-		#expect(!prefix.runLength.enabled)
+		#expect(prefix.code.lz77 == nil)
 		var ordinaryPrefixWriter = BitWriter()
-		EntropyCodeWriter.write(prefix.code, writer: &ordinaryPrefixWriter)
+		EntropyCodeWriter.writeHistograms(prefix.code, writer: &ordinaryPrefixWriter)
 		EntropyCodeWriter.writeTokens(
 			prefixTokens, code: prefix.code, writer: &ordinaryPrefixWriter)
 		#expect(ordinaryPrefixWriter.bytes == prefixWriter.bytes)
@@ -394,14 +399,11 @@ struct CoeffOrderContractTests {
 		let runTokens =
 			(0..<128).map { Token(context: UInt32($0 % 8), value: UInt32($0 % 64)) }
 			+ [Token](repeating: Token(context: 0, value: 63), count: 40)
-		let ans = CoeffOrder.preparePermutation(runTokens)
+		let ans = permutation(runTokens)
 		var ansWriter = BitWriter()
-		EntropyCodeWriter.write(ans.code, writer: &ansWriter)
+		EntropyCodeWriter.writeHistograms(ans.code, writer: &ansWriter)
 		EntropyCodeWriter.writeTokens(
-			ans.runLength.tokens, code: ans.code,
-			lengthConfiguration: HybridUintConfiguration(
-				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
-			lengthSymbolOffset: 224, writer: &ansWriter)
+			ans.tokens, code: ans.code, writer: &ansWriter)
 		#expect(ansWriter.bitsWritten == 901)
 		#expect(
 			ansWriter.bytes == [
@@ -415,18 +417,15 @@ struct CoeffOrderContractTests {
 				92, 255, 208, 255, 0, 0, 5,
 			])
 		var ordinaryANSWriter = BitWriter()
-		EntropyCodeWriter.write(ans.code, writer: &ordinaryANSWriter)
+		EntropyCodeWriter.writeHistograms(ans.code, writer: &ordinaryANSWriter)
 		EntropyCodeWriter.writeTokens(
 			runTokens, code: ans.code, writer: &ordinaryANSWriter)
 		var configuredANSWriter = BitWriter()
-		EntropyCodeWriter.write(ans.code, writer: &configuredANSWriter)
+		EntropyCodeWriter.writeHistograms(ans.code, writer: &configuredANSWriter)
 		EntropyCodeWriter.writeTokens(
 			runTokens.map {
-				ContextMapEntropy.EncodedToken(token: $0, isLength: false)
-			}, code: ans.code,
-			lengthConfiguration: HybridUintConfiguration(
-				splitExponent: 0, msbInToken: 0, lsbInToken: 0),
-			lengthSymbolOffset: 224, writer: &configuredANSWriter)
+				LZ77.EncodedToken(token: $0, isLength: false)
+			}, code: ans.code, writer: &configuredANSWriter)
 		#expect(ordinaryANSWriter.bytes == configuredANSWriter.bytes)
 	}
 }

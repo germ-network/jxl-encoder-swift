@@ -390,11 +390,9 @@ struct StreamingEntropyTests {
 		expected.write(2, 1)
 		for (position, stream) in [local.dc, local.metadata].enumerated() {
 			expected.write(4, 2)
-			expected.write(1, 0)
 			EntropyCodeWriter.write(stream.treeCode, writer: &expected)
 			EntropyCodeWriter.writeTokens(
 				stream.tree.tokens, code: stream.treeCode, writer: &expected)
-			expected.write(1, 0)
 			EntropyCodeWriter.write(stream.code, writer: &expected)
 			EntropyCodeWriter.writeTokens(
 				stream.tokens, code: stream.code, writer: &expected)

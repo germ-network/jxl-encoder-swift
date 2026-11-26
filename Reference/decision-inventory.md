@@ -124,6 +124,8 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `GE` | Geometry.swift |
 | `HC` | HistogramCluster.swift |
 | `HT` | HuffmanTree.swift |
+| `ICC` | ICCProfile.swift |
+| `ICCC` | ICCCodec.swift |
 | `IH` | ImageHeader.swift |
 | `JH` | JPEGHuffman.swift |
 | `JO` | JPEGOrientation.swift |
@@ -131,6 +133,7 @@ The checker proves shape, not completeness of rows within a file: that one row p
 | `JR` | JPEGRecompression.swift |
 | `JF` | JPEGCfL.swift |
 | `JT` | JPEGTranscode.swift |
+| `LZ` | LZ77.swift |
 | `PB` | PlaneBuffer.swift |
 | `PC` | PrefixCodeWriter.swift |
 | `PM` | PixelBlockEntropyModel.swift |

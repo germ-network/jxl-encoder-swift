@@ -52,8 +52,18 @@ public enum ImageHeader {
 		transferFunction: TransferFunction,
 		xybEncoded: Bool,
 		isGrayscale: Bool,
+		/// A profile to code after the transform data, so a decoder recovers
+		/// its exact bytes; nil keeps the enumerated sRGB encoding. Requires
+		/// `isGrayscale == false`: an admitted profile is always RGB. Follows
+		/// libjxl encode.cc:816-829, which writes `WriteICC` before padding.
+		/// Any `xybEncoded` is allowed, as upstream permits both. Throws
+		/// `unsupportedICCProfile` when libjxl's reader would reject the coded
+		/// profile.
+		iccProfile: ICCProfile? = nil,
 		to writer: inout BitWriter
 	) throws {
+		precondition(
+			iccProfile == nil || !isGrayscale, "an admitted ICC profile is always RGB")
 		guard width > 0, height > 0 else { throw EncoderError.emptyImage }
 		guard width <= maxDimension, height <= maxDimension else {
 			throw EncoderError.imageTooLarge(width: width, height: height)
@@ -87,18 +97,24 @@ public enum ImageHeader {
 		writer.write(2, 0)  // no extra channels
 		writer.write(1, xybEncoded ? 1 : 0)  // xyb encoded
 		writer.write(1, 0)  // not all default color encoding
-		writer.write(1, 0)  // no icc
+		writer.write(1, iccProfile == nil ? 0 : 1)  // want icc
 		writer.write(2, isGrayscale ? 1 : 0)  // color space
-		writer.write(2, 1)  // D65 white point
-		if !isGrayscale {
-			writer.write(2, 1)  // sRGB primaries
+		// color_encoding_internal.cc:158 skips the enums under want_icc.
+		if iccProfile == nil {
+			writer.write(2, 1)  // D65 white point
+			if !isGrayscale {
+				writer.write(2, 1)  // sRGB primaries
+			}
+			writer.write(1, 0)  // no gamma
+			writer.write(2, 2)  // transfer function selector bits (2 .. 17)
+			writer.write(4, transferFunction.enumValue - 2)
+			writer.write(2, 1)  // relative rendering intent
 		}
-		writer.write(1, 0)  // no gamma
-		writer.write(2, 2)  // transfer function selector bits (2 .. 17)
-		writer.write(4, transferFunction.enumValue - 2)
-		writer.write(2, 1)  // relative rendering intent
 		writer.write(2, 0)  // no extensions
 		writer.write(1, 1)  // all default transform data
+		if let iccProfile, !ICCCodec.write(iccProfile, to: &writer) {
+			throw EncoderError.unsupportedICCProfile
+		}
 		writer.zeroPadToByte()
 	}
 

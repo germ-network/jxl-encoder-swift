@@ -21,10 +21,17 @@ public struct JPEGTranscode {
 	/// A single-component source. JXL still codes three channels, and the two
 	/// chroma ones carry zeros rather than a copy of the luma.
 	public let isGrayscale: Bool
+	/// The source's admitted ICC profile, coded into the header so a decoder
+	/// colour-manages the reconstruction exactly as it would the JPEG. Mirrors
+	/// libjxl's JPEG path, which keeps the original profile
+	/// (encode.cc:2213 `uses_original_profile`). Always nil for a grayscale
+	/// source: a profile there throws `unsupportedColorInterpretation`.
+	public let iccProfile: ICCProfile?
 	let quantizationRatios: [[Int32]]
 
 	public enum TranscodeError: Error, Equatable, Sendable {
-		/// A tagged profile the coefficient route does not serialize.
+		/// A nonempty profile outside the admitted family, or any profile on a
+		/// grayscale source.
 		case unsupportedColorInterpretation
 		/// Sampling factors JXL cannot express: it carries a 2-bit mode per
 		/// channel, not arbitrary factors.
@@ -41,10 +48,15 @@ public struct JPEGTranscode {
 	}
 
 	public init(_ image: JPEGImage) throws {
-		guard !image.hasICCProfileTag else {
-			throw TranscodeError.unsupportedColorInterpretation
-		}
 		let count = image.components.count
+		if let bytes = image.iccProfile, !bytes.isEmpty {
+			guard count != 1, let profile = try? ICCProfile(validating: bytes) else {
+				throw TranscodeError.unsupportedColorInterpretation
+			}
+			iccProfile = profile
+		} else {
+			iccProfile = nil
+		}
 		switch count {
 		case 1:
 			// Grey. Only channel 1 reads the component; libjxl zero-fills the

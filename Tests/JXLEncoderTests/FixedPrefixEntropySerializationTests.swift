@@ -64,16 +64,11 @@ struct FixedPrefixEntropySerializationTests {
 			throw SemanticDumpError.unsupportedEntropyFixture(fixtureName)
 		}
 		let tokens = stride(from: 0, to: tokenValues.count, by: 3).map { index in
-			ContextMapEntropy.EncodedToken(
+			LZ77.EncodedToken(
 				token: Token(
 					context: UInt32(tokenValues[index]),
 					value: UInt32(tokenValues[index + 1])),
 				isLength: tokenValues[index + 2] != 0)
-		}
-		var histogram = Histogram()
-		for (symbol, count) in capturedCounts.enumerated() {
-			histogram.counts[symbol] = UInt32(count)
-			histogram.totalCount += Int(count)
 		}
 		let depths = depthValues.map(UInt8.init)
 		let prefixCode = PrefixCode(
@@ -104,16 +99,16 @@ struct FixedPrefixEntropySerializationTests {
 		#expect(capturedContextMap == [0])
 		#expect(usesPrefixCode == [1])
 		#expect(logAlphabetSize == [15])
-		let prepared = ContextMapEntropy.Prepared(
-			runLength: .init(enabled: runLengthEnabled[0] == 1, tokens: tokens),
-			contextMap: capturedContextMap.map(UInt8.init),
-			histograms: [histogram], uintConfigurations: uintConfigurations,
-			usesPrefixCode: usesPrefixCode[0] == 1,
-			logAlphabetSize: Int(logAlphabetSize[0]),
-			prefixCodes: [prefixCode], ansHistograms: [],
+		let prepared = EntropyCodeWriter.Prepared(
+			tokens: tokens,
+			code: EntropyCode(
+				contextMap: capturedContextMap.map(UInt8.init),
+				prefixCodes: [prefixCode],
+				uintConfigurations: uintConfigurations,
+				logAlphabetSize: Int(logAlphabetSize[0])),
 			estimatedCost: Int(costs[0]))
 		var writer = BitWriter()
-		ContextMapEntropy.write(prepared, to: &writer)
+		EntropyCodeWriter.write(prepared, writer: &writer)
 		#expect(nativeRecord.fixture == "context_entropy_prefix_99_fixed_wire")
 		#expect(nativeRecord.tableBits.count == depths.count)
 		#expect(nativeRecord.bitCount == 301)

@@ -23,11 +23,12 @@ extension Encoder {
 	/// Re-codes a JPEG from its own quantized coefficients, or returns nil if
 	/// this one cannot take that path.
 	///
-	/// A non-JPEG, unsupported layout, or tagged ICC profile returns nil so the
-	/// caller can decode and re-encode the pixels instead. Unprofiled RGB and
-	/// YCbCr inputs use the coefficient path when all RGB components are 1×1.
-	/// The output declares no orientation, so a
-	/// caller that must keep a rotated source upright checks
+	/// A non-JPEG, unsupported layout, or ICC profile outside the admitted
+	/// family, or one whose coded form libjxl's reader would reject, returns
+	/// nil so the caller can decode and re-encode the pixels instead. RGB and
+	/// YCbCr inputs use the coefficient path when all RGB components are 1×1;
+	/// an admitted profile is carried into the output. The output declares no
+	/// orientation, so a caller that must keep a rotated source upright checks
 	/// `JPEGParser.exifOrientation` first.
 	public static func recompressJPEG(
 		_ data: [UInt8],

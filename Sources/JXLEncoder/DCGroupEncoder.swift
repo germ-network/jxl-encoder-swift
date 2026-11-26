@@ -452,11 +452,9 @@ public enum DCGroupEncoder {
 	) throws {
 		func writeStream(_ stream: LocalStreams.Stream) {
 			writer.write(4, 2)  // own tree, default weighted predictor, no transforms
-			writer.write(1, 0)  // no lz77
 			EntropyCodeWriter.write(stream.treeCode, writer: &writer)
 			EntropyCodeWriter.writeTokens(
 				stream.tree.tokens, code: stream.treeCode, writer: &writer)
-			writer.write(1, 0)  // no lz77
 			EntropyCodeWriter.write(stream.code, writer: &writer)
 			EntropyCodeWriter.writeTokens(
 				stream.tokens, code: stream.code, writer: &writer)

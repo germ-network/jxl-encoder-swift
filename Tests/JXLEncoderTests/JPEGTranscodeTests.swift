@@ -76,10 +76,13 @@ struct JPEGTranscodeTests {
 	}
 
 	@Test(
-		"profiled source cannot enter coefficient coding")
+		"an admitted profile is carried and one outside the family cannot enter coefficient coding"
+	)
 	func unsupportedColorInterpretation() throws {
 		let profile = try JPEGParserTests.fixture("display_p3_profile")
-		let image = try JPEGParser.parse(profile)
+		var image = try JPEGParser.parse(profile)
+		#expect(try JPEGTranscode(image).iccProfile?.bytes == image.iccProfile)
+		image.iccProfile?[8] = 2
 		#expect(throws: JPEGTranscode.TranscodeError.unsupportedColorInterpretation) {
 			try JPEGTranscode(image)
 		}
