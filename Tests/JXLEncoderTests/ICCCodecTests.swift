@@ -27,8 +27,11 @@ struct ICCCodecTests {
 	}
 
 	static func curv(_ count: Int) -> [UInt8] {
-		Builder.ascii("curv") + [0, 0, 0, 0] + Builder.be32(UInt32(count))
-			+ (0..<count).flatMap { [UInt8($0 * 9 / 256), UInt8($0 * 9 % 256)] }
+		var bytes: [UInt8] = Builder.ascii("curv")
+		bytes += [0, 0, 0, 0]
+		bytes += Builder.be32(UInt32(count))
+		for i in 0..<count { bytes += [UInt8(i * 9 / 256), UInt8(i * 9 % 256)] }
+		return bytes
 	}
 
 	/// A command-stream reading written from the format's description of
@@ -245,21 +248,28 @@ struct ICCCodecTests {
 		}
 		// mAB layout: in/out channel counts at 8-9, CLUT offset at 24.
 		var lut = Builder()
-		let grid: [UInt8] = [3, 3, 3] + [UInt8](repeating: 0, count: 13) + [1, 0, 0, 0]
-		lut.setTag(
-			"A2B2",
-			Builder.ascii("mAB ") + [0, 0, 0, 0, 3, 3, 0, 0]
-				+ [UInt8](repeating: 0, count: 12)
-				+ Builder.be32(84) + [0, 0, 0, 0] + Self.curv(20) + grid
-				+ (0..<81).map { UInt8($0 * 3 % 256) })
+		var grid: [UInt8] = [3, 3, 3]
+		grid += [UInt8](repeating: 0, count: 13)
+		grid += [1, 0, 0, 0]
+		var mAB: [UInt8] = Builder.ascii("mAB ")
+		mAB += [0, 0, 0, 0, 3, 3, 0, 0]
+		mAB += [UInt8](repeating: 0, count: 12)
+		mAB += Builder.be32(84)
+		mAB += [0, 0, 0, 0]
+		mAB += Self.curv(20)
+		mAB += grid
+		mAB += (0..<81).map { (i: Int) -> UInt8 in UInt8(i * 3 % 256) }
+		lut.setTag("A2B2", mAB)
+		var gbd: [UInt8] = Builder.ascii("gbd ")
+		gbd += [0, 0, 0, 0]
+		gbd += (0..<42).map { (i: Int) -> UInt8 in UInt8(i * 5) }
 		var gamut = Builder()
-		gamut.setTag(
-			"gbdx",
-			Builder.ascii("gbd ") + [0, 0, 0, 0] + (0..<42).map { UInt8($0 * 5) })
-		let profiles = [
-			try Self.displayP3(), Builder().bytes,
+		gamut.setTag("gbdx", gbd)
+		let displayP3: [UInt8] = try Self.displayP3()
+		let profiles: [[UInt8]] = [
+			displayP3, Builder().bytes,
 			Self.aliasing(Builder().bytes, [5, 6], to: 4),
-			curved.bytes, Array(try Self.displayP3().prefix(100)), noise, lut.bytes,
+			curved.bytes, Array(displayP3.prefix(100)), noise, lut.bytes,
 			gamut.bytes,
 		]
 		for profile in profiles {

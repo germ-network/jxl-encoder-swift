@@ -49,8 +49,11 @@ struct ICCProfileTests {
 					+ Self.be32(UInt32(tag.data.count))
 				data += tag.data
 			}
-			return Self.be32(UInt32(tableEnd + data.count)) + header.dropFirst(4)
-				+ table + data
+			var bytes: [UInt8] = Self.be32(UInt32(tableEnd + data.count))
+			bytes += header.dropFirst(4)
+			bytes += table
+			bytes += data
+			return bytes
 		}
 
 		mutating func setHeader(_ offset: Int, _ value: some Collection<UInt8>) {

@@ -8,9 +8,9 @@ import Testing
 struct LZ77Tests {
 	@Test("RLE codes a run of the previous value as a length then distance 0")
 	func rleCopiesThePreviousValue() {
-		let values =
-			(0..<128).map { UInt32($0 % 64) } + [UInt32](repeating: 63, count: 40)
-			+ [5, 5, 5, 5, 9, 9, 9]
+		var values: [UInt32] = (0..<128).map { (i: Int) -> UInt32 in UInt32(i % 64) }
+		values += [UInt32](repeating: 63, count: 40)
+		values += [5, 5, 5, 5, 9, 9, 9]
 		let tokens = values.enumerated().map {
 			Token(context: UInt32($0.offset % 2), value: $0.element)
 		}
@@ -79,10 +79,15 @@ struct LZ77Tests {
 		]
 	}
 
-	static let tripled = literals(Array(1...40) + Array(1...40) + Array(1...40))
-	static let lazy = literals(
-		[200, 201, 202, 250] + [201, 202] + Array(1...40) + [200, 201, 202]
-			+ Array(1...40))
+	static let ramp: [UInt32] = Array(1...40)
+	static let tripled = literals(ramp + ramp + ramp)
+	static let lazy: [Token] = {
+		var values: [UInt32] = [200, 201, 202, 250, 201, 202]
+		values += ramp
+		values += [200, 201, 202]
+		values += ramp
+		return literals(values)
+	}()
 
 	@Test("greedy LZ77 replaces a repeated substring with a length and distance")
 	func lz77FindsRepeatedSubstring() {
@@ -138,9 +143,13 @@ struct LZ77Tests {
 	)
 	func optimalSkipsInsideRuns() {
 		let tail = [UInt32](200..<230)
-		let tokens = Self.literals(
-			[50] + [UInt32](repeating: 9, count: 12) + tail + [51]
-				+ [UInt32](repeating: 9, count: 40) + tail)
+		var values: [UInt32] = [50]
+		values += [UInt32](repeating: 9, count: 12)
+		values += tail
+		values.append(51)
+		values += [UInt32](repeating: 9, count: 40)
+		values += tail
+		let tokens = Self.literals(values)
 		let result = Self.apply(tokens, .optimal)
 		#expect(Self.expand(result.tokens) == tokens.map(\.value))
 		#expect(

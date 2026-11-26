@@ -33,6 +33,23 @@ enum ICCCodec {
 		func keyword(_ at: Int) -> UInt32 {
 			at + 4 > size ? 0x2020_2020 : UInt32(beInt(icc, at, 4))
 		}
+		// Split out of the loop's conditions: Swift 6.1/6.2 time out type-checking them inline.
+		func isSharedTRC(_ pos: Int) -> Bool {
+			guard keyword(pos) == Signature.gTRC, keyword(pos + 12) == Signature.bTRC
+			else { return false }
+			for k in 0..<8 {
+				let r = icc[pos - 8 + k]
+				if r != icc[pos + 4 + k] || r != icc[pos + 16 + k] { return false }
+			}
+			return true
+		}
+		func isPackedXYZ(_ pos: Int, after start: Int) -> Bool {
+			let gStart: Int = (start + 20) & 0xFFFF_FFFF
+			let bStart: Int = (start + 40) & 0xFFFF_FFFF
+			return keyword(pos) == Signature.gXYZ && keyword(pos + 12) == Signature.bXYZ
+				&& u32(pos + 8) == 20 && u32(pos + 20) == 20
+				&& u32(pos + 4) == gStart && u32(pos + 16) == bStart
+		}
 
 		var tagStarts: [Int] = []
 		var tagSizes: [Int] = []
@@ -56,25 +73,13 @@ enum ICCCodec {
 
 				var tagCode =
 					tagStrings.firstIndex(of: tag).map { UInt8($0) + 4 } ?? 1
-				if tag == Signature.rTRC, pos + 24 < size,
-					keyword(pos) == Signature.gTRC,
-					keyword(pos + 12) == Signature.bTRC,
-					(0..<8).allSatisfy({
-						icc[pos - 8 + $0] == icc[pos + 4 + $0]
-							&& icc[pos - 8 + $0] == icc[pos + 16 + $0]
-					})
-				{
+				if tag == Signature.rTRC, pos + 24 < size, isSharedTRC(pos) {
 					tagCode = 2
 					pos += 24
 					i += 2
 				}
-				if tag == Signature.rXYZ, pos + 24 < size,
-					keyword(pos) == Signature.gXYZ,
-					keyword(pos + 12) == Signature.bXYZ, tagSize == 20,
-					u32(pos + 8) == 20,
-					u32(pos + 20) == 20,
-					u32(pos + 4) == (tagStart + 20) & 0xFFFF_FFFF,
-					u32(pos + 16) == (tagStart + 40) & 0xFFFF_FFFF
+				if tag == Signature.rXYZ, pos + 24 < size, tagSize == 20,
+					isPackedXYZ(pos, after: tagStart)
 				{
 					tagCode = 3
 					pos += 24

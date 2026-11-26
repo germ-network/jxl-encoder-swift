@@ -313,10 +313,11 @@ public struct ICCProfile: Equatable, Sendable {
 	/// and storable as `Customxy` (color_encoding_cms.h:128-136). The named
 	/// shortcuts they take first lie inside that range, so they change nothing.
 	private static func isStorable(_ xy: (x: Double, y: Double)) -> Bool {
-		[xy.x, xy.y].allSatisfy { v in
-			v != 0 && abs(v) < 4
-				&& (-0x20_0000...0x1F_FFFF).contains(
-					Float(v * 1_000_000).rounded(.toNearestOrAwayFromZero))
+		let range: ClosedRange<Float> = -0x20_0000...0x1F_FFFF
+		return [xy.x, xy.y].allSatisfy { (v: Double) -> Bool in
+			guard v != 0, abs(v) < 4 else { return false }
+			let scaled = Float(v * 1_000_000).rounded(.toNearestOrAwayFromZero)
+			return range.contains(scaled)
 		}
 	}
 
