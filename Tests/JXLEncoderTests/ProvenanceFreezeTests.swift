@@ -12,7 +12,6 @@ struct ProvenanceFreezeTests {
 		"Tests/JXLEncoderTests/Fixtures/edge_dcgroup.dump",
 		"Tests/JXLEncoderTests/Fixtures/edge_acgroup.dump",
 		"Tests/JXLEncoderTests/Fixtures/edge_whole.jxl",
-		"Tests/JXLEncoderTests/Fixtures/multigroup_whole.jxl",
 		"Tests/JXLEncoderTests/Fixtures/prefix_codes.txt",
 		"Tests/JXLEncoderTests/Fixtures/context_tree.txt",
 		"Tests/JXLEncoderTests/Fixtures/ac_context.bin",

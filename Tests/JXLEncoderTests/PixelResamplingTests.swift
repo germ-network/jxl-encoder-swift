@@ -273,13 +273,10 @@ struct PixelResamplingTests {
 				}
 			}
 
-			for optimizeCodes in [false, true] {
-				let serial = try Encoder.encode(
-					image, distance: 10, optimizeCodes: optimizeCodes)
-				let concurrent = try await Encoder.encodeConcurrently(
-					image, distance: 10, optimizeCodes: optimizeCodes)
-				#expect(serial == concurrent)
-			}
+			let serial = try Encoder.encode(image, distance: 10)
+			let concurrent = try await Encoder.encodeConcurrently(
+				image, distance: 10)
+			#expect(serial == concurrent)
 		}
 	}
 

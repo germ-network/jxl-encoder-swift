@@ -7,33 +7,21 @@ import Testing
 /// exact bytes while streaming frames change how they are coded.
 @Suite("One-shot byte stability")
 struct OneShotByteStabilityTests {
-	@Test(
-		"frames at or below eight groups keep their bytes",
-		arguments: [true, false])
-	func eightGroupFrameBytesAreUnchanged(optimizeCodes: Bool) throws {
+	@Test("frames at or below eight groups keep their bytes")
+	func eightGroupFrameBytesAreUnchanged() throws {
 		let image = try ConcurrentEncodeTests.image(width: 600, height: 400)
 		#expect(ImageDim(width: 600, height: 400).groupCount <= 8)
-		let bytes = try Encoder.encode(
-			image, distance: 1.0, optimizeCodes: optimizeCodes)
-		#expect(
-			Self.sha256Hex(bytes)
-				== Self.eightGroup[optimizeCodes ? 0 : 1])
+		let bytes = try Encoder.encode(image, distance: 1.0)
+		#expect(Self.sha256Hex(bytes) == Self.eightGroup)
 	}
 
-	@Test(
-		"a resampled frame coded above eight groups keeps its bytes",
-		arguments: [true, false])
-	func resampledFrameAboveEightGroupsBytesAreUnchanged(
-		optimizeCodes: Bool
-	) throws {
+	@Test("a resampled frame coded above eight groups keeps its bytes")
+	func resampledFrameAboveEightGroupsBytesAreUnchanged() throws {
 		let image = try ConcurrentEncodeTests.image(width: 4608, height: 512)
 		let coded = ImageDim(width: 2304, height: 256)
 		#expect(coded.groupCount > 8)
-		let bytes = try Encoder.encode(
-			image, distance: 10, optimizeCodes: optimizeCodes)
-		#expect(
-			Self.sha256Hex(bytes)
-				== Self.resampled[optimizeCodes ? 0 : 1])
+		let bytes = try Encoder.encode(image, distance: 10)
+		#expect(Self.sha256Hex(bytes) == Self.resampled)
 	}
 
 	@Test(
@@ -53,14 +41,10 @@ struct OneShotByteStabilityTests {
 	}
 
 	// Digests recorded at main 3a9f046.
-	static let eightGroup = [
-		"18d74158f2b098a20cc7929551065e9b36a07e5d926a85dc8b8ece69fe349195",
-		"74816c3fae11c7d951e15d63a2224e87a4b36f807447ed4731dc51f72d371693",
-	]
-	static let resampled = [
-		"87b488282ac93bdb5e63688635df2229d94fecfda16bf56a62f7e80d71711090",
-		"422d239113f9c0ca8f0af3ebdfb8cec3e9e29c93892a80a9745650695e34da94",
-	]
+	static let eightGroup =
+		"18d74158f2b098a20cc7929551065e9b36a07e5d926a85dc8b8ece69fe349195"
+	static let resampled =
+		"87b488282ac93bdb5e63688635df2229d94fecfda16bf56a62f7e80d71711090"
 	static let jpeg = [
 		[
 			"1cf68cb275214f9dc083084d6447539878ed89447640a5f1e823bb84301756b2",

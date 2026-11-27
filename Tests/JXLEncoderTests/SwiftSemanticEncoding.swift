@@ -2,8 +2,7 @@ import Foundation
 
 @testable import JXLEncoder
 
-/// The decisions the optimized pixel path (`Encoder.encodeFrame` with
-/// `optimizeCodes: true`) makes for one frame, captured so they can be dumped
+/// The decisions the pixel path (`Encoder.encodeFrame`) makes for one frame, captured so they can be dumped
 /// and, in mutation tests, altered before the frame is written.
 struct SwiftFrameDecisions {
 	let width: Int
@@ -13,7 +12,7 @@ struct SwiftFrameDecisions {
 	let loopFilter: FrameAssembly.LoopFilter
 	var coeffOrder: CoeffOrder.Result
 	var acCode: EntropyCode
-	var blockContextMap: JPEGBlockContextMap.Result?
+	var blockContextMap: JPEGBlockContextMap.Result
 	/// No category reads it yet; the entropy categories will.
 	var dcCode: EntropyCode
 	/// Per AC group, in group raster order: the raw quant field the group
@@ -119,7 +118,7 @@ enum SwiftSemanticEncoding {
 		}
 		let dcData = try Encoder.assemble(
 			outputs: outputs, dim: dim, params: params,
-			optimizeCodes: true, sections: &sections)
+			sections: &sections)
 		let isStreaming: Bool
 		if case .streaming = plan { isStreaming = true } else { isStreaming = false }
 		var modularTree: (tree: ContextTree.Prepared, code: EntropyCode)?
@@ -243,13 +242,13 @@ extension SemanticDump {
 			]))
 		record(
 			"block_context.qf_thresholds",
-			.integers((decisions.blockContextMap?.qfThresholds ?? []).map(Int64.init)))
+			.integers(decisions.blockContextMap.qfThresholds.map(Int64.init)))
 		record(
 			"block_context.ctx_map",
-			.integers((decisions.blockContextMap?.contextMap ?? []).map(Int64.init)))
+			.integers(decisions.blockContextMap.contextMap.map(Int64.init)))
 		record(
 			"block_context.num_ctxs",
-			.integers([Int64(decisions.blockContextMap?.numContexts ?? 0)]))
+			.integers([Int64(decisions.blockContextMap.numContexts)]))
 		record("context_map.num_histograms", .integers([1]))
 		let code = decisions.acCode
 		let map =

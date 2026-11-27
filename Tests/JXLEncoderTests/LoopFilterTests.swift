@@ -175,15 +175,12 @@ struct LoopFilterTests {
 	func pixelHeadersKeepGaborishOffAtThresholds() throws {
 		let image = try Self.image()
 		let expected = try Self.referenceFilters(for: Self.thresholds)
-		for optimizeCodes in [true, false] {
-			for (distance, reference) in zip(Self.thresholds, expected) {
-				let encoded = try Encoder.encode(
-					image, distance: distance, optimizeCodes: optimizeCodes)
-				let actual = Self.loopFilter(in: encoded)
-				#expect(actual.gaborish == reference.0)
-				#expect(actual.epf == reference.1)
-				#expect(!actual.gaborish)
-			}
+		for (distance, reference) in zip(Self.thresholds, expected) {
+			let encoded = try Encoder.encode(image, distance: distance)
+			let actual = Self.loopFilter(in: encoded)
+			#expect(actual.gaborish == reference.0)
+			#expect(actual.epf == reference.1)
+			#expect(!actual.gaborish)
 		}
 	}
 

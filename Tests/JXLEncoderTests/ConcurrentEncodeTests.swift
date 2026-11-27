@@ -36,18 +36,6 @@ struct ConcurrentEncodeTests {
 		#expect(sequential == concurrent)
 	}
 
-	/// The staged entropy path collects tokens from every group before building
-	/// a code, so it is the one most exposed to results arriving out of order.
-	@Test("both entropy paths agree", arguments: [true, false])
-	func entropyPaths(optimize: Bool) async throws {
-		let image = try Self.image(width: 301, height: 301)
-		let sequential = try Encoder.encode(
-			image, distance: 1.0, optimizeCodes: optimize)
-		let concurrent = try await Encoder.encodeConcurrently(
-			image, distance: 1.0, optimizeCodes: optimize)
-		#expect(sequential == concurrent)
-	}
-
 	@Test(
 		"distance and transfer function carry through",
 		arguments: [0.5, 1.0, 3.0] as [Float])

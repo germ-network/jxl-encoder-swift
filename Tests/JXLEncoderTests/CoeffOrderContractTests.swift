@@ -182,13 +182,9 @@ struct CoeffOrderContractTests {
 		let params = try DistanceParams(distance: 1)
 
 		let optimized = Encoder.analyzePixelFrame(
-			computes: computes, dim: dim, params: params, optimizeCodes: true)
-		let unoptimized = Encoder.analyzePixelFrame(
-			computes: computes, dim: dim, params: params, optimizeCodes: false)
+			computes: computes, dim: dim, params: params)
 
 		#expect(optimized.coeffOrder.isCustom)
-		#expect(!unoptimized.coeffOrder.isCustom)
-		#expect(unoptimized.coeffOrder.orders == CoeffOrder.Result.identity.orders)
 	}
 
 	@Test

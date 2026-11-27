@@ -401,12 +401,15 @@ enum SwiftEntropySemanticEncoding {
 	}
 
 	static func acTokens(group: Encoder.ACGroupCompute, order: [[Int]]) -> SemanticDump {
-		let analysis = Encoder.PixelFrameAnalysis(
-			coeffOrder: .init(orders: order, isCustom: false), blockContextMap: nil,
-			acCode: .staticAC, plan: .oneShot)
-		let output = Encoder.tokenizeACGroup(
-			group, analysis: analysis, mode: .staging(.staticAC))
-		let tokens = output.section.staged.compactMap { record -> Token? in
+		var writer = SectionWriter(mode: .staging(.staticAC))
+		ACGroupEncoder.tokenizeGroup(
+			coefficients: group.coefficients,
+			widthInBlocks: group.widthInBlocks,
+			heightInBlocks: group.heightInBlocks,
+			subsampling: .none,
+			order: order,
+			writer: &writer)
+		let tokens = writer.staged.compactMap { record -> Token? in
 			guard case .token(let context, let value) = record else { return nil }
 			return Token(context: context, value: value)
 		}
