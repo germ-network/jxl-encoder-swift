@@ -103,8 +103,7 @@ public enum ACTokenizer {
 	/// block category (`JPEGBlockContextMap`) instead of deriving one from
 	/// `ACContext.blockContext`'s fixed formula. Otherwise identical —
 	/// duplicated rather than parameterising `writeBlock` itself, so the
-	/// pixel path and the JPEG static-table path keep touching only the
-	/// already-gated fixed-category code.
+	/// fixed-category code stays untouched.
 	public static func writeBlockAdaptive(
 		quantized: ArraySlice<Int32>,
 		blockCategory: Int,

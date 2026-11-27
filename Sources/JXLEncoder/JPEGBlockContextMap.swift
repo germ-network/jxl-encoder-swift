@@ -203,9 +203,7 @@ public enum JPEGBlockContextMap {
 		for threshold in result.qfThresholds {
 			QuantThresholdCoder.write(threshold - 1, writer: &writer)
 		}
-		// Always a per-image, dynamically computed map — no static-tiny
-		// reference to stay byte-exact against, unlike the pixel/JPEG
-		// static-table path's fixed context map.
+		// Always a per-image, dynamically computed map.
 		EntropyCodeWriter.writeContextMapEntries(
 			result.contextMap, numHistograms: result.numContexts, writer: &writer)
 	}

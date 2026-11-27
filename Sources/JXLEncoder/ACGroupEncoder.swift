@@ -258,9 +258,7 @@ extension ACGroupEncoder {
 		quantDC: inout [[Int32]],
 		/// Non-nil switches every block to the adaptive per-image context
 		/// assignment; nil keeps the fixed formula `ACContext.blockContext`
-		/// already computes, unchanged. The static-table (`optimizeCodes:
-		/// false`) path always passes nil — this adaptive scheme has no
-		/// meaning without per-image optimisation to carry it.
+		/// already computes, unchanged.
 		blockContextMap: JPEGBlockContextMap.Result?,
 		order: [[Int]],
 		writer: inout SectionWriter
