@@ -492,11 +492,42 @@ struct JPEGSemanticFixtureTests {
 				== .integers([1]))
 		let context = try SwiftJPEGSemanticEncoding.contextWitness(
 			transcode, reference: reference)
-		#expect(
-			context.fields
-				== witness.fields.filter {
-					$0.key != "jpeg_context.reconstructed_coefficients_exact"
-				})
+		let (expectedContext, expectedCfL) = Self.splitContextWitness(witness)
+		#expect(context.fields == expectedContext)
+		#expect(Self.colorCorrelationFields(transcode) == expectedCfL)
+	}
+
+	private static func splitContextWitness(_ witness: SemanticDump) -> (
+		context: [String: SemanticDump.Values], cfl: [String: SemanticDump.Values]
+	) {
+		let fields = witness.fields.filter {
+			$0.key != "jpeg_context.reconstructed_coefficients_exact"
+		}
+		return (
+			fields.filter { !$0.key.hasPrefix("jpeg_cfl.") },
+			fields.filter { $0.key.hasPrefix("jpeg_cfl.") }
+		)
+	}
+
+	private static func colorCorrelationFields(
+		_ transcode: JPEGTranscode
+	) -> [String: SemanticDump.Values] {
+		let dim = ImageDim(
+			width: transcode.width, height: transcode.height,
+			blockAlignment: (
+				x: 1 << transcode.subsampling.maxHorizontalShift,
+				y: 1 << transcode.subsampling.maxVerticalShift
+			))
+		var data = DCGroupData(
+			widthInBlocks: dim.widthInBlocks, heightInBlocks: dim.heightInBlocks)
+		transcode.populateColorCorrelation(data: &data, blockX0: 0, blockY0: 0)
+		return [
+			"jpeg_cfl.map_size": .integers([
+				Int64(data.cmapWidth), Int64(data.cmapHeight),
+			]),
+			"jpeg_cfl.ytox_map": .integers(data.ytoxMap.map(Int64.init)),
+			"jpeg_cfl.ytob_map": .integers(data.ytobMap.map(Int64.init)),
+		]
 	}
 
 	private func dcHistogram(_ transcode: JPEGTranscode) -> [Int] {
@@ -534,12 +565,11 @@ struct JPEGSemanticFixtureTests {
 			#expect(
 				expected.fields["jpeg_context.reconstructed_coefficients_exact"]
 					== .integers([1]))
+			let (expectedContext, expectedCfL) = Self.splitContextWitness(expected)
+			#expect(actual.fields == expectedContext, "\(name) context witness differs")
 			#expect(
-				actual.fields
-					== expected.fields.filter {
-						$0.key
-							!= "jpeg_context.reconstructed_coefficients_exact"
-					}, "\(name) context witness differs")
+				Self.colorCorrelationFields(transcode) == expectedCfL,
+				"\(name) CfL map differs")
 			#expect(expected.fields["jpeg_context.group_count"] == .integers([6]))
 			#expect(expected.fields["jpeg_context.bucket_count"] == .integers([3]))
 			let distinguishing = suffix == "420" ? 608 : suffix == "422" ? 636 : 644
