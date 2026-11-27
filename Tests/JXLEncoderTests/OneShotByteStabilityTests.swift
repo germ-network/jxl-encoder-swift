@@ -24,20 +24,17 @@ struct OneShotByteStabilityTests {
 		#expect(Self.sha256Hex(bytes) == Self.resampled)
 	}
 
-	@Test(
-		"colour and grayscale JPEG transcodes keep their bytes",
-		arguments: [true, false])
-	func jpegTranscodeBytesAreUnchanged(optimizeCodes: Bool) throws {
+	@Test("colour and grayscale JPEG transcodes keep their bytes")
+	func jpegTranscodeBytesAreUnchanged() throws {
 		var digests: [String] = []
 		for name in ["hopper_420_odd", "hopper_gray_odd"] {
 			let transcode = try JPEGTranscode(
 				JPEGParser.parse(JPEGParserTests.fixture(name)))
 			digests.append(
 				Self.sha256Hex(
-					try Encoder.encodeJPEG(
-						transcode, optimizeCodes: optimizeCodes)))
+					try Encoder.encodeJPEG(transcode)))
 		}
-		#expect(digests == Self.jpeg[optimizeCodes ? 0 : 1])
+		#expect(digests == Self.jpeg)
 	}
 
 	// Digests recorded at main 3a9f046.
@@ -46,14 +43,8 @@ struct OneShotByteStabilityTests {
 	static let resampled =
 		"87b488282ac93bdb5e63688635df2229d94fecfda16bf56a62f7e80d71711090"
 	static let jpeg = [
-		[
-			"1cf68cb275214f9dc083084d6447539878ed89447640a5f1e823bb84301756b2",
-			"0cd0a6e9df7d3d5341a8bb312f0c06571109c31582fb2dba69f66e26aa2b4b86",
-		],
-		[
-			"421a2bbb4dee4b560cfa2804938a42be1d4a181779dbf6f63f6fa22c97191620",
-			"3791b329dbab2d992db522e15333783682b429a546833455d0c6c2fdf6328848",
-		],
+		"1cf68cb275214f9dc083084d6447539878ed89447640a5f1e823bb84301756b2",
+		"0cd0a6e9df7d3d5341a8bb312f0c06571109c31582fb2dba69f66e26aa2b4b86",
 	]
 
 	static func sha256Hex(_ bytes: [UInt8]) -> String {

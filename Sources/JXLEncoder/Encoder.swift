@@ -616,8 +616,7 @@ extension Encoder {
 	/// An admitted source profile is coded into the header in place of sRGB. Throws
 	/// `EncoderError.unsupportedICCProfile` for one libjxl's reader would reject.
 	public static func encodeJPEG(
-		_ transcode: JPEGTranscode,
-		optimizeCodes: Bool = true
+		_ transcode: JPEGTranscode
 	) throws -> [UInt8] {
 		var writer = BitWriter()
 		try ImageHeader.write(
@@ -628,7 +627,7 @@ extension Encoder {
 		try encodeJPEGFrame(
 			transcode,
 			loopFilter: .init(gaborish: false, epfIterations: 0),
-			optimizeCodes: optimizeCodes, writer: &writer)
+			writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
 	}
@@ -640,7 +639,6 @@ extension Encoder {
 	static func encodeJPEGFrame(
 		_ transcode: JPEGTranscode,
 		loopFilter: FrameAssembly.LoopFilter,
-		optimizeCodes: Bool,
 		writer: inout BitWriter
 	) throws -> (dc: EntropyCode, ac: EntropyCode) {
 		// When chroma is subsampled the block grid rounds up to a whole MCU, so
@@ -656,39 +654,24 @@ extension Encoder {
 			width: transcode.width, height: transcode.height,
 			blockAlignment: alignment)
 
-		// The adaptive block context map has no meaning without per-image
-		// optimisation to carry it — the static-table path keeps the fixed
-		// formula `ACContext.blockContext` already computes, unchanged.
-		let blockContextMap: JPEGBlockContextMap.Result? =
-			optimizeCodes ? JPEGBlockContextMap.compute(transcode) : nil
+		let blockContextMap = JPEGBlockContextMap.compute(transcode)
 
 		var dcCode = EntropyCode.staticDC
-		// A wider raw context space than the static table's fixed 4
-		// categories, sized to whatever this image's adaptive map actually
-		// uses — `SectionOptimizer.optimize` reads only `contextCount`, so
-		// the map/prefix-code values here are never read.
-		var acCode: EntropyCode =
-			if let blockContextMap {
-				EntropyCode(
-					contextMap: [UInt8](
-						repeating: 0,
-						count: blockContextMap.numContexts
-							* (ACContext.nonZeroBuckets
-								+ ACContext.zeroDensityCount)),
-					prefixCodes: [])
-			} else {
-				.staticAC
-			}
+		// Sized to this image's block context map: `SectionOptimizer.optimize`
+		// reads only `contextCount`, so the map/prefix-code values are never read.
+		var acCode = EntropyCode(
+			contextMap: [UInt8](
+				repeating: 0,
+				count: blockContextMap.numContexts
+					* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+			prefixCodes: [])
 
-		let mode: SectionWriter.Mode =
-			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
 		var sections = [SectionWriter](
-			repeating: SectionWriter(mode: mode),
+			repeating: SectionWriter(mode: .staging(dcCode)),
 			count: 2 + dim.dcGroupCount + dim.groupCount)
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
 		for i in acRange {
-			sections[i] = SectionWriter(
-				mode: optimizeCodes ? .staging(acCode) : .direct(acCode))
+			sections[i] = SectionWriter(mode: .staging(acCode))
 		}
 
 		// DC groups collect the DC image; the AC pass fills it in as it goes,
@@ -710,50 +693,45 @@ extension Encoder {
 			return data
 		}
 
-		// No meaning without per-image code optimisation to carry it — the
-		// static-table path keeps the fixed zig-zag order, unchanged. Unlike
-		// the pixel path, a JPEG's coefficients are already fully parsed
+		// Unlike the pixel path, a JPEG's coefficients are already fully parsed
 		// (`transcode`), so this only needs a read-only sweep, not a full
 		// compute-then-tokenize split.
-		var coeffOrder = CoeffOrder.Result.identity
-		if optimizeCodes {
-			var counts = [CoeffOrder.ZeroCounts](
-				repeating: CoeffOrder.ZeroCounts(), count: 3)
-			var sampler = CoeffOrder.Sampler()
-			for gy in 0..<dim.heightInGroups {
-				for gx in 0..<dim.widthInGroups {
-					let blockX0 = gx * Geometry.groupDimInBlocks
-					let blockY0 = gy * Geometry.groupDimInBlocks
-					let rect = dim.pixelRect(
-						ix: gx, iy: gy, dim: Geometry.groupDim)
-					let groupDim = ImageDim(
-						width: rect.width, height: rect.height,
-						blockAlignment: alignment)
-					let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
-					let dcGroupX = blockX0 / dcGroupBlocks
-					let dcGroupY = blockY0 / dcGroupBlocks
-					let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
-					let coefficients =
-						try ACGroupEncoder.jpegCoefficientsForOrdering(
-							transcode: transcode,
-							colorCorrelation: dcData[dcIndex],
-							colorCorrelationBlockX0: dcGroupX
-								* dcGroupBlocks,
-							colorCorrelationBlockY0: dcGroupY
-								* dcGroupBlocks,
-							blockX0: blockX0, blockY0: blockY0,
-							widthInBlocks: groupDim.widthInBlocks,
-							heightInBlocks: groupDim.heightInBlocks)
-					CoeffOrder.accumulateGroup(
-						coefficients, widthInBlocks: groupDim.widthInBlocks,
-						heightInBlocks: groupDim.heightInBlocks,
-						sampler: &sampler, counts: &counts)
-				}
+		var counts = [CoeffOrder.ZeroCounts](
+			repeating: CoeffOrder.ZeroCounts(), count: 3)
+		var sampler = CoeffOrder.Sampler()
+		for gy in 0..<dim.heightInGroups {
+			for gx in 0..<dim.widthInGroups {
+				let blockX0 = gx * Geometry.groupDimInBlocks
+				let blockY0 = gy * Geometry.groupDimInBlocks
+				let rect = dim.pixelRect(
+					ix: gx, iy: gy, dim: Geometry.groupDim)
+				let groupDim = ImageDim(
+					width: rect.width, height: rect.height,
+					blockAlignment: alignment)
+				let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
+				let dcGroupX = blockX0 / dcGroupBlocks
+				let dcGroupY = blockY0 / dcGroupBlocks
+				let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
+				let coefficients =
+					try ACGroupEncoder.jpegCoefficientsForOrdering(
+						transcode: transcode,
+						colorCorrelation: dcData[dcIndex],
+						colorCorrelationBlockX0: dcGroupX
+							* dcGroupBlocks,
+						colorCorrelationBlockY0: dcGroupY
+							* dcGroupBlocks,
+						blockX0: blockX0, blockY0: blockY0,
+						widthInBlocks: groupDim.widthInBlocks,
+						heightInBlocks: groupDim.heightInBlocks)
+				CoeffOrder.accumulateGroup(
+					coefficients, widthInBlocks: groupDim.widthInBlocks,
+					heightInBlocks: groupDim.heightInBlocks,
+					sampler: &sampler, counts: &counts)
 			}
-			coeffOrder = CoeffOrder.compute(
-				counts: counts, widthInBlocks: dim.widthInBlocks,
-				heightInBlocks: dim.heightInBlocks)
 		}
+		let coeffOrder = CoeffOrder.compute(
+			counts: counts, widthInBlocks: dim.widthInBlocks,
+			heightInBlocks: dim.heightInBlocks)
 
 		for gy in 0..<dim.heightInGroups {
 			for gx in 0..<dim.widthInGroups {
@@ -843,40 +821,31 @@ extension Encoder {
 
 		var modularTree: ContextTree.Prepared?
 		var modularTreeCode: EntropyCode?
-		if optimizeCodes {
-			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: true)
-			let streams = try dcData.enumerated().map {
-				try DCGroupEncoder.tokenStreams(
-					data: $0.element, groupIndex: $0.offset, tree: tree)
-			}
-			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
-			dcCode = SectionOptimizer.modularCode(
-				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
-				extraDCPrecision: 0)
-			let treeCode = SectionOptimizer.modularCode(
-				tokenStreams: [tree.tokens],
-				contextCount: ContextTree.treeContextCount,
-				extraDCPrecision: 0)
-			for index in dcData.indices {
-				var section = BitWriter()
-				try DCGroupEncoder.write(
-					data: dcData[index], streams: streams[index],
-					code: dcCode, writer: &section)
-				sections[1 + index] = SectionWriter(prewritten: section)
-			}
-			modularTree = tree
-			modularTreeCode = treeCode
-		} else {
-			for i in 0..<dim.dcGroupCount {
-				DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
-			}
+		let tree = ContextTree.prepare(groups: dcData, jpegTranscode: true)
+		let streams = try dcData.enumerated().map {
+			try DCGroupEncoder.tokenStreams(
+				data: $0.element, groupIndex: $0.offset, tree: tree)
 		}
-
-		if optimizeCodes {
-			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode,
-				allowANS: true)
+		let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+		dcCode = SectionOptimizer.modularCode(
+			tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+			extraDCPrecision: 0)
+		let treeCode = SectionOptimizer.modularCode(
+			tokenStreams: [tree.tokens],
+			contextCount: ContextTree.treeContextCount,
+			extraDCPrecision: 0)
+		for index in dcData.indices {
+			var section = BitWriter()
+			try DCGroupEncoder.write(
+				data: dcData[index], streams: streams[index],
+				code: dcCode, writer: &section)
+			sections[1 + index] = SectionWriter(prewritten: section)
 		}
+		modularTree = tree
+		modularTreeCode = treeCode
+		acCode = SectionOptimizer.optimize(
+			sections: &sections, range: acRange, baseCode: acCode,
+			allowANS: true)
 
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(

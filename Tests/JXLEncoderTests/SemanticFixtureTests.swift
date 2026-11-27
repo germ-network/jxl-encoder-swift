@@ -397,7 +397,7 @@ struct SemanticFixtureTests {
 		var writer = BitWriter()
 		let acCode = try Encoder.encodeJPEGFrame(
 			transcode, loopFilter: .init(gaborish: false, epfIterations: 0),
-			optimizeCodes: true, writer: &writer
+			writer: &writer
 		).ac
 		var actual = SemanticDump()
 		try actual.recordACEntropyCode(acCode)

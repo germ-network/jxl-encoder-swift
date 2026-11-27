@@ -25,24 +25,22 @@
 			.enabled(if: CoeffOrderNativeIntegrationTests.harness != nil),
 			arguments: [
 				"ycbcr-p3", "rgb-p3", "lz77-p3", "kLZ77", "random", "ratio-above",
-			],
-			[true, false])
+			])
 		func witnessRecoversProfileCoefficientsAndQuantizers(
-			fixture: String, optimizeCodes: Bool
+			fixture: String
 		) throws {
-			try Self.witness(fixture, optimizeCodes)
+			try Self.witness(fixture)
 		}
 
-		static func witness(_ fixture: String, _ optimizeCodes: Bool) throws {
+		static func witness(_ fixture: String) throws {
 			let (name, lz77) = try #require(Self.fixtures[fixture])
 			let jpeg = try JPEGParserTests.fixture(name)
 			let image = try JPEGParser.parse(jpeg)
 			let profile = try #require(image.iccProfile)
-			let codestream = try Encoder.encodeJPEG(
-				JPEGTranscode(image), optimizeCodes: optimizeCodes)
+			let codestream = try Encoder.encodeJPEG(JPEGTranscode(image))
 			let witness = try CoeffOrderNativeIntegrationTests.jpegWitness(
 				sourceJPEG: Data(jpeg), codestream: Data(codestream),
-				name: "\(fixture) optimizeCodes=\(optimizeCodes)")
+				name: fixture)
 			for field in [
 				"want_icc", "exact_bytes", "coefficients_exact", "quantizers_exact",
 			] {

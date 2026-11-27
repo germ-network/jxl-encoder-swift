@@ -281,26 +281,24 @@ extension PortableJPEGRecompressionTests {
 			sourceLocation: sourceLocation)
 		let header = try Self.headerBytes(transcode)
 		let strippedHeader = try Self.headerBytes(stripped)
-		for optimizeCodes in [true, false] {
-			let stream = try Encoder.encodeJPEG(transcode, optimizeCodes: optimizeCodes)
-			let plain = try Encoder.encodeJPEG(stripped, optimizeCodes: optimizeCodes)
-			#expect(JXLSignature.matches(stream), sourceLocation: sourceLocation)
-			let signal = Self.colorSignal(stream)
-			#expect(signal.wantICC == 1, sourceLocation: sourceLocation)
-			#expect(signal.colorSpace == 0, sourceLocation: sourceLocation)
-			#expect(
-				signal.size == UInt64(ICCCodec.predict(bytes).count),
-				sourceLocation: sourceLocation)
-			#expect(
-				Self.colorSignal(plain).wantICC == 0, sourceLocation: sourceLocation
-			)
-			#expect(stream.starts(with: header), sourceLocation: sourceLocation)
-			#expect(plain.starts(with: strippedHeader), sourceLocation: sourceLocation)
-			#expect(
-				stream.dropFirst(header.count)
-					== plain.dropFirst(strippedHeader.count),
-				sourceLocation: sourceLocation)
-		}
+		let stream = try Encoder.encodeJPEG(transcode)
+		let plain = try Encoder.encodeJPEG(stripped)
+		#expect(JXLSignature.matches(stream), sourceLocation: sourceLocation)
+		let signal = Self.colorSignal(stream)
+		#expect(signal.wantICC == 1, sourceLocation: sourceLocation)
+		#expect(signal.colorSpace == 0, sourceLocation: sourceLocation)
+		#expect(
+			signal.size == UInt64(ICCCodec.predict(bytes).count),
+			sourceLocation: sourceLocation)
+		#expect(
+			Self.colorSignal(plain).wantICC == 0, sourceLocation: sourceLocation
+		)
+		#expect(stream.starts(with: header), sourceLocation: sourceLocation)
+		#expect(plain.starts(with: strippedHeader), sourceLocation: sourceLocation)
+		#expect(
+			stream.dropFirst(header.count)
+				== plain.dropFirst(strippedHeader.count),
+			sourceLocation: sourceLocation)
 	}
 
 	@Test("a YCbCr JPEG with an in-family profile recompresses")

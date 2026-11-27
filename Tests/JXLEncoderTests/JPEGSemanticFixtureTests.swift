@@ -163,8 +163,7 @@ struct JPEGSemanticFixtureTests {
 			let transcode = try JPEGTranscode(
 				JPEGParser.parse(
 					JPEGSemanticCorpusEntry.jpegBytes(entry.jpegFixture)))
-			let referenceEncoding = try Encoder.encodeJPEG(
-				transcode, optimizeCodes: true)
+			let referenceEncoding = try Encoder.encodeJPEG(transcode)
 			let matches = result.codestream.elementsEqual(referenceEncoding)
 			#expect(matches)
 		}

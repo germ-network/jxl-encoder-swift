@@ -35,18 +35,11 @@
 		@Test(
 			"Grayscale JPEG streams declare grayscale sRGB with YCbCr and preserve coefficients and quantizers",
 			.enabled(if: harness != nil),
-			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [false, true])
-		func actualGrayscaleJPEGSerializationCrossCheck(name: String, optimize: Bool) throws
-		{
+			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"])
+		func actualGrayscaleJPEGSerializationCrossCheck(name: String) throws {
 			guard Self.harness != nil else { return }
 			let source = try JPEGParserTests.fixture(name)
-			let transcode = try JPEGTranscode(JPEGParser.parse(source))
-			let codestream =
-				if optimize {
-					try #require(Encoder.recompressJPEG(source))
-				} else {
-					try Encoder.encodeJPEG(transcode, optimizeCodes: false)
-				}
+			let codestream = try #require(Encoder.recompressJPEG(source))
 			let witness = try Self.jpegWitness(
 				sourceJPEG: Data(source), codestream: Data(codestream), name: name)
 			#expect(
@@ -58,17 +51,11 @@
 		@Test(
 			"grayscale JPEG native decoders preserve pixels",
 			.enabled(if: nativePixelDecoders != nil),
-			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [false, true])
-		func nativeGrayscalePixels(name: String, optimize: Bool) throws {
+			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"])
+		func nativeGrayscalePixels(name: String) throws {
 			guard let nativePixelDecoders = Self.nativePixelDecoders else { return }
 			let source = try JPEGParserTests.fixture(name)
-			let transcode = try JPEGTranscode(JPEGParser.parse(source))
-			let codestream =
-				if optimize {
-					try #require(Encoder.recompressJPEG(source))
-				} else {
-					try Encoder.encodeJPEG(transcode, optimizeCodes: false)
-				}
+			let codestream = try #require(Encoder.recompressJPEG(source))
 			let directory = FileManager.default.temporaryDirectory
 				.appendingPathComponent("jpeg-native-pixels-\(UUID().uuidString)")
 			try FileManager.default.createDirectory(
@@ -100,13 +87,13 @@
 			}
 			let mae = total / Double(sourcePixels.samples.count)
 			let receipt =
-				"\(name) optimize=\(optimize) size=\(sourcePixels.width)x\(sourcePixels.height) mae=\(mae)\n"
+				"\(name) size=\(sourcePixels.width)x\(sourcePixels.height) mae=\(mae)\n"
 			if let evidenceDirectory = ProcessInfo.processInfo.environment[
 				"JXL_PIXEL_EVIDENCE_DIR"]
 			{
 				let evidenceURL = URL(fileURLWithPath: evidenceDirectory)
 					.appendingPathComponent(
-						"\(name)-\(optimize ? "optimized" : "static").txt")
+						"\(name)-optimized.txt")
 				try Data(receipt.utf8).write(to: evidenceURL, options: .atomic)
 			}
 			#expect(mae < 2.0, Comment(rawValue: receipt))

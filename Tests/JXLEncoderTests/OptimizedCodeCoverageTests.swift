@@ -21,7 +21,7 @@ struct OptimizedCodeCoverageTests {
 		return code.contextMap
 	}
 
-	static func codes(_ name: String, optimize: Bool) throws -> (
+	static func codes(_ name: String) throws -> (
 		dc: EntropyCode, ac: EntropyCode
 	) {
 		let jpeg = try JPEGParser.parse(try JPEGParserTests.fixture(name))
@@ -29,7 +29,7 @@ struct OptimizedCodeCoverageTests {
 		var writer = BitWriter()
 		return try Encoder.encodeJPEGFrame(
 			transcode, loopFilter: .init(gaborish: false, epfIterations: 0),
-			optimizeCodes: optimize, writer: &writer)
+			writer: &writer)
 	}
 
 	/// Reports coverage rather than just asserting, so a failure names the code
@@ -58,7 +58,7 @@ struct OptimizedCodeCoverageTests {
 		"no transmitted prefix code is empty",
 		arguments: ["small_444", "small_422", "small_440", "hopper_420_odd"])
 	func noEmptyCodes(name: String) throws {
-		let (dc, ac) = try Self.codes(name, optimize: true)
+		let (dc, ac) = try Self.codes(name)
 		let detail = Self.shapes(dc, "DC") + "  " + Self.shapes(ac, "AC")
 		let empty =
 			dc.prefixCodes.contains { $0.depths.allSatisfy { $0 == 0 } }
@@ -70,7 +70,7 @@ struct OptimizedCodeCoverageTests {
 		"subsampled transcodes transmit a covering context map",
 		arguments: ["small_422", "small_440", "hopper_420_odd"])
 	func subsampledCoverage(name: String) throws {
-		let (dc, ac) = try Self.codes(name, optimize: true)
+		let (dc, ac) = try Self.codes(name)
 		let problems = [Self.report(dc, "DC"), Self.report(ac, "AC")].compactMap { $0 }
 		#expect(problems.isEmpty, "\(problems.joined(separator: "; "))")
 	}
@@ -81,7 +81,7 @@ struct OptimizedCodeCoverageTests {
 		"unsubsampled transcodes transmit a covering context map",
 		arguments: ["small_444", "hopper_gray_odd"])
 	func unsubsampledCoverage(name: String) throws {
-		let (dc, ac) = try Self.codes(name, optimize: true)
+		let (dc, ac) = try Self.codes(name)
 		let problems = [Self.report(dc, "DC"), Self.report(ac, "AC")].compactMap { $0 }
 		#expect(problems.isEmpty, "\(problems.joined(separator: "; "))")
 	}
