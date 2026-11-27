@@ -456,6 +456,8 @@ public enum Encoder {
 			sections.map { $0.finished() }, writer: &writer)
 	}
 
+	/// Placeholders: assembly replaces every section with its tokenized or
+	/// prewritten form.
 	static func initialPixelSections(dim: ImageDim) -> [SectionWriter] {
 		var sections = [SectionWriter](
 			repeating: SectionWriter(mode: .staging(.staticDC)),

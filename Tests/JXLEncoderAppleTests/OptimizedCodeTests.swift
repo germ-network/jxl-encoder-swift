@@ -124,9 +124,8 @@
 			}
 		}
 
-		/// The static tables impose roughly a 1 kB floor; optimising should take
-		/// a small thumbnail well below it.
-		@Test("a 64x64 thumbnail drops under the static floor")
+		/// Per-image codes keep a small thumbnail well under 1 kB.
+		@Test("a 64x64 thumbnail stays under 1 kB")
 		func belowStaticFloor() throws {
 			let optimized = try Self.encode(Self.image(64))
 			#expect(optimized.count < 1000)
