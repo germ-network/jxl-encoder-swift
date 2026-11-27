@@ -7,69 +7,44 @@ import Testing
 /// exact bytes while streaming frames change how they are coded.
 @Suite("One-shot byte stability")
 struct OneShotByteStabilityTests {
-	@Test(
-		"frames at or below eight groups keep their bytes",
-		arguments: [true, false])
-	func eightGroupFrameBytesAreUnchanged(optimizeCodes: Bool) throws {
+	@Test("frames at or below eight groups keep their bytes")
+	func eightGroupFrameBytesAreUnchanged() throws {
 		let image = try ConcurrentEncodeTests.image(width: 600, height: 400)
 		#expect(ImageDim(width: 600, height: 400).groupCount <= 8)
-		let bytes = try Encoder.encode(
-			image, distance: 1.0, optimizeCodes: optimizeCodes)
-		#expect(
-			Self.sha256Hex(bytes)
-				== Self.eightGroup[optimizeCodes ? 0 : 1])
+		let bytes = try Encoder.encode(image, distance: 1.0)
+		#expect(Self.sha256Hex(bytes) == Self.eightGroup)
 	}
 
-	@Test(
-		"a resampled frame coded above eight groups keeps its bytes",
-		arguments: [true, false])
-	func resampledFrameAboveEightGroupsBytesAreUnchanged(
-		optimizeCodes: Bool
-	) throws {
+	@Test("a resampled frame coded above eight groups keeps its bytes")
+	func resampledFrameAboveEightGroupsBytesAreUnchanged() throws {
 		let image = try ConcurrentEncodeTests.image(width: 4608, height: 512)
 		let coded = ImageDim(width: 2304, height: 256)
 		#expect(coded.groupCount > 8)
-		let bytes = try Encoder.encode(
-			image, distance: 10, optimizeCodes: optimizeCodes)
-		#expect(
-			Self.sha256Hex(bytes)
-				== Self.resampled[optimizeCodes ? 0 : 1])
+		let bytes = try Encoder.encode(image, distance: 10)
+		#expect(Self.sha256Hex(bytes) == Self.resampled)
 	}
 
-	@Test(
-		"colour and grayscale JPEG transcodes keep their bytes",
-		arguments: [true, false])
-	func jpegTranscodeBytesAreUnchanged(optimizeCodes: Bool) throws {
+	@Test("colour and grayscale JPEG transcodes keep their bytes")
+	func jpegTranscodeBytesAreUnchanged() throws {
 		var digests: [String] = []
 		for name in ["hopper_420_odd", "hopper_gray_odd"] {
 			let transcode = try JPEGTranscode(
 				JPEGParser.parse(JPEGParserTests.fixture(name)))
 			digests.append(
 				Self.sha256Hex(
-					try Encoder.encodeJPEG(
-						transcode, optimizeCodes: optimizeCodes)))
+					try Encoder.encodeJPEG(transcode)))
 		}
-		#expect(digests == Self.jpeg[optimizeCodes ? 0 : 1])
+		#expect(digests == Self.jpeg)
 	}
 
 	// Digests recorded at main 3a9f046.
-	static let eightGroup = [
-		"18d74158f2b098a20cc7929551065e9b36a07e5d926a85dc8b8ece69fe349195",
-		"74816c3fae11c7d951e15d63a2224e87a4b36f807447ed4731dc51f72d371693",
-	]
-	static let resampled = [
-		"87b488282ac93bdb5e63688635df2229d94fecfda16bf56a62f7e80d71711090",
-		"422d239113f9c0ca8f0af3ebdfb8cec3e9e29c93892a80a9745650695e34da94",
-	]
+	static let eightGroup =
+		"18d74158f2b098a20cc7929551065e9b36a07e5d926a85dc8b8ece69fe349195"
+	static let resampled =
+		"87b488282ac93bdb5e63688635df2229d94fecfda16bf56a62f7e80d71711090"
 	static let jpeg = [
-		[
-			"1cf68cb275214f9dc083084d6447539878ed89447640a5f1e823bb84301756b2",
-			"0cd0a6e9df7d3d5341a8bb312f0c06571109c31582fb2dba69f66e26aa2b4b86",
-		],
-		[
-			"421a2bbb4dee4b560cfa2804938a42be1d4a181779dbf6f63f6fa22c97191620",
-			"3791b329dbab2d992db522e15333783682b429a546833455d0c6c2fdf6328848",
-		],
+		"1cf68cb275214f9dc083084d6447539878ed89447640a5f1e823bb84301756b2",
+		"0cd0a6e9df7d3d5341a8bb312f0c06571109c31582fb2dba69f66e26aa2b4b86",
 	]
 
 	static func sha256Hex(_ bytes: [UInt8]) -> String {

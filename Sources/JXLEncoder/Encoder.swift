@@ -89,14 +89,14 @@ public enum Encoder {
 
 	struct PixelFrameAnalysis {
 		let coeffOrder: CoeffOrder.Result
-		let blockContextMap: JPEGBlockContextMap.Result?
+		let blockContextMap: JPEGBlockContextMap.Result
 		let acCode: EntropyCode
 		let plan: FramePlan
 
 		/// Contexts in one histogram set: every set has the block model's AC
 		/// contexts (libjxl `NumACContexts`).
 		var acContextsPerSet: Int {
-			blockContextMap.map(Self.contextsPerSet) ?? ACContext.totalCount
+			Self.contextsPerSet(blockContextMap)
 		}
 
 		static func contextsPerSet(_ map: JPEGBlockContextMap.Result) -> Int {
@@ -210,25 +210,15 @@ public enum Encoder {
 			writer.writeUnstaged(analysis.plan.selectorBits, UInt64(set))
 		}
 		let order = analysis.coeffOrder.orders
-		if let blockContextMap = analysis.blockContextMap {
-			ACGroupEncoder.tokenizeGroup(
-				coefficients: compute.coefficients,
-				widthInBlocks: compute.widthInBlocks,
-				heightInBlocks: compute.heightInBlocks,
-				subsampling: .none,
-				order: order,
-				blockContextMap: blockContextMap,
-				rawQuantField: compute.quantField,
-				writer: &writer)
-		} else {
-			ACGroupEncoder.tokenizeGroup(
-				coefficients: compute.coefficients,
-				widthInBlocks: compute.widthInBlocks,
-				heightInBlocks: compute.heightInBlocks,
-				subsampling: .none,
-				order: order,
-				writer: &writer)
-		}
+		ACGroupEncoder.tokenizeGroup(
+			coefficients: compute.coefficients,
+			widthInBlocks: compute.widthInBlocks,
+			heightInBlocks: compute.heightInBlocks,
+			subsampling: .none,
+			order: order,
+			blockContextMap: analysis.blockContextMap,
+			rawQuantField: compute.quantField,
+			writer: &writer)
 		return ACGroupOutput(
 			groupX: compute.groupX, groupY: compute.groupY,
 			widthInBlocks: compute.widthInBlocks,
@@ -293,7 +283,7 @@ public enum Encoder {
 	/// share it exactly and cannot drift.
 	static func assemble(
 		outputs: [ACGroupOutput], dim: ImageDim, params: DistanceParams,
-		optimizeCodes: Bool, sections: inout [SectionWriter]
+		sections: inout [SectionWriter]
 	) throws -> [DCGroupData] {
 		var dcData: [DCGroupData] = (0..<dim.dcGroupCount).map { i in
 			let rect = dim.pixelRect(
@@ -352,41 +342,23 @@ public enum Encoder {
 				rawDC: rawDCByGroup[i], globalScale: params.globalScale,
 				quantDC: params.quantDC,
 				data: &dcData[i])
-			if !optimizeCodes {
-				DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
-			}
 		}
 		return dcData
 	}
 
 	static func analyzePixelFrame(
-		computes: [ACGroupCompute], dim: ImageDim, params: DistanceParams,
-		optimizeCodes: Bool
+		computes: [ACGroupCompute], dim: ImageDim, params: DistanceParams
 	) -> PixelFrameAnalysis {
 		let plan = FramePlan(dim: dim, upsampling: params.upsampling)
-		var acCode = EntropyCode.staticAC
-		let coeffOrder: CoeffOrder.Result =
-			optimizeCodes
-			? computeCoeffOrder(computes, dim: dim, plan: plan) : .identity
-		let blockContextMap =
-			optimizeCodes
-			? computeBlockContextMap(computes, params: params, plan: plan) : nil
-		let sets = plan.histogramSetCount
-		if let blockContextMap {
-			acCode = EntropyCode(
-				contextMap: [UInt8](
-					repeating: 0,
-					count: sets
-						* PixelFrameAnalysis.contextsPerSet(blockContextMap)
-				),
-				prefixCodes: [])
-		} else if sets > 1 {
-			acCode = EntropyCode(
-				contextMap: Array(
-					[[UInt8]](repeating: acCode.contextMap, count: sets)
-						.joined()),
-				prefixCodes: acCode.prefixCodes)
-		}
+		let coeffOrder = computeCoeffOrder(computes, dim: dim, plan: plan)
+		let blockContextMap = computeBlockContextMap(
+			computes, params: params, plan: plan)
+		let acCode = EntropyCode(
+			contextMap: [UInt8](
+				repeating: 0,
+				count: plan.histogramSetCount
+					* PixelFrameAnalysis.contextsPerSet(blockContextMap)),
+			prefixCodes: [])
 		return PixelFrameAnalysis(
 			coeffOrder: coeffOrder, blockContextMap: blockContextMap,
 			acCode: acCode, plan: plan)
@@ -394,12 +366,11 @@ public enum Encoder {
 
 	static func finishPixelFrame(
 		outputs: [ACGroupOutput], dim: ImageDim, params: DistanceParams,
-		optimizeCodes: Bool, analysis: PixelFrameAnalysis,
+		analysis: PixelFrameAnalysis,
 		sections: inout [SectionWriter], writer: inout BitWriter
 	) throws {
 		let dcData = try assemble(
-			outputs: outputs, dim: dim, params: params,
-			optimizeCodes: optimizeCodes, sections: &sections)
+			outputs: outputs, dim: dim, params: params, sections: &sections)
 		var dcCode = EntropyCode.staticDC
 		var acCode = analysis.acCode
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
@@ -412,7 +383,7 @@ public enum Encoder {
 		} else {
 			isStreaming = false
 		}
-		if optimizeCodes && isStreaming {
+		if isStreaming {
 			for index in dcData.indices {
 				var section = BitWriter()
 				try DCGroupEncoder.write(
@@ -425,7 +396,7 @@ public enum Encoder {
 				sections: &sections, range: acRange,
 				histogramSetCount: analysis.plan.histogramSetCount,
 				contextsPerSet: analysis.acContextsPerSet)
-		} else if optimizeCodes {
+		} else {
 			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: false)
 			let streams = try dcData.enumerated().map {
 				try DCGroupEncoder.tokenStreams(
@@ -454,10 +425,10 @@ public enum Encoder {
 		}
 
 		var dcGlobal = BitWriter()
-		if optimizeCodes && isStreaming {
+		if isStreaming {
 			try FrameAssembly.writeStreamingDCGlobal(
 				params: params,
-				blockContextMap: analysis.blockContextMap!,
+				blockContextMap: analysis.blockContextMap,
 				writer: &dcGlobal)
 		} else {
 			try FrameAssembly.writeDCGlobal(
@@ -485,18 +456,15 @@ public enum Encoder {
 			sections.map { $0.finished() }, writer: &writer)
 	}
 
-	static func initialPixelSections(dim: ImageDim, optimizeCodes: Bool) -> [SectionWriter] {
-		let dcCode = EntropyCode.staticDC
-		let acCode = EntropyCode.staticAC
-		let mode: SectionWriter.Mode =
-			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
+	/// Placeholders: assembly replaces every section with its tokenized or
+	/// prewritten form.
+	static func initialPixelSections(dim: ImageDim) -> [SectionWriter] {
 		var sections = [SectionWriter](
-			repeating: SectionWriter(mode: mode),
+			repeating: SectionWriter(mode: .staging(.staticDC)),
 			count: 2 + dim.dcGroupCount + dim.groupCount)
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
 		for index in acRange {
-			sections[index] = SectionWriter(
-				mode: optimizeCodes ? .staging(acCode) : .direct(acCode))
+			sections[index] = SectionWriter(mode: .staging(.staticAC))
 		}
 		return sections
 	}
@@ -504,11 +472,10 @@ public enum Encoder {
 	static func encodeFrame(
 		pixelFrame: PixelFrameInput,
 		params: DistanceParams,
-		optimizeCodes: Bool = true,
 		writer: inout BitWriter
 	) throws {
 		let dim = pixelFrame.dim
-		var sections = initialPixelSections(dim: dim, optimizeCodes: optimizeCodes)
+		var sections = initialPixelSections(dim: dim)
 
 		var computes: [ACGroupCompute] = []
 		computes.reserveCapacity(dim.groupCount)
@@ -521,11 +488,9 @@ public enum Encoder {
 					params: params))
 		}
 		let analysis = analyzePixelFrame(
-			computes: computes, dim: dim, params: params,
-			optimizeCodes: optimizeCodes)
+			computes: computes, dim: dim, params: params)
 
-		let acMode: SectionWriter.Mode =
-			optimizeCodes ? .staging(analysis.acCode) : .direct(analysis.acCode)
+		let acMode = SectionWriter.Mode.staging(analysis.acCode)
 		var outputs: [ACGroupOutput] = []
 		outputs.reserveCapacity(dim.groupCount)
 		// Drains rather than iterates: each group's coefficients are only
@@ -537,8 +502,7 @@ public enum Encoder {
 				tokenizeACGroup(compute, analysis: analysis, mode: acMode))
 		}
 		try finishPixelFrame(
-			outputs: outputs, dim: dim, params: params,
-			optimizeCodes: optimizeCodes, analysis: analysis,
+			outputs: outputs, dim: dim, params: params, analysis: analysis,
 			sections: &sections, writer: &writer)
 	}
 
@@ -551,8 +515,7 @@ public enum Encoder {
 	public static func encode(
 		_ image: ImageBuffer,
 		distance: Float,
-		transferFunction: TransferFunction = .sRGB,
-		optimizeCodes: Bool = true
+		transferFunction: TransferFunction = .sRGB
 	) throws -> [UInt8] {
 		let params = try DistanceParams(distance: distance)
 		let pixelFrame = preparePixelFrame(
@@ -565,7 +528,7 @@ public enum Encoder {
 			transferFunction: transferFunction, to: &writer)
 		try encodeFrame(
 			pixelFrame: pixelFrame,
-			params: params, optimizeCodes: optimizeCodes, writer: &writer)
+			params: params, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
 	}
@@ -589,8 +552,7 @@ extension Encoder {
 	public static func encodeConcurrently(
 		_ image: ImageBuffer,
 		distance: Float,
-		transferFunction: TransferFunction = .sRGB,
-		optimizeCodes: Bool = true
+		transferFunction: TransferFunction = .sRGB
 	) async throws -> [UInt8] {
 		let params = try DistanceParams(distance: distance)
 		let pixelFrame = preparePixelFrame(
@@ -603,13 +565,7 @@ extension Encoder {
 			width: image.width, height: image.height,
 			transferFunction: transferFunction, to: &writer)
 
-		let dcCode = EntropyCode.staticDC
-		let dcMode: SectionWriter.Mode =
-			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
-
-		var sections = [SectionWriter](
-			repeating: SectionWriter(mode: dcMode),
-			count: 2 + dim.dcGroupCount + dim.groupCount)
+		var sections = initialPixelSections(dim: dim)
 
 		var computes = await withTaskGroup(of: ACGroupCompute.self) { group in
 			for index in 0..<dim.groupCount {
@@ -627,10 +583,8 @@ extension Encoder {
 			return collected
 		}
 		let analysis = analyzePixelFrame(
-			computes: computes, dim: dim, params: params,
-			optimizeCodes: optimizeCodes)
-		let acMode: SectionWriter.Mode =
-			optimizeCodes ? .staging(analysis.acCode) : .direct(analysis.acCode)
+			computes: computes, dim: dim, params: params)
+		let acMode = SectionWriter.Mode.staging(analysis.acCode)
 
 		let outputs = await withTaskGroup(of: ACGroupOutput.self) { group in
 			for compute in computes {
@@ -647,8 +601,7 @@ extension Encoder {
 		// than leaving them reachable for the rest of the encode.
 		computes = []
 		try finishPixelFrame(
-			outputs: outputs, dim: dim, params: params,
-			optimizeCodes: optimizeCodes, analysis: analysis,
+			outputs: outputs, dim: dim, params: params, analysis: analysis,
 			sections: &sections, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
@@ -663,8 +616,7 @@ extension Encoder {
 	/// An admitted source profile is coded into the header in place of sRGB. Throws
 	/// `EncoderError.unsupportedICCProfile` for one libjxl's reader would reject.
 	public static func encodeJPEG(
-		_ transcode: JPEGTranscode,
-		optimizeCodes: Bool = true
+		_ transcode: JPEGTranscode
 	) throws -> [UInt8] {
 		var writer = BitWriter()
 		try ImageHeader.write(
@@ -675,7 +627,7 @@ extension Encoder {
 		try encodeJPEGFrame(
 			transcode,
 			loopFilter: .init(gaborish: false, epfIterations: 0),
-			optimizeCodes: optimizeCodes, writer: &writer)
+			writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
 	}
@@ -687,7 +639,6 @@ extension Encoder {
 	static func encodeJPEGFrame(
 		_ transcode: JPEGTranscode,
 		loopFilter: FrameAssembly.LoopFilter,
-		optimizeCodes: Bool,
 		writer: inout BitWriter
 	) throws -> (dc: EntropyCode, ac: EntropyCode) {
 		// When chroma is subsampled the block grid rounds up to a whole MCU, so
@@ -703,39 +654,24 @@ extension Encoder {
 			width: transcode.width, height: transcode.height,
 			blockAlignment: alignment)
 
-		// The adaptive block context map has no meaning without per-image
-		// optimisation to carry it — the static-table path keeps the fixed
-		// formula `ACContext.blockContext` already computes, unchanged.
-		let blockContextMap: JPEGBlockContextMap.Result? =
-			optimizeCodes ? JPEGBlockContextMap.compute(transcode) : nil
+		let blockContextMap = JPEGBlockContextMap.compute(transcode)
 
 		var dcCode = EntropyCode.staticDC
-		// A wider raw context space than the static table's fixed 4
-		// categories, sized to whatever this image's adaptive map actually
-		// uses — `SectionOptimizer.optimize` reads only `contextCount`, so
-		// the map/prefix-code values here are never read.
-		var acCode: EntropyCode =
-			if let blockContextMap {
-				EntropyCode(
-					contextMap: [UInt8](
-						repeating: 0,
-						count: blockContextMap.numContexts
-							* (ACContext.nonZeroBuckets
-								+ ACContext.zeroDensityCount)),
-					prefixCodes: [])
-			} else {
-				.staticAC
-			}
+		// Sized to this image's block context map: `SectionOptimizer.optimize`
+		// reads only `contextCount`, so the map/prefix-code values are never read.
+		var acCode = EntropyCode(
+			contextMap: [UInt8](
+				repeating: 0,
+				count: blockContextMap.numContexts
+					* (ACContext.nonZeroBuckets + ACContext.zeroDensityCount)),
+			prefixCodes: [])
 
-		let mode: SectionWriter.Mode =
-			optimizeCodes ? .staging(dcCode) : .direct(dcCode)
 		var sections = [SectionWriter](
-			repeating: SectionWriter(mode: mode),
+			repeating: SectionWriter(mode: .staging(dcCode)),
 			count: 2 + dim.dcGroupCount + dim.groupCount)
 		let acRange = (2 + dim.dcGroupCount)..<(2 + dim.dcGroupCount + dim.groupCount)
 		for i in acRange {
-			sections[i] = SectionWriter(
-				mode: optimizeCodes ? .staging(acCode) : .direct(acCode))
+			sections[i] = SectionWriter(mode: .staging(acCode))
 		}
 
 		// DC groups collect the DC image; the AC pass fills it in as it goes,
@@ -757,50 +693,45 @@ extension Encoder {
 			return data
 		}
 
-		// No meaning without per-image code optimisation to carry it — the
-		// static-table path keeps the fixed zig-zag order, unchanged. Unlike
-		// the pixel path, a JPEG's coefficients are already fully parsed
+		// Unlike the pixel path, a JPEG's coefficients are already fully parsed
 		// (`transcode`), so this only needs a read-only sweep, not a full
 		// compute-then-tokenize split.
-		var coeffOrder = CoeffOrder.Result.identity
-		if optimizeCodes {
-			var counts = [CoeffOrder.ZeroCounts](
-				repeating: CoeffOrder.ZeroCounts(), count: 3)
-			var sampler = CoeffOrder.Sampler()
-			for gy in 0..<dim.heightInGroups {
-				for gx in 0..<dim.widthInGroups {
-					let blockX0 = gx * Geometry.groupDimInBlocks
-					let blockY0 = gy * Geometry.groupDimInBlocks
-					let rect = dim.pixelRect(
-						ix: gx, iy: gy, dim: Geometry.groupDim)
-					let groupDim = ImageDim(
-						width: rect.width, height: rect.height,
-						blockAlignment: alignment)
-					let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
-					let dcGroupX = blockX0 / dcGroupBlocks
-					let dcGroupY = blockY0 / dcGroupBlocks
-					let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
-					let coefficients =
-						try ACGroupEncoder.jpegCoefficientsForOrdering(
-							transcode: transcode,
-							colorCorrelation: dcData[dcIndex],
-							colorCorrelationBlockX0: dcGroupX
-								* dcGroupBlocks,
-							colorCorrelationBlockY0: dcGroupY
-								* dcGroupBlocks,
-							blockX0: blockX0, blockY0: blockY0,
-							widthInBlocks: groupDim.widthInBlocks,
-							heightInBlocks: groupDim.heightInBlocks)
-					CoeffOrder.accumulateGroup(
-						coefficients, widthInBlocks: groupDim.widthInBlocks,
-						heightInBlocks: groupDim.heightInBlocks,
-						sampler: &sampler, counts: &counts)
-				}
+		var counts = [CoeffOrder.ZeroCounts](
+			repeating: CoeffOrder.ZeroCounts(), count: 3)
+		var sampler = CoeffOrder.Sampler()
+		for gy in 0..<dim.heightInGroups {
+			for gx in 0..<dim.widthInGroups {
+				let blockX0 = gx * Geometry.groupDimInBlocks
+				let blockY0 = gy * Geometry.groupDimInBlocks
+				let rect = dim.pixelRect(
+					ix: gx, iy: gy, dim: Geometry.groupDim)
+				let groupDim = ImageDim(
+					width: rect.width, height: rect.height,
+					blockAlignment: alignment)
+				let dcGroupBlocks = Geometry.dcGroupDim / Geometry.blockDim
+				let dcGroupX = blockX0 / dcGroupBlocks
+				let dcGroupY = blockY0 / dcGroupBlocks
+				let dcIndex = dcGroupY * dim.widthInDCGroups + dcGroupX
+				let coefficients =
+					try ACGroupEncoder.jpegCoefficientsForOrdering(
+						transcode: transcode,
+						colorCorrelation: dcData[dcIndex],
+						colorCorrelationBlockX0: dcGroupX
+							* dcGroupBlocks,
+						colorCorrelationBlockY0: dcGroupY
+							* dcGroupBlocks,
+						blockX0: blockX0, blockY0: blockY0,
+						widthInBlocks: groupDim.widthInBlocks,
+						heightInBlocks: groupDim.heightInBlocks)
+				CoeffOrder.accumulateGroup(
+					coefficients, widthInBlocks: groupDim.widthInBlocks,
+					heightInBlocks: groupDim.heightInBlocks,
+					sampler: &sampler, counts: &counts)
 			}
-			coeffOrder = CoeffOrder.compute(
-				counts: counts, widthInBlocks: dim.widthInBlocks,
-				heightInBlocks: dim.heightInBlocks)
 		}
+		let coeffOrder = CoeffOrder.compute(
+			counts: counts, widthInBlocks: dim.widthInBlocks,
+			heightInBlocks: dim.heightInBlocks)
 
 		for gy in 0..<dim.heightInGroups {
 			for gx in 0..<dim.widthInGroups {
@@ -890,40 +821,31 @@ extension Encoder {
 
 		var modularTree: ContextTree.Prepared?
 		var modularTreeCode: EntropyCode?
-		if optimizeCodes {
-			let tree = ContextTree.prepare(groups: dcData, jpegTranscode: true)
-			let streams = try dcData.enumerated().map {
-				try DCGroupEncoder.tokenStreams(
-					data: $0.element, groupIndex: $0.offset, tree: tree)
-			}
-			let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
-			dcCode = SectionOptimizer.modularCode(
-				tokenStreams: [payloadTokens], contextCount: tree.contextCount,
-				extraDCPrecision: 0)
-			let treeCode = SectionOptimizer.modularCode(
-				tokenStreams: [tree.tokens],
-				contextCount: ContextTree.treeContextCount,
-				extraDCPrecision: 0)
-			for index in dcData.indices {
-				var section = BitWriter()
-				try DCGroupEncoder.write(
-					data: dcData[index], streams: streams[index],
-					code: dcCode, writer: &section)
-				sections[1 + index] = SectionWriter(prewritten: section)
-			}
-			modularTree = tree
-			modularTreeCode = treeCode
-		} else {
-			for i in 0..<dim.dcGroupCount {
-				DCGroupEncoder.write(data: dcData[i], writer: &sections[1 + i])
-			}
+		let tree = ContextTree.prepare(groups: dcData, jpegTranscode: true)
+		let streams = try dcData.enumerated().map {
+			try DCGroupEncoder.tokenStreams(
+				data: $0.element, groupIndex: $0.offset, tree: tree)
 		}
-
-		if optimizeCodes {
-			acCode = SectionOptimizer.optimize(
-				sections: &sections, range: acRange, baseCode: acCode,
-				allowANS: true)
+		let payloadTokens = streams.flatMap { $0.dc + $0.metadata }
+		dcCode = SectionOptimizer.modularCode(
+			tokenStreams: [payloadTokens], contextCount: tree.contextCount,
+			extraDCPrecision: 0)
+		let treeCode = SectionOptimizer.modularCode(
+			tokenStreams: [tree.tokens],
+			contextCount: ContextTree.treeContextCount,
+			extraDCPrecision: 0)
+		for index in dcData.indices {
+			var section = BitWriter()
+			try DCGroupEncoder.write(
+				data: dcData[index], streams: streams[index],
+				code: dcCode, writer: &section)
+			sections[1 + index] = SectionWriter(prewritten: section)
 		}
+		modularTree = tree
+		modularTreeCode = treeCode
+		acCode = SectionOptimizer.optimize(
+			sections: &sections, range: acRange, baseCode: acCode,
+			allowANS: true)
 
 		var dcGlobal = BitWriter()
 		try FrameAssembly.writeDCGlobal(

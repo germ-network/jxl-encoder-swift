@@ -6,12 +6,8 @@
 	import JXLEncoder
 	import Testing
 
-	/// Where the JPEG transcode currently stands, per subsampling and per entropy
-	/// path. ImageIO is the decoder, so this records what a real consumer accepts.
-	///
-	/// Written to separate two candidate causes of the subsampled failure: the
-	/// coefficient layout, which the static path exercises on its own, and the
-	/// per-image entropy code, which only the optimised path builds.
+	/// Where the JPEG transcode currently stands, per subsampling. ImageIO is
+	/// the decoder, so this records what a real consumer accepts.
 	@Suite("JPEG transcode decoding")
 	struct JPEGTranscodeDecodeTests {
 		@Test(
@@ -21,13 +17,8 @@
 				"scan_420_111", "scan_420_111_restart", "scan_422_21",
 				"scan_440_12", "scan_420_111_dqt_redefined",
 			] {
-				for optimize in [true, false] {
-					let error = try Self.meanError(name, optimize: optimize)
-					#expect(
-						error < 2.0,
-						"\(name), optimize=\(optimize): mean error \(error)"
-					)
-				}
+				let error = try Self.meanError(name)
+				#expect(error < 2.0, "\(name): mean error \(error)")
 			}
 		}
 
@@ -71,15 +62,14 @@
 		/// Mean absolute difference from what the source JPEG decodes to. A
 		/// transcode carries the same coefficients, so the only honest source of
 		/// difference is the inverse transform, worth a fraction of a level.
-		static func meanError(_ name: String, optimize: Bool) throws -> Double {
+		static func meanError(_ name: String) throws -> Double {
 			let url = try #require(
 				Bundle.module.url(
 					forResource: name, withExtension: "jpg",
 					subdirectory: "Fixtures"))
 			let jpeg = try Data(contentsOf: url)
 			let bytes = try Encoder.encodeJPEG(
-				try JPEGTranscode(try JPEGParser.parse([UInt8](jpeg))),
-				optimizeCodes: optimize)
+				try JPEGTranscode(try JPEGParser.parse([UInt8](jpeg))))
 
 			let ours = try #require(Self.samples(Data(bytes)))
 			let referenceJPEG: Data
@@ -107,32 +97,25 @@
 		/// distinguishes a working transcode from one that merely decodes.
 		@Test(
 			"JPEG transcodes match source pixels",
-			arguments: ["hopper_444"],
-			[true, false])
-		func unsubsampled(name: String, optimize: Bool) throws {
-			let error = try Self.meanError(name, optimize: optimize)
+			arguments: ["hopper_444"])
+		func unsubsampled(name: String) throws {
+			let error = try Self.meanError(name)
 			#expect(error < 2.0, "mean absolute error \(error)")
 		}
 
 		@Test(
 			"grayscale transcodes decode as monochrome at source dimensions",
-			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"], [true, false])
-		func grayscaleDecodedModelAndDimensions(name: String, optimize: Bool) throws {
+			arguments: ["hopper_gray_odd", "hopper_gray_2x2_odd"])
+		func grayscaleDecodedModelAndDimensions(name: String) throws {
 			let sourceURL = try #require(
 				Bundle.module.url(
 					forResource: name, withExtension: "jpg",
 					subdirectory: "Fixtures"))
 			let source = try Data(contentsOf: sourceURL)
-			let transcode = try JPEGTranscode(JPEGParser.parse([UInt8](source)))
-			let codestream =
-				if optimize {
-					try #require(Encoder.recompressJPEG([UInt8](source)))
-				} else {
-					try Encoder.encodeJPEG(transcode, optimizeCodes: false)
-				}
+			let codestream = try #require(Encoder.recompressJPEG([UInt8](source)))
 			let decoded = try #require(Self.image(Data(codestream)))
 			let reference = try #require(Self.image(source))
-			#expect(decoded.colorModel == .monochrome, "\(name), optimize=\(optimize)")
+			#expect(decoded.colorModel == .monochrome, "\(name)")
 			#expect(reference.colorModel == .monochrome, "\(name), source JPEG")
 			#expect(decoded.width == reference.width, "\(name), decoded width")
 			#expect(decoded.height == reference.height, "\(name), decoded height")
@@ -154,33 +137,7 @@
 			"subsampled transcodes, optimised entropy codes",
 			arguments: ["hopper_422", "hopper_420_restart"])
 		func subsampledOptimized(name: String) throws {
-			let error = try Self.meanError(name, optimize: true)
-			#expect(error < 2.0, "mean absolute error \(error)")
-		}
-
-		/// The entropy path makes no difference to the pixels, which is what an
-		/// entropy layer should do and what an earlier reading of this got wrong: a
-		/// decodability check made the static path look like it worked, when both
-		/// paths were producing the same wrong image and only ImageIO's leniency
-		/// separated them from djxl's rejection.
-		@Test(
-			"the entropy path does not change the pixels",
-			arguments: ["hopper_444", "hopper_422", "hopper_420_restart"])
-		func entropyPathIsNeutral(name: String) throws {
-			let optimized = try Self.meanError(name, optimize: true)
-			let staticCoded = try Self.meanError(name, optimize: false)
-			#expect(optimized == staticCoded)
-		}
-
-		/// The bisect. If the static path decodes and the optimised one does not,
-		/// the coefficient layout is sound and the fault is in the entropy code
-		/// built from this image's statistics — which is the only thing the two
-		/// paths differ by.
-		@Test(
-			"subsampled transcodes, static entropy tables",
-			arguments: ["hopper_422", "hopper_420_restart"])
-		func subsampledStatic(name: String) throws {
-			let error = try Self.meanError(name, optimize: false)
+			let error = try Self.meanError(name)
 			#expect(error < 2.0, "mean absolute error \(error)")
 		}
 	}

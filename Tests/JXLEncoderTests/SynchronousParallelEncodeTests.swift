@@ -115,27 +115,24 @@ struct SynchronousParallelEncodeTests {
 		guard #available(iOS 18, macOS 15, *) else { return }
 		let cases:
 			[(
-				Int, Int, Int, Bool, Float, TransferFunction, Bool
+				Int, Int, Int, Bool, Float, TransferFunction
 			)] = [
-				(64, 64, 3, false, 1, .sRGB, true),
-				(256, 256, 3, false, 1, .linear, false),
-				(301, 301, 3, false, 0.5, .linear, true),
-				(257, 257, 4, false, 3, .sRGB, false),
-				(257, 257, 3, true, 10, .linear, true),
+				(64, 64, 3, false, 1, .sRGB),
+				(256, 256, 3, false, 1, .linear),
+				(301, 301, 3, false, 0.5, .linear),
+				(257, 257, 4, false, 3, .sRGB),
+				(257, 257, 3, true, 10, .linear),
 			]
-		for (width, height, channels, grayscale, distance, transferFunction, optimize)
-			in cases
-		{
+		for (width, height, channels, grayscale, distance, transferFunction) in cases {
 			let source = try image(
 				width: width, height: height, channels: channels,
 				grayscale: grayscale)
 			let runner = InlineRunner(maximumWorkers: 3)
 			let serial = try Encoder.encode(
-				source, distance: distance, transferFunction: transferFunction,
-				optimizeCodes: optimize)
+				source, distance: distance, transferFunction: transferFunction)
 			let parallel = try Encoder.encode(
 				source, distance: distance, transferFunction: transferFunction,
-				optimizeCodes: optimize, runner: runner)
+				runner: runner)
 			#expect(parallel == serial)
 			#expect(runner.metrics.state.withLock { $0.calls.count } == 2)
 		}
@@ -244,8 +241,7 @@ struct SynchronousParallelEncodeTests {
 			computeRunner.metrics.state.withLock { $0.calls }
 				== [pixelFrame.dim.groupCount])
 		let analysis = Encoder.analyzePixelFrame(
-			computes: computes, dim: pixelFrame.dim, params: params,
-			optimizeCodes: true)
+			computes: computes, dim: pixelFrame.dim, params: params)
 		#expect(analysis.coeffOrder.orders.count == 3)
 		#expect(analysis.coeffOrder.isCustom)
 	}

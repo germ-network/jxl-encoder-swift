@@ -6,9 +6,8 @@
 //  staged so the code can be optimised for the image before anything is
 //  emitted.
 //
-//  Optimising is worth a lot on small images: the static tables ship in full on
-//  every file, roughly a 1 kB floor, which dominates a thumbnail. Per-image
-//  codes drop the contexts the image never used.
+//  Optimising is worth a lot on small images: per-image codes drop the
+//  contexts the image never used.
 //
 
 /// One entry in a staged section: either a token to be entropy coded once the

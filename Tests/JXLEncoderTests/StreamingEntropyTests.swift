@@ -461,7 +461,7 @@ struct StreamingEntropyTests {
 		#expect(allGroups.orders != expected.orders)
 
 		let analysis = Encoder.analyzePixelFrame(
-			computes: computes, dim: dim, params: params, optimizeCodes: true)
+			computes: computes, dim: dim, params: params)
 		#expect(analysis.coeffOrder.orders == expected.orders)
 		#expect(analysis.coeffOrder.isCustom == expected.isCustom)
 	}
@@ -481,9 +481,9 @@ struct StreamingEntropyTests {
 		#expect(allGroups.contextMap != expected.contextMap)
 
 		let analysis = Encoder.analyzePixelFrame(
-			computes: computes, dim: dim, params: params, optimizeCodes: true)
-		#expect(analysis.blockContextMap?.contextMap == expected.contextMap)
-		#expect(analysis.blockContextMap?.numContexts == expected.numContexts)
+			computes: computes, dim: dim, params: params)
+		#expect(analysis.blockContextMap.contextMap == expected.contextMap)
+		#expect(analysis.blockContextMap.numContexts == expected.numContexts)
 	}
 
 	// MARK: Per-DC-group AC histograms

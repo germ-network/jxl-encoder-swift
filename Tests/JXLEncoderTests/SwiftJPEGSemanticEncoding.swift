@@ -116,7 +116,7 @@ enum SwiftJPEGSemanticEncoding {
 		var writer = BitWriter()
 		let loopFilter = FrameAssembly.LoopFilter(gaborish: false, epfIterations: 0)
 		let codes = try Encoder.encodeJPEGFrame(
-			transcode, loopFilter: loopFilter, optimizeCodes: true, writer: &writer)
+			transcode, loopFilter: loopFilter, writer: &writer)
 		let decisions = SwiftJPEGFrameDecisions(
 			transcode: transcode, coeffOrder: coeffOrder,
 			blockContextMap: blockContextMap, dcCode: codes.dc, acCode: codes.ac,

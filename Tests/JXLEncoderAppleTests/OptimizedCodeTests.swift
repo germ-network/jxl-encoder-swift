@@ -33,14 +33,14 @@
 			return context.makeImage()!
 		}
 
-		static func encode(_ image: CGImage, optimize: Bool) throws -> [UInt8] {
+		static func encode(_ image: CGImage) throws -> [UInt8] {
 			let samples = try JXLEncoderApple.sRGBSamples(
 				from: image,
 				alphaPolicy: .flatten(background: JXLEncoderApple.defaultBackground)
 			)
 			let buffer = try ImageBuffer(
 				width: image.width, height: image.height, samples: samples)
-			return try Encoder.encode(buffer, distance: 1.0, optimizeCodes: optimize)
+			return try Encoder.encode(buffer, distance: 1.0)
 		}
 
 		static func decode(_ bytes: [UInt8]) -> [UInt8]? {
@@ -66,7 +66,7 @@
 			arguments: [64, 200])
 		func optimizedFrameDecodes(size: Int) throws {
 			let image = Self.image(size)
-			let optimized = try Self.encode(image, optimize: true)
+			let optimized = try Self.encode(image)
 			let a = try #require(Self.decode(optimized))
 			#expect(a.count == size * size * 4)
 			let redSamples = stride(from: 0, to: a.count, by: 4).map { a[$0] }
@@ -124,19 +124,10 @@
 			}
 		}
 
-		@Test("files get smaller, most so when small", arguments: [64, 200])
-		func smaller(size: Int) throws {
-			let image = Self.image(size)
-			let optimized = try Self.encode(image, optimize: true)
-			let staticCoded = try Self.encode(image, optimize: false)
-			#expect(optimized.count < staticCoded.count)
-		}
-
-		/// The static tables impose roughly a 1 kB floor; optimising should take
-		/// a small thumbnail well below it.
-		@Test("a 64x64 thumbnail drops under the static floor")
+		/// Per-image codes keep a small thumbnail well under 1 kB.
+		@Test("a 64x64 thumbnail stays under 1 kB")
 		func belowStaticFloor() throws {
-			let optimized = try Self.encode(Self.image(64), optimize: true)
+			let optimized = try Self.encode(Self.image(64))
 			#expect(optimized.count < 1000)
 		}
 
@@ -154,7 +145,7 @@
 		/// Photographs hit them constantly: before the fix, 42 of these 49 cases
 		/// produced a stream ImageIO refused.
 		@Test(
-			"optimised photographs match the static path at every distance",
+			"optimised photographs decode at every distance",
 			arguments: fixtures, distances)
 		func photographsDecode(fixture: String, distance: Float) throws {
 			let url = try #require(

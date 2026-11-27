@@ -10,9 +10,9 @@
 	struct StreamingDecodeTests {
 		@Test(
 			"frames either side of the streaming boundary decode",
-			arguments: [(2048, 256), (2304, 256), (2057, 257)], [true, false])
+			arguments: [(2048, 256), (2304, 256), (2057, 257)])
 		func framesEitherSideOfBoundaryDecode(
-			size: (Int, Int), optimize: Bool
+			size: (Int, Int)
 		) throws {
 			let (width, height) = size
 			var samples = [UInt8](repeating: 0, count: width * height * 3)
@@ -25,7 +25,7 @@
 				}
 			}
 			let image = try ImageBuffer(width: width, height: height, samples: samples)
-			let data = try Encoder.encode(image, distance: 1, optimizeCodes: optimize)
+			let data = try Encoder.encode(image, distance: 1)
 			let decoded = try #require(
 				JXLEncoderAppleTests.decodeSamples(Data(data)))
 			#expect(decoded.width == width)
@@ -35,10 +35,7 @@
 				total += abs(Int(samples[i]) - Int(decoded.rgb[i]))
 			}
 			let mean = Double(total) / Double(samples.count)
-			// The unoptimized static-code path writes a valid stream that decodes
-			// to different pixels (djxl and ImageIO decode it alike, even at one group), so fidelity is
-			// checked for optimized streams only.
-			if optimize { #expect(mean < 4.0, "mean absolute error \(mean)") }
+			#expect(mean < 4.0, "mean absolute error \(mean)")
 		}
 	}
 

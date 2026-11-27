@@ -22,25 +22,17 @@ struct JPEGCfLIntegrationTests {
 				at: directory, withIntermediateDirectories: true)
 			for name in names {
 				let jpeg = try JPEGParserTests.fixture(name)
-				let transcode = try JPEGTranscode(JPEGParser.parse(jpeg))
-				for optimized in [false, true] {
-					let suffix = optimized ? "optimized" : "static"
-					let stream =
-						optimized
-						? try #require(Encoder.recompressJPEG(jpeg))
-						: try Encoder.encodeJPEG(
-							transcode, optimizeCodes: false)
-					#expect(JXLSignature.matches(stream))
-					try Data(stream).write(
-						to: directory.appendingPathComponent(
-							"\(name)-\(suffix).jxl"))
-				}
+				let stream = try #require(Encoder.recompressJPEG(jpeg))
+				#expect(JXLSignature.matches(stream))
+				try Data(stream).write(
+					to: directory.appendingPathComponent(
+						"\(name)-optimized.jxl"))
 			}
 			return
 		}
 		let directory = URL(fileURLWithPath: try #require(checkPath), isDirectory: true)
 		for name in names {
-			for suffix in ["static", "optimized"] {
+			for suffix in ["optimized"] {
 				let actual = try SemanticDump(
 					parsing: String(
 						contentsOf: directory.appendingPathComponent(
@@ -136,7 +128,7 @@ struct JPEGCfLIntegrationTests {
 	}
 
 	@Test(
-		"Actual static and optimized Swift streams recover source coefficients",
+		"Actual Swift streams recover source coefficients",
 		.enabled(
 			if: ProcessInfo.processInfo.environment["JXL_CFL_EXPORT_DIR"] != nil
 				|| ProcessInfo.processInfo.environment["JXL_CFL_CHECK_DIR"] != nil)
@@ -179,14 +171,10 @@ struct JPEGCfLIntegrationTests {
 					to: directory.appendingPathComponent(
 						"\(name)-expected.sem"),
 					atomically: true, encoding: .utf8)
-				for optimizeCodes in [false, true] {
-					let suffix = optimizeCodes ? "optimized" : "static"
-					let bytes = try Encoder.encodeJPEG(
-						transcode, optimizeCodes: optimizeCodes)
-					try Data(bytes).write(
-						to: directory.appendingPathComponent(
-							"\(name)-\(suffix).jxl"))
-				}
+				let bytes = try Encoder.encodeJPEG(transcode)
+				try Data(bytes).write(
+					to: directory.appendingPathComponent(
+						"\(name)-optimized.jxl"))
 			}
 			return
 		}
@@ -200,7 +188,7 @@ struct JPEGCfLIntegrationTests {
 					contentsOf: directory.appendingPathComponent(
 						"\(name)-expected.sem"),
 					encoding: .utf8))
-			for suffix in ["static", "optimized"] {
+			for suffix in ["optimized"] {
 				let actual = try SemanticDump(
 					parsing: String(
 						contentsOf: directory.appendingPathComponent(

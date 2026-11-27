@@ -198,8 +198,8 @@ struct StreamingPlanTests {
 		return (pixelFrame, params)
 	}
 
-	@Test("a streaming frame's AC code spans every set", arguments: [true, false])
-	func streamingACCodeSpansEverySet(optimize: Bool) throws {
+	@Test("a streaming frame's AC code spans every set")
+	func streamingACCodeSpansEverySet() throws {
 		let (pixelFrame, params) = try Self.frame(
 			width: 2304, height: 256)
 		let dim = pixelFrame.dim
@@ -209,16 +209,10 @@ struct StreamingPlanTests {
 				groupY: $0 / dim.widthInGroups, params: params)
 		}
 		let analysis = Encoder.analyzePixelFrame(
-			computes: computes, dim: dim, params: params, optimizeCodes: optimize)
+			computes: computes, dim: dim, params: params)
 		#expect(analysis.plan.histogramSetCount == 2)
 		#expect(analysis.acCode.contextCount == 2 * analysis.acContextsPerSet)
 		#expect(analysis.acCode.contextCount > analysis.acContextsPerSet)
-		if !optimize {
-			#expect(analysis.acContextsPerSet == ACContext.totalCount)
-			#expect(
-				Array(analysis.acCode.contextMap[ACContext.totalCount...])
-					== EntropyCode.staticAC.contextMap)
-		}
 	}
 
 	@Test("a streaming frame's optimized sections keep ANS")
@@ -231,7 +225,7 @@ struct StreamingPlanTests {
 				groupY: $0 / dim.widthInGroups, params: params)
 		}
 		let analysis = Encoder.analyzePixelFrame(
-			computes: computes, dim: dim, params: params, optimizeCodes: true)
+			computes: computes, dim: dim, params: params)
 		var sections = computes.map {
 			Encoder.tokenizeACGroup(
 				$0, analysis: analysis, mode: .staging(analysis.acCode)
@@ -249,14 +243,17 @@ struct StreamingPlanTests {
 		let (pixelFrame, params) = try Self.frame(
 			width: 2057, height: 257)
 		let dim = pixelFrame.dim
-		let analysis = Encoder.analyzePixelFrame(
-			computes: [], dim: dim, params: params, optimizeCodes: false)
-		let perSet = analysis.acContextsPerSet
-		for (group, set) in [(0, 0), (8, 1)] {
-			let compute = Encoder.computeACGroup(
+		let cases = [(0, 0), (8, 1)]
+		let computes = cases.map { group, _ in
+			Encoder.computeACGroup(
 				xybAt: pixelFrame.xybAt, dim: dim,
 				groupX: group % dim.widthInGroups,
 				groupY: group / dim.widthInGroups, params: params)
+		}
+		let analysis = Encoder.analyzePixelFrame(
+			computes: computes, dim: dim, params: params)
+		let perSet = analysis.acContextsPerSet
+		for (compute, (_, set)) in zip(computes, cases) {
 			let output = Encoder.tokenizeACGroup(
 				compute, analysis: analysis, mode: .staging(analysis.acCode))
 			#expect(output.section.writer.bitsWritten == 1)
@@ -281,19 +278,18 @@ struct StreamingPlanTests {
 
 	@Test(
 		"parallel and concurrent drivers match serial above eight groups",
-		arguments: [(2304, 256), (2057, 257)], [true, false])
+		arguments: [(2304, 256), (2057, 257)])
 	func driversMatchSerialAboveEightGroups(
-		size: (Int, Int), optimize: Bool
+		size: (Int, Int)
 	) async throws {
 		let image = try ConcurrentEncodeTests.image(width: size.0, height: size.1)
-		let serial = try Encoder.encode(image, distance: 1, optimizeCodes: optimize)
+		let serial = try Encoder.encode(image, distance: 1)
 		let concurrent = try await Encoder.encodeConcurrently(
-			image, distance: 1, optimizeCodes: optimize)
+			image, distance: 1)
 		#expect(serial == concurrent)
 		if #available(iOS 18, macOS 15, *) {
 			let parallel = try Encoder.encode(
-				image, distance: 1, optimizeCodes: optimize,
-				runner: InlineRunner())
+				image, distance: 1, runner: InlineRunner())
 			#expect(serial == parallel)
 		}
 	}

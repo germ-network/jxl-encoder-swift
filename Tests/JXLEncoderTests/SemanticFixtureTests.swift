@@ -257,7 +257,7 @@ struct SemanticFixtureTests {
 				to: &writer)
 			try Encoder.encodeFrame(
 				pixelFrame: pixelFrame, params: params,
-				optimizeCodes: true, writer: &writer)
+				writer: &writer)
 			writer.zeroPadToByte()
 			let result = try SwiftSemanticEncoding.encode(
 				linear: input, distance: entry.distance)
@@ -397,7 +397,7 @@ struct SemanticFixtureTests {
 		var writer = BitWriter()
 		let acCode = try Encoder.encodeJPEGFrame(
 			transcode, loopFilter: .init(gaborish: false, epfIterations: 0),
-			optimizeCodes: true, writer: &writer
+			writer: &writer
 		).ac
 		var actual = SemanticDump()
 		try actual.recordACEntropyCode(acCode)
@@ -482,9 +482,10 @@ struct SemanticMutationTests {
 						$0,
 						analysis: Encoder.PixelFrameAnalysis(
 							coeffOrder: baseline.decisions.coeffOrder,
-							blockContextMap: nil, acCode: .staticAC,
-							plan: .oneShot),
-						mode: .staging(.staticAC)
+							blockContextMap: baseline.decisions
+								.blockContextMap,
+							acCode: code, plan: .oneShot),
+						mode: .staging(code)
 					).section.staged.compactMap { record -> Int? in
 						if case .token(let context, _) = record {
 							return Int(context)

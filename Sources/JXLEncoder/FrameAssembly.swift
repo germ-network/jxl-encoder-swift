@@ -145,7 +145,7 @@ enum FrameAssembly {
 
 	private static func writeSharedDCFields(
 		params: DistanceParams, dcQuantization: [Float]?, globalScale: Int?,
-		quantDC: Int?, blockContextMap: JPEGBlockContextMap.Result?,
+		quantDC: Int?, blockContextMap: JPEGBlockContextMap.Result,
 		writer: inout BitWriter
 	) throws {
 		if let dcQuantization {
@@ -167,19 +167,7 @@ enum FrameAssembly {
 			globalScale: globalScale ?? params.globalScale,
 			quantDC: quantDC ?? params.quantDC, writer: &writer)
 
-		if let blockContextMap {
-			JPEGBlockContextMap.write(blockContextMap, writer: &writer)
-		} else {
-			writer.write(1, 0)  // non-default block context map
-			writer.write(16, 0)  // no dc context, no quant field table
-
-			// The compact block context map has no prefix codes of its own;
-			// only its context map is transmitted.
-			EntropyCodeWriter.writeContextMapEntries(
-				ACContext.compactBlockIndexMap,
-				numHistograms: Int(ACContext.compactBlockIndexMap.max() ?? 0) + 1,
-				writer: &writer)
-		}
+		JPEGBlockContextMap.write(blockContextMap, writer: &writer)
 
 		try writeColorCorrelationDC(jpegCompatible: dcQuantization != nil, writer: &writer)
 	}
@@ -195,9 +183,7 @@ enum FrameAssembly {
 		/// Overrides the distance-derived scales, which a transcode does not use.
 		globalScale: Int? = nil,
 		quantDC: Int? = nil,
-		/// Non-nil writes the optimized pixel or JPEG-transcode block context
-		/// map in place of the fixed one below. Nil on static-table paths.
-		blockContextMap: JPEGBlockContextMap.Result? = nil,
+		blockContextMap: JPEGBlockContextMap.Result,
 		writer: inout BitWriter
 	) throws {
 		try writeSharedDCFields(

@@ -247,7 +247,7 @@ struct DCGroupSharpnessTests {
 	}
 
 	@Test(
-		"native decoding observes actual JPEG sharpness in both coding modes",
+		"native decoding observes actual JPEG sharpness",
 		.enabled(
 			if: ProcessInfo.processInfo.environment["JXL_SHARPNESS_EXPORT_DIR"] != nil
 				|| ProcessInfo.processInfo.environment["JXL_SHARPNESS_CHECK_DIR"]
@@ -267,15 +267,9 @@ struct DCGroupSharpnessTests {
 					JPEGParser.parse(
 						JPEGSemanticCorpusEntry.jpegBytes(jpegInput))
 				)
-				for optimizeCodes in [false, true] {
-					let suffix = optimizeCodes ? "optimized" : "static"
-					let path = directory.appendingPathComponent(
-						"\(proof.fixture)-\(suffix).jxl")
-					try Data(
-						Encoder.encodeJPEG(
-							transcode, optimizeCodes: optimizeCodes)
-					).write(to: path)
-				}
+				let path = directory.appendingPathComponent(
+					"\(proof.fixture)-optimized.jxl")
+				try Data(Encoder.encodeJPEG(transcode)).write(to: path)
 			}
 			return
 		}
@@ -283,7 +277,7 @@ struct DCGroupSharpnessTests {
 		let directory = URL(fileURLWithPath: try #require(checkPath), isDirectory: true)
 		for proof in SharpnessProofCase.all where proof.jpegInput != nil {
 			let expected = try Self.dump(proof.fixture)
-			for suffix in ["static", "optimized"] {
+			for suffix in ["optimized"] {
 				let actual = try SemanticDump(
 					parsing: String(
 						contentsOf: directory.appendingPathComponent(

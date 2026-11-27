@@ -11,8 +11,8 @@
 
 		@Test(
 			.enabled(if: decoder != nil),
-			arguments: [(2048, 256), (2304, 256), (2057, 257)], [true, false])
-		func streamingOutputDecodesWithDjxl(size: (Int, Int), optimize: Bool) throws {
+			arguments: [(2048, 256), (2304, 256), (2057, 257)])
+		func streamingOutputDecodesWithDjxl(size: (Int, Int)) throws {
 			let decoder = try #require(Self.decoder)
 			let (width, height) = size
 			let image = try ConcurrentEncodeTests.image(width: width, height: height)
@@ -23,7 +23,7 @@
 			defer { try? FileManager.default.removeItem(at: directory) }
 			let codestream = directory.appendingPathComponent("encoded.jxl")
 			let decodedPath = directory.appendingPathComponent("decoded.pfm")
-			try Data(Encoder.encode(image, distance: 1, optimizeCodes: optimize))
+			try Data(Encoder.encode(image, distance: 1))
 				.write(to: codestream)
 			let process = Process()
 			process.executableURL = URL(fileURLWithPath: decoder)

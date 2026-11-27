@@ -34,11 +34,10 @@ extension Encoder {
 	@available(iOS 18, macOS 15, *)
 	static func tokenizePixelGroups(
 		computes: consuming [ACGroupCompute], dim: ImageDim,
-		analysis: PixelFrameAnalysis, optimizeCodes: Bool,
+		analysis: PixelFrameAnalysis,
 		runner: any ParallelRunner, maximumWorkers: Int
 	) -> [ACGroupOutput] {
-		let mode: SectionWriter.Mode =
-			optimizeCodes ? .staging(analysis.acCode) : .direct(analysis.acCode)
+		let mode = SectionWriter.Mode.staging(analysis.acCode)
 		return ParallelWork.drain(
 			consume computes, maximumWorkers: maximumWorkers, runner: runner
 		) { compute in
@@ -55,7 +54,6 @@ extension Encoder {
 		_ image: ImageBuffer,
 		distance: Float,
 		transferFunction: TransferFunction = .sRGB,
-		optimizeCodes: Bool = true,
 		runner: any ParallelRunner
 	) throws -> [UInt8] {
 		let maximumWorkers = runner.maximumWorkers
@@ -72,20 +70,17 @@ extension Encoder {
 		try ImageHeader.write(
 			width: image.width, height: image.height,
 			transferFunction: transferFunction, to: &writer)
-		var sections = initialPixelSections(dim: dim, optimizeCodes: optimizeCodes)
+		var sections = initialPixelSections(dim: dim)
 		let computes = Self.computePixelGroups(
 			pixelFrame: pixelFrame, params: params, runner: runner,
 			maximumWorkers: maximumWorkers)
 		let analysis = analyzePixelFrame(
-			computes: computes, dim: dim, params: params,
-			optimizeCodes: optimizeCodes)
+			computes: computes, dim: dim, params: params)
 		let outputs = Self.tokenizePixelGroups(
 			computes: consume computes, dim: dim, analysis: analysis,
-			optimizeCodes: optimizeCodes, runner: runner,
-			maximumWorkers: maximumWorkers)
+			runner: runner, maximumWorkers: maximumWorkers)
 		try finishPixelFrame(
-			outputs: outputs, dim: dim, params: params,
-			optimizeCodes: optimizeCodes, analysis: analysis,
+			outputs: outputs, dim: dim, params: params, analysis: analysis,
 			sections: &sections, writer: &writer)
 		writer.zeroPadToByte()
 		return writer.take()
