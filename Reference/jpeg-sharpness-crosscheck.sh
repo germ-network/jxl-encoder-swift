@@ -16,4 +16,4 @@ done
 JXL_SHARPNESS_CHECK_DIR="$OUT" swift test --skip-build \
   --scratch-path plans/.build \
   --filter DCGroupSharpnessTests.actualJPEGSharpnessCrossCheck
-echo 'PASS actual Swift JPEG sharpness cross-check: static and optimized codestreams decoded by pinned libjxl'
+echo 'PASS actual Swift JPEG sharpness cross-check: codestreams decoded by pinned libjxl'

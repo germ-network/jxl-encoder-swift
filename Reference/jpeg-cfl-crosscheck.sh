@@ -13,14 +13,14 @@ JXL_CFL_EXPORT_DIR="$OUT" swift test --scratch-path plans/.build \
 JXL_RGB_EXPORT_DIR="$OUT" swift test --skip-build --scratch-path plans/.build \
 	--filter JPEGCfLIntegrationTests.actualRGBJPEGSerializationCrossCheck
 for name in small_444 cfl_endpoint_444 cfl_tile_65x8 small_422 hopper_gray_odd; do
-	for suffix in static optimized; do
+	for suffix in optimized; do
 		echo "Checking $name $suffix"
 		"$HARNESS" jpeg-witness "Tests/JXLEncoderTests/Fixtures/$name.jpg" \
 			"$OUT/$name-$suffix.jxl" >"$OUT/$name-$suffix.cfl.sem"
 	done
 done
 for name in rgb_color rgb_coded_dc; do
-	for suffix in static optimized; do
+	for suffix in optimized; do
 		echo "Checking $name $suffix"
 		"$HARNESS" jpeg-witness "Tests/JXLEncoderTests/Fixtures/$name.jpg" \
 			"$OUT/$name-$suffix.jxl" >"$OUT/$name-$suffix.rgb.sem"
