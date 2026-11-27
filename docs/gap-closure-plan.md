@@ -867,6 +867,8 @@ state; the end state is the named command, and stages land in an order
 that keeps every intermediate decodable and gated. Byte-exact-vs-tiny gates
 are retired stage by stage as each stage is retargeted, not wholesale.
 
+2026-11-26: the `optimizeCodes` parameter and its `optimizeCodes: false` (libjxl-tiny static-code) path were removed; every encode builds per-image codes.
+
 ## Scope-document changes — landed in Phase D, not Phase B as originally planned
 
 README, NOTICE.md, and CONTRIBUTING.md all named libjxl-tiny as the sole
