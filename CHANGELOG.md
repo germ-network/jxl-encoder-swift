@@ -1,5 +1,21 @@
 # @germ-network/jxl-encoder-swift
 
+## 0.5.0
+
+### Minor Changes
+
+- [#65](https://github.com/germ-network/jxl-encoder-swift/pull/65) [`2ff9cea`](https://github.com/germ-network/jxl-encoder-swift/commit/2ff9ceab2648ee312068f251d34b82904fe1d280) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Recompress JPEGs carrying an SDR ICC v4 display RGB matrix profile, coding the exact profile into the JPEG XL header. Adds the public `ICCProfile` and `JPEGTranscode.iccProfile`, and `EncoderError.unsupportedICCProfile`, thrown by `encodeJPEG` for a profile libjxl's ICC reader would reject.
+
+### Patch Changes
+
+- [#59](https://github.com/germ-network/jxl-encoder-swift/pull/59) [`8af5f13`](https://github.com/germ-network/jxl-encoder-swift/commit/8af5f130f5c6cef256568aa35716037c18b8505c) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Signal unprofiled single-component JPEG recompressions as grayscale sRGB while preserving their YCbCr coefficient path.
+
+- [#60](https://github.com/germ-network/jxl-encoder-swift/pull/60) [`69df2b3`](https://github.com/germ-network/jxl-encoder-swift/commit/69df2b3e50226363a659d1cb69b8d7e4f65cce9e) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Give each DC group its own AC histogram set when a frame has more than eight AC groups, matching libjxl's streaming layout.
+
+- [#57](https://github.com/germ-network/jxl-encoder-swift/pull/57) [`fe753ba`](https://github.com/germ-network/jxl-encoder-swift/commit/fe753ba29e26d2421614f7c34d658ae0ce0bdb1d) Thanks [@germ-mark-llm](https://github.com/germ-mark-llm)! - Recompress recognized unprofiled 4:4:4 RGB JPEGs from their quantized coefficients while signaling RGB meaning and the source decoder's integer DC offset.
+
+  The offset can leave a fractional source-unit difference in decoded pixels when q00 does not divide 1024, while the original JPEG coefficients remain exactly recoverable.
+
 ## 0.4.1
 
 ### Patch Changes
